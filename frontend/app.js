@@ -41,6 +41,13 @@ function toast(message) {
   element._timer = setTimeout(() => element.classList.remove('show'), 1800);
 }
 
+function clearToast() {
+  const element = document.getElementById('toast');
+  clearTimeout(element._timer);
+  element.classList.remove('show');
+  element.textContent = '';
+}
+
 function isCurrent(id) {
   return id === operationId && state.screen === 'workspace';
 }
@@ -53,6 +60,7 @@ function cancelPending() {
 
 function startFlow() {
   cancelPending();
+  clearToast();
   resetState();
   state.screen = 'workspace';
   render();
@@ -60,6 +68,7 @@ function startFlow() {
 
 function restartFlow() {
   cancelPending();
+  clearToast();
   resetState();
   state.screen = 'workspace';
   render();
@@ -67,6 +76,7 @@ function restartFlow() {
 
 function goHome() {
   cancelPending();
+  clearToast();
   resetState();
   render();
 }
@@ -200,6 +210,11 @@ function renderWorkspace() {
 function render() {
   if (state.screen === 'home') renderHome();
   else renderWorkspace();
+}
+
+function renderAtTop() {
+  render();
+  window.scrollTo({ top: 0, left: 0, behavior: 'auto' });
 }
 
 function hydrateGoals() {
@@ -532,7 +547,8 @@ async function extractTasks() {
     state.report = null;
     state.step = 2;
     state.maxStep = 2;
-    render();
+    clearToast();
+    renderAtTop();
   } catch (error) {
     handleWorkflowError(error, id);
   }
@@ -553,7 +569,8 @@ async function classifyTasks() {
     state.report = null;
     state.step = 3;
     state.maxStep = 3;
-    render();
+    clearToast();
+    renderAtTop();
   } catch (error) {
     handleWorkflowError(error, id);
   }
@@ -576,7 +593,8 @@ async function generateReport() {
     state.report = report;
     state.step = 4;
     state.maxStep = 4;
-    render();
+    clearToast();
+    renderAtTop();
   } catch (error) {
     handleWorkflowError(error, id);
   }

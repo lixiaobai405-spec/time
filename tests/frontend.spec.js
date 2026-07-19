@@ -724,3 +724,38 @@ test('用户输入会真实贯穿任务、矩阵和报告', async ({ page }) => 
   expect(bodies[2].body.tasks[0].id).toBe('task-1');
   expect(bodies[3].body.matrix.quadrants[0].taskIds[0]).toBe('task-1');
 });
+
+test('窄屏异步步骤完成后新页面标题回到可视区', async ({ page }) => {
+  await page.setViewportSize({ width: 375, height: 812 });
+  await advanceToMatrix(page);
+  await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
+  await page.getByRole('button', { name: /生成报告/ }).click();
+  await expect(page.locator('.panel-h')).toHaveText('优先级报告');
+
+  await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(0);
+  const titleBox = await page.locator('.panel-h').boundingBox();
+  const topbarBox = await page.locator('.topbar').boundingBox();
+  expect(titleBox.y).toBeGreaterThanOrEqual(topbarBox.height);
+  expect(titleBox.y).toBeLessThan(812);
+});
+
+test('失败后重试成功会清除旧错误提示', async ({ page }) => {
+  await advanceToTasks(page);
+  let attempts = 0;
+  await page.route('**/api/time-management/matrix/classify', async route => {
+    attempts += 1;
+    if (attempts === 1) return route.abort('failed');
+    const { tasks } = route.request().postDataJSON();
+    return route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify(matrixPayload(tasks)),
+    });
+  });
+  await page.getByRole('button', { name: /矩阵判定/ }).click();
+  await expect(page.locator('#toast')).toContainText('网络连接');
+  await page.getByRole('button', { name: /矩阵判定/ }).click();
+  await expect(page.locator('.panel-h')).toHaveText('矩阵判定');
+  await expect(page.locator('#toast')).not.toHaveClass(/show/);
+  await expect(page.locator('#toast')).toBeEmpty();
+});
