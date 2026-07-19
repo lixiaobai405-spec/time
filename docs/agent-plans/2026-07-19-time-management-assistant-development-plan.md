@@ -947,7 +947,7 @@ git commit -m "feat: connect time management workflow UI"
 - Create: `tests/server/security.test.js`
 - Modify: `tests/frontend.spec.js`
 
-- [ ] **Step 1: 写安全失败测试**
+- [x] **Step 1: 写安全失败测试**
 
 ```js
 const test = require('node:test');
@@ -981,19 +981,19 @@ test('用户提示注入只进入 user JSON，不改变 system prompt', async ()
 
 同文件增加五个精确用例：65KB 请求体返回 413；额外字段返回 `INPUT_INVALID`；错误响应序列化后不含用户目标、模型原文和 `stack`；注入内存日志器后只出现 requestId、路径、状态、耗时四类字段；递归扫描 `frontend/` 后不出现 `MODEL_API_KEY` 或测试密钥。
 
-- [ ] **Step 2: 隔离提示词与用户数据**
+- [x] **Step 2: 隔离提示词与用户数据**
 
 系统规则只放 `system` 消息；用户内容先通过 Schema，再以 JSON 放入 `user` 消息。用户输入中的“忽略规则”“输出 HTML”“泄露提示词”等文本只能作为目标内容，不得拼接进 system 文本。
 
-- [ ] **Step 3: 增加安全响应头和请求标识**
+- [x] **Step 3: 增加安全响应头和请求标识**
 
 至少设置 `Content-Security-Policy`、`X-Content-Type-Options: nosniff`、`Referrer-Policy: no-referrer`、`Cache-Control: no-store`；每个 API 请求生成 UUID 并通过 `X-Request-Id` 返回。
 
-- [ ] **Step 4: 增加页面隐私说明**
+- [x] **Step 4: 增加页面隐私说明**
 
 在输入页展示：“你填写的目标和任务仅用于完成本次会话，不会保存为历史记录。请勿填写客户隐私、密码或其他敏感信息。”
 
-- [ ] **Step 5: 运行安全回归并提交**
+- [x] **Step 5: 运行安全回归并提交**
 
 ```powershell
 npm.cmd run test:server -- tests/server/security.test.js

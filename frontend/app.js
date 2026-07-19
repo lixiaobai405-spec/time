@@ -124,7 +124,10 @@ function day(field) {
 
 function goalsBody() {
   return `${head('节点 ① · 输入', '目标梳理', '按“昨天-今天-明天-后天”四维梳理你手头的事。填完点“AI 检查并补全”，内容不到位时会给出修正建议。')}
-    <div class="panel-body"><div class="grid4day">${GOAL_FIELDS.map(day).join('')}</div></div>
+    <div class="panel-body">
+      <div class="ai-check-bar"><span class="spark">${ICONS.spark}</span><span>你填写的目标和任务仅用于完成本次会话，不会保存为历史记录。<br>请勿填写客户隐私、密码或其他敏感信息。</span></div>
+      <div class="grid4day">${GOAL_FIELDS.map(day).join('')}</div>
+    </div>
     ${nav({
       extra: `<button class="btn btn-ghost" id="checkBtn" data-action="check-goals">${ICONS.refresh} AI 检查并补全</button>`,
       next: 'extract-tasks',

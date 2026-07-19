@@ -665,3 +665,10 @@ test('输入错误、模型超时和格式错误保留当前步骤供重试', as
     await expect(page.getByRole('button', { name: /矩阵判定/ })).toBeVisible();
   }
 });
+
+test('目标输入页明确展示会话隐私和敏感信息提示', async ({ page }) => {
+  await page.goto('/');
+  await page.getByRole('button', { name: /开始梳理/ }).click();
+  await expect(page.getByText('你填写的目标和任务仅用于完成本次会话，不会保存为历史记录。')).toBeVisible();
+  await expect(page.getByText('请勿填写客户隐私、密码或其他敏感信息。')).toBeVisible();
+});

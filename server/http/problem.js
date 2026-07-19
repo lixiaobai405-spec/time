@@ -9,13 +9,24 @@ function notFound(_request, _response, next) {
 }
 
 function problemHandler(error, request, response, _next) {
-  const status = Number.isInteger(error.status) && error.status >= 400 && error.status <= 599
+  let status = Number.isInteger(error.status) && error.status >= 400 && error.status <= 599
     ? error.status
     : 500;
-  const exposed = error.expose === true || status < 500;
-  const code = typeof error.code === 'string' && error.code ? error.code : 'INTERNAL_ERROR';
-  const message = exposed && typeof error.message === 'string'
-    ? error.message
+  let normalizedError = error;
+  if (error.type === 'entity.too.large') {
+    status = 413;
+    normalizedError = httpProblem('PAYLOAD_TOO_LARGE', '请求内容过大。', status);
+  } else if (error.type === 'entity.parse.failed') {
+    status = 400;
+    normalizedError = httpProblem('INVALID_JSON', 'JSON 格式不正确。', status);
+  }
+
+  const exposed = normalizedError.expose === true || status < 500;
+  const code = exposed && typeof normalizedError.code === 'string' && normalizedError.code
+    ? normalizedError.code
+    : 'INTERNAL_ERROR';
+  const message = exposed && typeof normalizedError.message === 'string'
+    ? normalizedError.message
     : '服务暂时不可用，请稍后重试。';
 
   response.status(status).json({
