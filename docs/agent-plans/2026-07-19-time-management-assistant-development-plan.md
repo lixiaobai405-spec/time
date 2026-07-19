@@ -437,7 +437,7 @@ Expected: 健康检查通过；浏览器可以从同一端口访问 `frontend/in
 - Modify: `server/index.js`
 - Create: `tests/server/model-client.test.js`
 
-- [ ] **Step 1: 写模型输出和重试测试**
+- [x] **Step 1: 写模型输出和重试测试**
 
 先用队列式 `fetchImpl` 精确控制每次模型响应：
 
@@ -468,7 +468,7 @@ test('第一次非 JSON、第二次合法时总共请求两次', async () => {
 
 同文件再以相同队列机制覆盖：第一次合法时调用次数为 1；连续两次非法时错误码为 `MODEL_OUTPUT_INVALID`；超过 64KB 时错误码相同；永不结束的 `fetchImpl` 在超时后返回 `MODEL_TIMEOUT`。提示词加载测试依次传入四个合法步骤键，断言结果都包含对应的角色段且不包含其他步骤代码块。
 
-- [ ] **Step 2: 实现严格 JSON 解析器**
+- [x] **Step 2: 实现严格 JSON 解析器**
 
 ```js
 // server/model/parse-model-json.js
@@ -488,7 +488,7 @@ function parseModelJson(text) {
 module.exports = { parseModelJson, MAX_MODEL_OUTPUT_BYTES };
 ```
 
-- [ ] **Step 3: 实现 OpenAI-compatible 适配器**
+- [x] **Step 3: 实现 OpenAI-compatible 适配器**
 
 请求只发送 `system` 与 JSON 序列化后的 `user` 数据；使用 `AbortController` 执行超时；只读取 `choices[0].message.content`。`completeJson()` 捕获格式错误后以同一输入重试一次，第二次失败抛出稳定错误码，不记录原始响应。
 
@@ -509,13 +509,13 @@ const result = await client.completeJson({
 });
 ```
 
-- [ ] **Step 4: 实现提示词分段加载**
+- [x] **Step 4: 实现提示词分段加载**
 
 `loadStepPrompt(stepName)` 只允许 `check-goals`、`extract-tasks`、`classify-matrix`、`generate-report` 四个键，并从 `prompts/system.md` 对应二级标题下读取唯一围栏代码块。缺少或重复代码块时启动失败，避免静默使用错误提示词。
 
 同时将 `server/index.js` 中的 `modelClient: null` 替换为 `createModelClient(config)`，并加入 `const { createModelClient } = require('./model/model-client')`。
 
-- [ ] **Step 5: 运行测试并提交**
+- [x] **Step 5: 运行测试并提交**
 
 ```powershell
 npm.cmd run test:server -- tests/server/model-client.test.js
