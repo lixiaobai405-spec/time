@@ -1091,11 +1091,11 @@ git commit -m "test: automate client acceptance scenarios"
 - Modify: `docs/adversarial-review.md`
 - Create: `docs/acceptance/time-management-v1.md`
 
-- [ ] **Step 1: 更新 README**
+- [x] **Step 1: 更新 README**
 
 明确 Node.js 版本要求、安装、启动、环境变量、测试命令、四个接口、会话数据边界，以及当前仍不包含账号、历史记录和外部系统集成。
 
-- [ ] **Step 2: 编写甲方验收清单**
+- [x] **Step 2: 编写甲方验收清单**
 
 `docs/acceptance/time-management-v1.md` 必须逐项包含：
 
@@ -1113,11 +1113,11 @@ git commit -m "test: automate client acceptance scenarios"
 11. 复制报告内容与当前页面一致
 ```
 
-- [ ] **Step 3: 复查原对抗审查中的阻断项**
+- [x] **Step 3: 复查原对抗审查中的阻断项**
 
 将已经由测试证明确认解决的条目标为已解决，并附测试文件名；没有测试证据的条目保持未解决，不能仅凭代码存在关闭。
 
-- [ ] **Step 4: 执行最终验证**
+- [x] **Step 4: 执行最终验证**
 
 ```powershell
 git status --short
@@ -1127,11 +1127,11 @@ git diff --check
 
 Expected: 无意外文件、全部测试通过、无空白错误。
 
-- [ ] **Step 5: 人工浏览器验收**
+- [x] **Step 5: 人工浏览器验收**
 
 使用假模型完成一次桌面主流程和一次窄屏主流程，检查加载状态、按钮禁用、错误恢复、任务增删、矩阵方向、Markdown 渲染和复制报告。
 
-- [ ] **Step 6: 提交文档**
+- [x] **Step 6: 提交文档**
 
 ```powershell
 git add README.md docs/adversarial-review.md docs/acceptance/time-management-v1.md
