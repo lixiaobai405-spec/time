@@ -672,3 +672,55 @@ test('目标输入页明确展示会话隐私和敏感信息提示', async ({ pa
   await expect(page.getByText('你填写的目标和任务仅用于完成本次会话，不会保存为历史记录。')).toBeVisible();
   await expect(page.getByText('请勿填写客户隐私、密码或其他敏感信息。')).toBeVisible();
 });
+
+test('用户输入会真实贯穿任务、矩阵和报告', async ({ page }) => {
+  const bodies = [];
+  await page.route('**/api/time-management/**', async route => {
+    const requestPath = new URL(route.request().url()).pathname;
+    bodies.push({ path: requestPath, body: route.request().postDataJSON() });
+    const responses = {
+      '/api/time-management/goals/check': {
+        fields: ['昨天', '今天', '明天', '后天'].map(key => ({ key, status: 'ok', issue: '', suggestion: '' })),
+        overall: 'pass',
+      },
+      '/api/time-management/tasks/extract': {
+        tasks: [{ id: 'task-1', name: '提交七月经营复盘', importance: '高', urgency: '高', source: '今天', due: '7月31日', est: '约2h', status: 'pending', classificationSource: 'ai-extraction' }],
+      },
+      '/api/time-management/matrix/classify': {
+        classifications: [{ taskId: 'task-1', importance: '高', urgency: '高', classificationSource: 'ai-extraction' }],
+        quadrants: [
+          { q: '第一象限', priority: 1, action: '立即做', energyPercent: 55, taskIds: ['task-1'] },
+          { q: '第二象限', priority: 2, action: '计划做', energyPercent: 25, taskIds: [] },
+          { q: '第三象限', priority: 3, action: '授权做', energyPercent: 15, taskIds: [] },
+          { q: '第四象限', priority: 4, action: '减少做', energyPercent: 5, taskIds: [] },
+        ],
+        note: '',
+      },
+      '/api/time-management/report/generate': {
+        order: [{ taskId: 'task-1', reason: '重要且紧急' }],
+        energyRules: ['优先完成第一象限'],
+        adjustments: ['完成后进行复盘'],
+      },
+    };
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify(responses[requestPath]),
+    });
+  });
+  await page.goto('/');
+  await page.getByRole('button', { name: /开始梳理/ }).click();
+  await page.locator('#g-昨').fill('已复盘目标、结果、原因和改进');
+  await page.locator('#g-今').fill('提交七月经营复盘');
+  await page.locator('#g-明').fill('7月31日前提交1份八月计划');
+  await page.locator('#g-后').fill('12月31日前完成年度复盘');
+  await page.getByRole('button', { name: /AI 检查并补全/ }).click();
+  await page.getByRole('button', { name: /提取任务/ }).click();
+  await expect(page.getByText('提交七月经营复盘')).toBeVisible();
+  await page.getByRole('button', { name: /矩阵判定/ }).click();
+  await page.getByRole('button', { name: /生成报告/ }).click();
+  await expect(page.locator('#report-markdown')).toContainText('重要且紧急');
+  expect(bodies).toHaveLength(4);
+  expect(bodies[2].body.tasks[0].id).toBe('task-1');
+  expect(bodies[3].body.matrix.quadrants[0].taskIds[0]).toBe('task-1');
+});

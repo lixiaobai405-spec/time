@@ -1009,11 +1009,11 @@ git commit -m "feat: enforce session privacy and input safety"
 - Modify: `tests/frontend.spec.js`
 - Modify: `tests/prompt-cases.md`
 
-- [ ] **Step 1: 将确定性规则自动化**
+- [x] **Step 1: 将确定性规则自动化**
 
 把以下甲方用例转为使用假模型输出的自动测试：空输入、PDCA 缺环、SMART 缺指标/时限、并列任务拆分、空维不产出、单任务不重复、五条第一象限过载、报告不虚构。
 
-- [ ] **Step 2: 增加端到端主路径**
+- [x] **Step 2: 增加端到端主路径**
 
 ```js
 test('用户输入会真实贯穿任务、矩阵和报告', async ({ page }) => {
@@ -1065,11 +1065,11 @@ test('用户输入会真实贯穿任务、矩阵和报告', async ({ page }) => 
 });
 ```
 
-- [ ] **Step 3: 保留模型质量人工评测**
+- [x] **Step 3: 保留模型质量人工评测**
 
 `tests/prompt-cases.md` 中依赖自然语言质量的用例继续标记为“人工/模型评测”，每次修改 `prompts/system.md` 后执行；记录模型名、日期、通过项和失败样例，不使用真实业务敏感数据。
 
-- [ ] **Step 4: 运行完整测试**
+- [x] **Step 4: 运行完整测试**
 
 ```powershell
 npm.cmd test
@@ -1077,7 +1077,7 @@ npm.cmd test
 
 Expected: Node 单元/API 测试与 Playwright 测试全部通过；测试过程中不访问真实模型服务。
 
-- [ ] **Step 5: 提交**
+- [x] **Step 5: 提交**
 
 ```powershell
 git add tests
