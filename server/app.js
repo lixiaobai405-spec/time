@@ -3,6 +3,7 @@ const path = require('node:path');
 
 const { notFound, problemHandler } = require('./http/problem');
 const { checkGoals } = require('./workflows/check-goals');
+const { classifyMatrix } = require('./workflows/classify-matrix');
 const { extractTasks } = require('./workflows/extract-tasks');
 
 function createApp({ modelClient } = {}) {
@@ -27,6 +28,17 @@ function createApp({ modelClient } = {}) {
     try {
       response.json(await extractTasks({
         goals: request.body?.goals,
+        modelClient,
+        requestBody: request.body,
+      }));
+    } catch (error) {
+      next(error);
+    }
+  });
+  app.post('/api/time-management/matrix/classify', async (request, response, next) => {
+    try {
+      response.json(await classifyMatrix({
+        tasks: request.body?.tasks,
         modelClient,
         requestBody: request.body,
       }));

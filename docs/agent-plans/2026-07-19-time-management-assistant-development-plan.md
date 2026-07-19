@@ -675,7 +675,7 @@ git commit -m "feat: add task extraction workflow"
 - Create: `tests/server/classify-matrix.test.js`
 - Modify: `server/app.js`
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 ```js
 const test = require('node:test');
@@ -705,7 +705,7 @@ test('每条任务只出现一次且精力比例合计 100', async () => {
 
 同文件增加八个精确用例：两个同名不同 ID 均被保留；缺少 ID 时触发重试；同一 ID 重复时触发重试；单任务时三个象限为空；五个第一象限任务产生过载提示；四个 `energyPercent` 严格等于 55、25、15、5；模型修改已有人工/提取标签时拒绝结果；未标注任务在模型返回后仍缺任一等级时拒绝结果。
 
-- [ ] **Step 2: 实现任务守恒校验**
+- [x] **Step 2: 实现任务守恒校验**
 
 ```js
 function assertTaskConservation(tasks, quadrants) {
@@ -717,11 +717,11 @@ function assertTaskConservation(tasks, quadrants) {
 }
 ```
 
-- [ ] **Step 3: 服务端覆盖非确定性字段**
+- [x] **Step 3: 服务端覆盖非确定性字段**
 
 模型为每个任务返回 `taskId`、`importance` 和 `urgency`。服务端保持 `ai-extraction` 和 `manual` 标签不变，只把 `unclassified` 任务的合法等级合并回任务并将来源改为 `ai-matrix`；若模型试图修改已有标签则拒绝结果。全部任务完成分类后，服务端使用 `quadrantFor(task)` 确定象限，并固定写入 `priority`、`action` 和 `energyPercent`，不信任模型给出的象限或数值。
 
-- [ ] **Step 4: 注册路由、运行测试并提交**
+- [x] **Step 4: 注册路由、运行测试并提交**
 
 ```powershell
 npm.cmd run test:server -- tests/server/classify-matrix.test.js
