@@ -609,7 +609,7 @@ git commit -m "feat: add goal quality check workflow"
 - Modify: `server/app.js`
 - Modify: `frontend/state.js`
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 ```js
 const test = require('node:test');
@@ -632,11 +632,11 @@ test('并列事项拆为两条独立任务并生成不同 UUID', async () => {
 
 同文件增加六个精确用例：明天为空时不得出现 `source=短期目标`；“已完成季度复盘”不得生成 `pending` 任务；缺少 `due` 时结果为“待确认”；101 条输出触发 `MODEL_OUTPUT_INVALID`；非法枚举触发第二次调用；空任务名在两次输出后仍存在时最终失败。
 
-- [ ] **Step 2: 实现 `extractTasks({ goals, modelClient })`**
+- [x] **Step 2: 实现 `extractTasks({ goals, modelClient })`**
 
 输入只接受已经通过目标检查的四栏快照。输出标准化为正式任务对象；`name` 最长 200 字，`due` 最长 80 字，`est` 最长 40 字，任务最多 100 条。
 
-- [ ] **Step 3: 实现同名任务和删除所需的稳定 ID 规则**
+- [x] **Step 3: 实现同名任务和删除所需的稳定 ID 规则**
 
 不按名称去重；每个模型任务由服务端生成 UUID，并写入 `classificationSource='ai-extraction'`；手动任务由浏览器 `crypto.randomUUID()` 生成。删除操作只接收 ID，不允许使用数组位置或任务名。
 
@@ -653,7 +653,7 @@ const MANUAL_FLAGS = {
 
 “未标注”不是第四象限，也不能在前端提前调用 `quadrantFor()`；它只表示等待矩阵步骤进行 AI 判定。
 
-- [ ] **Step 4: 注册路由并验证**
+- [x] **Step 4: 注册路由并验证**
 
 ```powershell
 npm.cmd run test:server -- tests/server/extract-tasks.test.js
@@ -661,7 +661,7 @@ npm.cmd run test:server -- tests/server/extract-tasks.test.js
 
 Expected: 输入中的每个未完成行动都能追溯到一条任务；没有新增业务事实。
 
-- [ ] **Step 5: 提交**
+- [x] **Step 5: 提交**
 
 ```powershell
 git add server/workflows/extract-tasks.js server/app.js frontend/state.js tests/server/extract-tasks.test.js

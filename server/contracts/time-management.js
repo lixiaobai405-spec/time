@@ -27,6 +27,17 @@ const TEXT_LIMITS = Object.freeze({
   est: 40,
 });
 
+const MANUAL_FLAGS = Object.freeze({
+  imp: Object.freeze({ importance: '高', urgency: '低', classificationSource: 'manual' }),
+  urg: Object.freeze({ importance: '低', urgency: '高', classificationSource: 'manual' }),
+  both: Object.freeze({ importance: '高', urgency: '高', classificationSource: 'manual' }),
+  unclassified: Object.freeze({
+    importance: null,
+    urgency: null,
+    classificationSource: 'unclassified',
+  }),
+});
+
 function quadrantFor(task) {
   if (!IMPORTANCE.includes(task.importance) || !URGENCY.includes(task.urgency)) {
     throw Object.assign(new Error('task classification is incomplete'), {
@@ -71,6 +82,7 @@ module.exports = {
   GOAL_KEYS,
   IMPORTANCE,
   LEVELS: IMPORTANCE,
+  MANUAL_FLAGS,
   SOURCES,
   TASK_LIMIT,
   TASK_STATUS,

@@ -3,6 +3,7 @@ const path = require('node:path');
 
 const { notFound, problemHandler } = require('./http/problem');
 const { checkGoals } = require('./workflows/check-goals');
+const { extractTasks } = require('./workflows/extract-tasks');
 
 function createApp({ modelClient } = {}) {
   const app = express();
@@ -14,6 +15,17 @@ function createApp({ modelClient } = {}) {
   app.post('/api/time-management/goals/check', async (request, response, next) => {
     try {
       response.json(await checkGoals({
+        goals: request.body?.goals,
+        modelClient,
+        requestBody: request.body,
+      }));
+    } catch (error) {
+      next(error);
+    }
+  });
+  app.post('/api/time-management/tasks/extract', async (request, response, next) => {
+    try {
+      response.json(await extractTasks({
         goals: request.body?.goals,
         modelClient,
         requestBody: request.body,
