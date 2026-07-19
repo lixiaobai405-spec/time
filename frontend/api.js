@@ -28,6 +28,11 @@ export async function postJson(path, body) {
     if (error.name === 'AbortError') {
       throw Object.assign(new Error('请求已取消。'), { code: 'REQUEST_CANCELLED' });
     }
+    if (error instanceof TypeError) {
+      throw Object.assign(new Error('网络连接异常，请检查网络后重试。'), {
+        code: 'NETWORK_ERROR',
+      });
+    }
     throw error;
   }
 }

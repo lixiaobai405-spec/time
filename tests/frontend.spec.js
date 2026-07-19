@@ -40,25 +40,36 @@ function matrixPayload(tasks) {
   };
 }
 
-async function installWorkflowMocks(page, { onMatrix } = {}) {
-  await page.route('**/api/time-management/goals/check', route => route.fulfill({
-    status: 200,
-    contentType: 'application/json',
-    body: JSON.stringify({
-      fields: ['昨天', '今天', '明天', '后天'].map(key => ({
-        key,
-        status: 'ok',
-        issue: '',
-        suggestion: '',
-      })),
-      overall: 'pass',
-    }),
-  }));
-  await page.route('**/api/time-management/tasks/extract', route => route.fulfill({
-    status: 200,
-    contentType: 'application/json',
-    body: JSON.stringify({ tasks: MOCK_TASKS }),
-  }));
+async function installWorkflowMocks(page, {
+  onGoals,
+  onExtract,
+  onMatrix,
+  onReport,
+} = {}) {
+  await page.route('**/api/time-management/goals/check', async route => {
+    onGoals?.(route.request().postDataJSON());
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        fields: ['昨天', '今天', '明天', '后天'].map(key => ({
+          key,
+          status: 'ok',
+          issue: '',
+          suggestion: '',
+        })),
+        overall: 'pass',
+      }),
+    });
+  });
+  await page.route('**/api/time-management/tasks/extract', async route => {
+    onExtract?.(route.request().postDataJSON());
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ tasks: MOCK_TASKS }),
+    });
+  });
   await page.route('**/api/time-management/matrix/classify', async route => {
     const body = route.request().postDataJSON();
     onMatrix?.(body);
@@ -70,6 +81,7 @@ async function installWorkflowMocks(page, { onMatrix } = {}) {
   });
   await page.route('**/api/time-management/report/generate', async route => {
     const body = route.request().postDataJSON();
+    onReport?.(body);
     const order = body.tasks.slice(0, 3).map(item => ({
       taskId: item.id,
       reason: '该任务是当前的优先事项',
@@ -488,4 +500,168 @@ test('未修改数据时返回上一步再前进保留原结果', async ({ page 
   await expect(page.locator('.panel-h')).toHaveText('矩阵判定');
   expect(await page.locator('.matrix .qtask').allTextContents()).toEqual(before);
   expect(matrixCalls).toBe(1);
+});
+
+test('四个 API 请求使用用户当前输入和编辑后任务', async ({ page }) => {
+  const seen = {};
+  await advanceToTasks(page, {
+    onGoals: body => { seen.goals = body; },
+    onExtract: body => { seen.extract = body; },
+    onMatrix: body => { seen.matrix = body; },
+    onReport: body => { seen.report = body; },
+  });
+  await page.getByRole('button', { name: /手动添加任务/ }).click();
+  await page.locator('#f-name').fill('用户刚添加的任务');
+  await page.locator('#f-src').selectOption({ label: '临时' });
+  await page.locator('#f-due').fill('2026-08-01');
+  await page.locator('#f-cost').fill('45分钟');
+  await page.getByRole('button', { name: /添加到列表/ }).click();
+  await page.getByRole('button', { name: /矩阵判定/ }).click();
+  await expect(page.locator('.panel-h')).toHaveText('矩阵判定');
+  await page.getByRole('button', { name: /生成报告/ }).click();
+  await expect(page.locator('.panel-h')).toHaveText('优先级报告');
+
+  expect(seen.goals.goals.今天).toContain('客户反馈');
+  expect(seen.extract).toEqual(seen.goals);
+  const manual = seen.matrix.tasks.find(item => item.name === '用户刚添加的任务');
+  expect(manual).toMatchObject({
+    importance: null,
+    urgency: null,
+    classificationSource: 'unclassified',
+    due: '2026-08-01',
+  });
+  expect(seen.report.tasks.find(item => item.id === manual.id)).toMatchObject({
+    importance: '低',
+    urgency: '低',
+    classificationSource: 'ai-matrix',
+  });
+  expect(seen.report.matrix.quadrants).toHaveLength(4);
+  expect(seen.report.goals).toEqual(seen.goals.goals);
+});
+
+test('overall=need_fix 时阻止提取且只在对应输入框下展示建议', async ({ page }) => {
+  let extractCalls = 0;
+  await installWorkflowMocks(page, { onExtract: () => { extractCalls += 1; } });
+  await page.route('**/api/time-management/goals/check', route => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: JSON.stringify({
+      fields: [
+        { key: '昨天', status: 'warn', issue: '缺少原因', suggestion: '补充差距原因' },
+        ...['今天', '明天', '后天'].map(key => ({ key, status: 'ok', issue: '', suggestion: '' })),
+      ],
+      overall: 'need_fix',
+    }),
+  }));
+  await page.goto('/');
+  await page.getByRole('button', { name: /开始梳理/ }).click();
+  for (const id of ['昨', '今', '明', '后']) await page.locator(`#g-${id}`).fill('当前用户输入');
+  await page.getByRole('button', { name: /AI 检查并补全/ }).click();
+
+  await expect(page.locator('#fb-昨')).toContainText('缺少原因');
+  await expect(page.locator('#fb-昨')).toContainText('补充差距原因');
+  await expect(page.getByRole('button', { name: '采纳建议' })).toHaveCount(1);
+  await expect(page.locator('[class*="chat"]')).toHaveCount(0);
+  await page.getByRole('button', { name: /提取任务/ }).click();
+  await expect(page.locator('.panel-h')).toHaveText('目标梳理');
+  expect(extractCalls).toBe(0);
+});
+
+test('未标注手动任务在矩阵前后分别显示待 AI 判定和 AI 判定', async ({ page }) => {
+  await advanceToTasks(page);
+  await page.getByRole('button', { name: /手动添加任务/ }).click();
+  await page.locator('#f-name').fill('待判定任务');
+  await page.locator('#f-src').selectOption({ label: '临时' });
+  await page.locator('#f-due').fill('2026-08-01');
+  await page.locator('#f-cost').fill('1h');
+  await page.getByRole('button', { name: /添加到列表/ }).click();
+  await expect(page.locator('.task').filter({ hasText: '待判定任务' })).toContainText('待 AI 判定');
+  await page.getByRole('button', { name: /矩阵判定/ }).click();
+  await page.getByRole('button', { name: '上一步' }).click();
+  const taskRow = page.locator('.task').filter({ hasText: '待判定任务' });
+  await expect(taskRow).toContainText('AI 判定');
+  await expect(taskRow).not.toContainText('待 AI 判定');
+});
+
+test('矩阵响应修改已有标签时不渲染部分结果', async ({ page }) => {
+  await advanceToTasks(page);
+  await page.route('**/api/time-management/matrix/classify', async route => {
+    const result = matrixPayload(route.request().postDataJSON().tasks);
+    result.classifications[0] = { ...result.classifications[0], importance: '高' };
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(result) });
+  });
+  await page.getByRole('button', { name: /矩阵判定/ }).click();
+
+  await expect(page.locator('.panel-h')).toHaveText('任务提取');
+  await expect(page.locator('#toast')).toContainText('任务数据已变化');
+  await expect(page.locator('.matrix')).toHaveCount(0);
+});
+
+test('矩阵响应缺少 taskId 时要求重新判定', async ({ page }) => {
+  await advanceToTasks(page);
+  await page.route('**/api/time-management/matrix/classify', async route => {
+    const result = matrixPayload(route.request().postDataJSON().tasks);
+    result.classifications = result.classifications.slice(1);
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(result) });
+  });
+  await page.getByRole('button', { name: /矩阵判定/ }).click();
+
+  await expect(page.locator('.panel-h')).toHaveText('任务提取');
+  await expect(page.locator('#toast')).toContainText('任务数据已变化');
+});
+
+test('网络断开时保留当前任务并给出中文重试提示', async ({ page }) => {
+  await advanceToTasks(page);
+  const before = await page.locator('#tasklist .task').count();
+  await page.route('**/api/time-management/matrix/classify', route => route.abort('failed'));
+  await page.getByRole('button', { name: /矩阵判定/ }).click();
+
+  await expect(page.locator('.panel-h')).toHaveText('任务提取');
+  await expect(page.locator('#tasklist .task')).toHaveCount(before);
+  await expect(page.locator('#toast')).toContainText('网络连接');
+  await expect(page.getByRole('button', { name: /矩阵判定/ })).toBeVisible();
+});
+
+test('报告引用已删除 taskId 时不显示混合旧数据', async ({ page }) => {
+  await advanceToMatrix(page);
+  await page.route('**/api/time-management/report/generate', route => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: JSON.stringify({
+      order: [{ taskId: 'deleted-task', reason: '这是旧任务' }],
+      energyRules: ['保留第二象限时间'],
+      adjustments: ['每周复盘'],
+    }),
+  }));
+  await page.getByRole('button', { name: /生成报告/ }).click();
+
+  await expect(page.locator('.panel-h')).toHaveText('矩阵判定');
+  await expect(page.locator('#toast')).toContainText('重新生成报告');
+  await expect(page.locator('#report-markdown')).toHaveCount(0);
+});
+
+test('输入错误、模型超时和格式错误保留当前步骤供重试', async ({ page }) => {
+  await advanceToTasks(page);
+  const errors = [
+    { status: 400, code: 'INPUT_INVALID', message: '输入内容不符合要求。' },
+    { status: 504, code: 'MODEL_TIMEOUT', message: 'AI 响应超时，请重试。' },
+    { status: 502, code: 'MODEL_OUTPUT_INVALID', message: 'AI 返回格式异常，请重试。' },
+  ];
+  let index = 0;
+  await page.route('**/api/time-management/matrix/classify', route => {
+    const current = errors[index];
+    index += 1;
+    return route.fulfill({
+      status: current.status,
+      contentType: 'application/json',
+      body: JSON.stringify({ error: { code: current.code, message: current.message } }),
+    });
+  });
+
+  for (const expected of errors) {
+    await page.getByRole('button', { name: /矩阵判定/ }).click();
+    await expect(page.locator('.panel-h')).toHaveText('任务提取');
+    await expect(page.locator('#toast')).toContainText(expected.message);
+    await expect(page.getByRole('button', { name: /矩阵判定/ })).toBeVisible();
+  }
 });

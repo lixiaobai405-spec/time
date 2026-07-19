@@ -79,6 +79,15 @@ function showStep(step) {
 }
 
 function navigateStep(step) {
+  if (step > state.maxStep) {
+    const messages = {
+      2: '请先提取当前目标中的任务',
+      3: '任务数据已变化，请重新判定',
+      4: '请先生成当前报告',
+    };
+    toast(messages[step]);
+    return;
+  }
   if (step === 2 && (!state.goalReview || state.checkedGoalSnapshot !== goalSnapshot())) {
     toast('请先完成 AI 检查并修正提示项');
     return;
@@ -197,6 +206,10 @@ function hydrateGoals() {
     textarea.addEventListener('input', event => {
       state.goals[field.key] = event.target.value;
       invalidateAfterGoals();
+      document.querySelectorAll('.field-fb').forEach(item => {
+        item.className = 'field-fb';
+        item.replaceChildren();
+      });
     });
   }
   if (!state.goalReview) return;
@@ -280,6 +293,90 @@ const QUADRANT_CLASSES = Object.freeze({
   '第四象限': 'q4',
 });
 
+const QUADRANT_RULES = Object.freeze({
+  '第一象限': { priority: 1, action: '立即做', energyPercent: 55 },
+  '第二象限': { priority: 2, action: '计划做', energyPercent: 25 },
+  '第三象限': { priority: 3, action: '授权做', energyPercent: 15 },
+  '第四象限': { priority: 4, action: '减少做', energyPercent: 5 },
+});
+
+function workflowDataError(message = '任务数据已变化，请重新判定') {
+  return Object.assign(new Error(message), { code: 'WORKFLOW_DATA_CHANGED' });
+}
+
+function expectedQuadrant(task) {
+  const important = task.importance === '高';
+  const urgent = task.urgency === '高';
+  if (important && urgent) return '第一象限';
+  if (important) return '第二象限';
+  if (urgent) return '第三象限';
+  return '第四象限';
+}
+
+function validateAndMergeMatrix(tasks, matrix) {
+  if (!matrix || !Array.isArray(matrix.classifications) || !Array.isArray(matrix.quadrants)) {
+    throw workflowDataError();
+  }
+  const taskById = new Map(tasks.map(task => [task.id, task]));
+  const classificationById = new Map();
+  for (const item of matrix.classifications) {
+    if (!item || classificationById.has(item.taskId) || !taskById.has(item.taskId)
+        || !['高', '中', '低'].includes(item.importance)
+        || !['高', '中', '低'].includes(item.urgency)) {
+      throw workflowDataError();
+    }
+    classificationById.set(item.taskId, item);
+  }
+  if (classificationById.size !== tasks.length) throw workflowDataError();
+
+  const mergedTasks = tasks.map(task => {
+    const item = classificationById.get(task.id);
+    if (!item) throw workflowDataError();
+    if (task.classificationSource === 'unclassified') {
+      if (task.importance !== null || task.urgency !== null
+          || item.classificationSource !== 'ai-matrix') {
+        throw workflowDataError();
+      }
+      return {
+        ...task,
+        importance: item.importance,
+        urgency: item.urgency,
+        classificationSource: 'ai-matrix',
+      };
+    }
+    if (item.importance !== task.importance || item.urgency !== task.urgency
+        || item.classificationSource !== task.classificationSource) {
+      throw workflowDataError();
+    }
+    return task;
+  });
+
+  const quadrantByName = new Map();
+  const placedIds = [];
+  for (const quadrant of matrix.quadrants) {
+    const name = quadrant?.name || quadrant?.q;
+    const rule = QUADRANT_RULES[name];
+    if (!rule || quadrantByName.has(name) || !Array.isArray(quadrant.taskIds)
+        || quadrant.priority !== rule.priority || quadrant.action !== rule.action
+        || quadrant.energyPercent !== rule.energyPercent) {
+      throw workflowDataError();
+    }
+    quadrantByName.set(name, quadrant);
+    placedIds.push(...quadrant.taskIds);
+  }
+  if (quadrantByName.size !== 4 || placedIds.length !== tasks.length
+      || new Set(placedIds).size !== tasks.length
+      || placedIds.some(taskId => !taskById.has(taskId))) {
+    throw workflowDataError();
+  }
+  for (const task of mergedTasks) {
+    if (!quadrantByName.get(expectedQuadrant(task)).taskIds.includes(task.id)) {
+      throw workflowDataError();
+    }
+  }
+  return mergedTasks;
+}
+
 function hydrateMatrix() {
   if (!state.matrix) return;
   const taskById = new Map(state.tasks.map(task => [task.id, task]));
@@ -312,6 +409,30 @@ function reportMarkdown() {
   const energy = state.report.energyRules.map(item => `- ${item}`);
   const adjustments = state.report.adjustments.map(item => `- ${item}`);
   return [`## 今日优先处理顺序`, '', ...order, '', '## 精力分配原则', '', ...energy, '', '## 需结合复盘与目标的调整', '', ...adjustments].join('\n');
+}
+
+function validateReport(tasks, report) {
+  const error = () => workflowDataError('任务数据已变化，请重新生成报告');
+  if (!report || !Array.isArray(report.order) || !Array.isArray(report.energyRules)
+      || !Array.isArray(report.adjustments)) {
+    throw error();
+  }
+  const taskIds = new Set(tasks.map(task => task.id));
+  const orderedIds = new Set();
+  for (const item of report.order) {
+    if (!item || !taskIds.has(item.taskId) || orderedIds.has(item.taskId)
+        || typeof item.reason !== 'string' || !item.reason.trim()) {
+      throw error();
+    }
+    orderedIds.add(item.taskId);
+  }
+  if ((tasks.length >= 3 && (report.order.length < 3 || report.order.length > 5))
+      || report.order.length > tasks.length
+      || [...report.energyRules, ...report.adjustments].some(item =>
+        typeof item !== 'string' || !item.trim())) {
+    throw error();
+  }
+  return report;
 }
 
 function hydrateReport() {
@@ -422,13 +543,8 @@ async function classifyTasks() {
   try {
     const matrix = await postJson('/api/time-management/matrix/classify', { tasks: state.tasks });
     if (!isCurrent(id)) return;
-    const byId = new Map(matrix.classifications.map(item => [item.taskId, item]));
-    state.tasks = state.tasks.map(task => {
-      const item = byId.get(task.id);
-      return item && task.classificationSource === 'unclassified'
-        ? { ...task, importance: item.importance, urgency: item.urgency, classificationSource: 'ai-matrix' }
-        : task;
-    });
+    const mergedTasks = validateAndMergeMatrix(state.tasks, matrix);
+    state.tasks = mergedTasks;
     state.pending = null;
     state.matrix = matrix;
     state.report = null;
@@ -452,6 +568,7 @@ async function generateReport() {
       goals: state.goals,
     });
     if (!isCurrent(id)) return;
+    validateReport(state.tasks, report);
     state.pending = null;
     state.report = report;
     state.step = 4;
