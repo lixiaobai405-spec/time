@@ -322,7 +322,7 @@ Expected: 契约测试全部通过。
 - Modify: `playwright.config.js`
 - Test: `tests/server/api.test.js`
 
-- [ ] **Step 1: 安装并锁定最小后端依赖**
+- [x] **Step 1: 安装并锁定最小后端依赖**
 
 ```powershell
 npm.cmd install express ajv
@@ -330,7 +330,7 @@ npm.cmd install express ajv
 
 影响：更新 `package.json` 和 `package-lock.json`；执行前不需要真实模型密钥。
 
-- [ ] **Step 2: 增加脚本**
+- [x] **Step 2: 增加脚本**
 
 ```json
 {
@@ -343,7 +343,7 @@ npm.cmd install express ajv
 }
 ```
 
-- [ ] **Step 3: 写健康检查失败测试**
+- [x] **Step 3: 写健康检查失败测试**
 
 ```js
 // tests/server/api.test.js
@@ -362,7 +362,7 @@ test('GET /api/health 返回 ok', async () => {
 });
 ```
 
-- [ ] **Step 4: 实现服务骨架与安全默认值**
+- [x] **Step 4: 实现服务骨架与安全默认值**
 
 ```js
 // server/app.js
@@ -402,7 +402,7 @@ MODEL_NAME=replace-with-model-name
 MODEL_TIMEOUT_MS=30000
 ```
 
-- [ ] **Step 5: 将 Playwright 服务切换到 Node 应用并验证**
+- [x] **Step 5: 将 Playwright 服务切换到 Node 应用并验证**
 
 ```js
 // playwright.config.js 中的 webServer
@@ -418,7 +418,7 @@ webServer: {
 }
 ```
 
-- [ ] **Step 6: 运行测试并提交**
+- [x] **Step 6: 运行测试并提交**
 
 ```powershell
 npm.cmd run test:server -- tests/server/api.test.js
