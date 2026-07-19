@@ -792,7 +792,7 @@ git commit -m "feat: add actionable priority report workflow"
 - Modify: `frontend/index.html:194`
 - Test: `tests/frontend.spec.js`
 
-- [ ] **Step 1: 为状态失效规则写浏览器测试**
+- [x] **Step 1: 为状态失效规则写浏览器测试**
 
 ```js
 test('目标修改后必须重新检查才能提取任务', async ({ page }) => {
@@ -821,7 +821,7 @@ test('目标修改后必须重新检查才能提取任务', async ({ page }) => 
 
 同文件再增加三个完整交互用例：新增或删除任务后返回矩阵页必须要求重新判定；“重新梳理”调用取消函数并清空四栏、任务、矩阵和报告；未修改数据时返回上一步再前进仍显示原有结果。
 
-- [ ] **Step 2: 实现状态树**
+- [x] **Step 2: 实现状态树**
 
 ```js
 // frontend/state.js
@@ -853,7 +853,7 @@ export function invalidateAfterTasks() {
 }
 ```
 
-- [ ] **Step 3: 实现可取消 API 封装**
+- [x] **Step 3: 实现可取消 API 封装**
 
 ```js
 // frontend/api.js
@@ -878,7 +878,7 @@ export function cancelActiveRequest() {
 }
 ```
 
-- [ ] **Step 4: 将 `index.html` 改为模块入口**
+- [x] **Step 4: 将 `index.html` 改为模块入口**
 
 保留现有 HTML/CSS 和 `markdown-renderer.js`，删除 `BASE_TASKS`、`TIME_REPORT_MARKDOWN`、模拟 `runAI()` 数据与 DOM 内任务状态，改为：
 
@@ -888,7 +888,7 @@ export function cancelActiveRequest() {
 <script type="module" src="app.js"></script>
 ```
 
-- [ ] **Step 5: 运行现有前端回归并提交**
+- [x] **Step 5: 运行现有前端回归并提交**
 
 ```powershell
 npm.cmd run test:e2e

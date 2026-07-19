@@ -1,6 +1,93 @@
 const { test, expect } = require('@playwright/test');
 
-async function completeGoalCheck(page) {
+const MOCK_TASKS = [
+  { id: 'task-1', name: '**校对今天的方案终稿**', importance: '低', urgency: '高', source: '今天', due: '今天 18:00', est: '约1h', status: 'pending', classificationSource: 'ai-extraction' },
+  { id: 'task-2', name: '跟进两个客户投诉', importance: '高', urgency: '高', source: '临时', due: '今天', est: '约1.5h', status: 'pending', classificationSource: 'ai-extraction' },
+  { id: 'task-3', name: '复盘上季度转化缺口原因', importance: '高', urgency: '中', source: '复盘', due: '本周五', est: '约2h', status: 'pending', classificationSource: 'ai-extraction' },
+  { id: 'task-4', name: '推进本月选题策划', importance: '高', urgency: '低', source: '短期目标', due: '本月', est: '约3h', status: 'pending', classificationSource: 'ai-extraction' },
+  { id: 'task-5', name: '搭建团队分层培养框架', importance: '高', urgency: '低', source: '中长期', due: 'Q3', est: '约4h', status: 'pending', classificationSource: 'ai-extraction' },
+  { id: 'task-6', name: '回复非紧急群消息', importance: '低', urgency: '低', source: '临时', due: '待确认', est: '约0.5h', status: 'pending', classificationSource: 'ai-extraction' },
+];
+
+function matrixPayload(tasks) {
+  const classifications = tasks.map(item => ({
+    taskId: item.id,
+    importance: item.importance || '低',
+    urgency: item.urgency || '低',
+    classificationSource: item.classificationSource === 'unclassified'
+      ? 'ai-matrix'
+      : item.classificationSource,
+  }));
+  const taskIds = name => classifications
+    .filter(item => {
+      const important = item.importance === '高';
+      const urgent = item.urgency === '高';
+      return (name === '第一象限' && important && urgent)
+        || (name === '第二象限' && important && !urgent)
+        || (name === '第三象限' && !important && urgent)
+        || (name === '第四象限' && !important && !urgent);
+    })
+    .map(item => item.taskId);
+  return {
+    classifications,
+    quadrants: [
+      { name: '第一象限', priority: 1, action: '立即做', energyPercent: 55, taskIds: taskIds('第一象限') },
+      { name: '第二象限', priority: 2, action: '计划做', energyPercent: 25, taskIds: taskIds('第二象限') },
+      { name: '第三象限', priority: 3, action: '授权做', energyPercent: 15, taskIds: taskIds('第三象限') },
+      { name: '第四象限', priority: 4, action: '减少做', energyPercent: 5, taskIds: taskIds('第四象限') },
+    ],
+    note: '',
+  };
+}
+
+async function installWorkflowMocks(page, { onMatrix } = {}) {
+  await page.route('**/api/time-management/goals/check', route => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: JSON.stringify({
+      fields: ['昨天', '今天', '明天', '后天'].map(key => ({
+        key,
+        status: 'ok',
+        issue: '',
+        suggestion: '',
+      })),
+      overall: 'pass',
+    }),
+  }));
+  await page.route('**/api/time-management/tasks/extract', route => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: JSON.stringify({ tasks: MOCK_TASKS }),
+  }));
+  await page.route('**/api/time-management/matrix/classify', async route => {
+    const body = route.request().postDataJSON();
+    onMatrix?.(body);
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify(matrixPayload(body.tasks)),
+    });
+  });
+  await page.route('**/api/time-management/report/generate', async route => {
+    const body = route.request().postDataJSON();
+    const order = body.tasks.slice(0, 3).map(item => ({
+      taskId: item.id,
+      reason: '该任务是当前的优先事项',
+    }));
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        order,
+        energyRules: ['为第二象限预留整块时间', '压缩第四象限的零散事项'],
+        adjustments: ['每周固定一次复盘', '在 12 月 31 日前完成 3 个里程碑'],
+      }),
+    });
+  });
+}
+
+async function completeGoalCheck(page, mockOptions) {
+  await installWorkflowMocks(page, mockOptions);
   await page.locator('#g-昨').fill('原定完成季度复盘，实际已完成初稿，差距是缺少数据，下一步补齐数据并复核。');
   await page.locator('#g-今').fill('整理客户反馈清单并在今天下班前确认三项最高优先问题。');
   await page.locator('#g-明').fill('本周五前完成方案初稿并覆盖三个明确的业务场景。');
@@ -9,20 +96,20 @@ async function completeGoalCheck(page) {
   await expect(page.locator('.field-fb.ok')).toHaveCount(4);
 }
 
-async function advanceToMatrix(page) {
+async function advanceToMatrix(page, mockOptions) {
   await page.goto('/');
   await page.getByRole('button', { name: /开始梳理/ }).click();
-  await completeGoalCheck(page);
+  await completeGoalCheck(page, mockOptions);
   await page.getByRole('button', { name: /提取任务/ }).click();
   await expect(page.locator('.panel-h')).toHaveText('任务提取');
   await page.getByRole('button', { name: /矩阵判定/ }).click();
   await expect(page.locator('.panel-h')).toHaveText('矩阵判定');
 }
 
-async function advanceToTasks(page) {
+async function advanceToTasks(page, mockOptions) {
   await page.goto('/');
   await page.getByRole('button', { name: /开始梳理/ }).click();
-  await completeGoalCheck(page);
+  await completeGoalCheck(page, mockOptions);
   await page.getByRole('button', { name: /提取任务/ }).click();
   await expect(page.locator('.panel-h')).toHaveText('任务提取');
 }
@@ -226,6 +313,19 @@ test('处理动画中返回首页不会被旧定时器带回工作区', async ({
 });
 
 test('空目标的补全提示不会写入虚构业务事实', async ({ page }) => {
+  await page.route('**/api/time-management/goals/check', route => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: JSON.stringify({
+      fields: ['昨天', '今天', '明天', '后天'].map(key => ({
+        key,
+        status: 'warn',
+        issue: '示范，请按实际修改:当前尚未填写。',
+        suggestion: '请补充:目标、结果、原因与下一步改进。',
+      })),
+      overall: 'need_fix',
+    }),
+  }));
   await page.goto('/');
   await page.getByRole('button', { name: /开始梳理/ }).click();
   await page.getByRole('button', { name: /AI 检查并补全/ }).click();
@@ -286,4 +386,106 @@ test('复制报告会把当前报告正文写入剪贴板', async ({ page }) => 
     .toContain('今日优先处理顺序');
   await expect.poll(() => page.evaluate(() => window.__copiedText || ''))
     .toContain('精力分配原则');
+});
+
+test('目标修改后必须重新检查才能提取任务', async ({ page }) => {
+  await page.route('**/api/time-management/goals/check', route => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: JSON.stringify({
+      fields: ['昨天', '今天', '明天', '后天'].map(key => ({
+        key,
+        status: 'ok',
+        issue: '',
+        suggestion: '',
+      })),
+      overall: 'pass',
+    }),
+  }));
+  await page.goto('/');
+  await page.getByRole('button', { name: /开始梳理/ }).click();
+  await page.locator('#g-昨').fill('目标、结果、原因和改进均已记录');
+  await page.locator('#g-今').fill('提交今日方案');
+  await page.locator('#g-明').fill('7月31日前提交1份计划');
+  await page.locator('#g-后').fill('12月31日前完成年度目标');
+  await page.getByRole('button', { name: /AI 检查并补全/ }).click();
+  await expect(page.locator('.field-fb.ok')).toHaveCount(4);
+  await page.locator('#g-今').fill('提交修改后的今日方案');
+  await page.getByRole('button', { name: /提取任务/ }).click();
+  await expect(page.locator('.panel-h')).toHaveText('目标梳理');
+  await expect(page.locator('#toast')).toContainText('先完成');
+});
+
+test('新增或删除任务后必须重新判定矩阵', async ({ page }) => {
+  let matrixCalls = 0;
+  await advanceToMatrix(page, { onMatrix: () => { matrixCalls += 1; } });
+  await page.getByRole('button', { name: '上一步' }).click();
+  await page.locator('#tasklist .task-del').first().click();
+  await page.locator('.step').filter({ hasText: '矩阵判定' }).click();
+  await expect(page.locator('.panel-h')).toHaveText('任务提取');
+  await expect(page.locator('#toast')).toContainText('重新判定');
+  expect(matrixCalls).toBe(1);
+
+  await page.getByRole('button', { name: /矩阵判定/ }).click();
+  await expect(page.locator('.panel-h')).toHaveText('矩阵判定');
+  expect(matrixCalls).toBe(2);
+  await page.getByRole('button', { name: '上一步' }).click();
+  await page.getByRole('button', { name: /手动添加任务/ }).click();
+  await page.locator('#f-name').fill('新增临时任务');
+  await page.locator('#f-src').selectOption({ label: '临时' });
+  await page.locator('#f-due').fill('2026-07-20');
+  await page.locator('#f-cost').fill('1h');
+  await page.getByRole('button', { name: /添加到列表/ }).click();
+  await page.locator('.step').filter({ hasText: '矩阵判定' }).click();
+  await expect(page.locator('.panel-h')).toHaveText('任务提取');
+  await expect(page.locator('#toast')).toContainText('重新判定');
+  expect(matrixCalls).toBe(2);
+});
+
+test('重新梳理会取消请求并清空全部流程状态', async ({ page }) => {
+  await page.addInitScript(() => {
+    const abort = AbortController.prototype.abort;
+    window.__abortCount = 0;
+    AbortController.prototype.abort = function instrumentedAbort(...args) {
+      window.__abortCount += 1;
+      return abort.apply(this, args);
+    };
+  });
+  await advanceToMatrix(page);
+  await page.getByRole('button', { name: /生成报告/ }).click();
+  await expect(page.locator('.panel-h')).toHaveText('优先级报告');
+  const before = await page.evaluate(() => window.__abortCount);
+
+  await page.getByRole('button', { name: /重新梳理/ }).click();
+
+  await expect(page.locator('.panel-h')).toHaveText('目标梳理');
+  expect(await page.locator('textarea[id^="g-"]').evaluateAll(nodes =>
+    nodes.map(node => node.value))).toEqual(['', '', '', '']);
+  const snapshot = await page.evaluate(async () => {
+    const { state } = await import('/state.js');
+    return {
+      goals: state.goals,
+      tasks: state.tasks,
+      matrix: state.matrix,
+      report: state.report,
+      abortCount: window.__abortCount,
+    };
+  });
+  expect(snapshot.goals).toEqual({ 昨天: '', 今天: '', 明天: '', 后天: '' });
+  expect(snapshot.tasks).toEqual([]);
+  expect(snapshot.matrix).toBeNull();
+  expect(snapshot.report).toBeNull();
+  expect(snapshot.abortCount).toBeGreaterThan(before);
+});
+
+test('未修改数据时返回上一步再前进保留原结果', async ({ page }) => {
+  let matrixCalls = 0;
+  await advanceToMatrix(page, { onMatrix: () => { matrixCalls += 1; } });
+  const before = await page.locator('.matrix .qtask').allTextContents();
+  await page.getByRole('button', { name: '上一步' }).click();
+  await page.locator('.step').filter({ hasText: '矩阵判定' }).click();
+
+  await expect(page.locator('.panel-h')).toHaveText('矩阵判定');
+  expect(await page.locator('.matrix .qtask').allTextContents()).toEqual(before);
+  expect(matrixCalls).toBe(1);
 });
