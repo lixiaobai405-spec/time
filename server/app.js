@@ -5,6 +5,7 @@ const { notFound, problemHandler } = require('./http/problem');
 const { checkGoals } = require('./workflows/check-goals');
 const { classifyMatrix } = require('./workflows/classify-matrix');
 const { extractTasks } = require('./workflows/extract-tasks');
+const { generateReport } = require('./workflows/generate-report');
 
 function createApp({ modelClient } = {}) {
   const app = express();
@@ -39,6 +40,19 @@ function createApp({ modelClient } = {}) {
     try {
       response.json(await classifyMatrix({
         tasks: request.body?.tasks,
+        modelClient,
+        requestBody: request.body,
+      }));
+    } catch (error) {
+      next(error);
+    }
+  });
+  app.post('/api/time-management/report/generate', async (request, response, next) => {
+    try {
+      response.json(await generateReport({
+        tasks: request.body?.tasks,
+        matrix: request.body?.matrix,
+        goals: request.body?.goals,
         modelClient,
         requestBody: request.body,
       }));

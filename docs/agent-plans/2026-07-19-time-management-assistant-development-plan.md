@@ -736,7 +736,7 @@ git commit -m "feat: add validated priority matrix workflow"
 - Create: `tests/server/generate-report.test.js`
 - Modify: `server/app.js`
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 ```js
 const test = require('node:test');
@@ -759,7 +759,7 @@ test('报告只引用当前任务并保留三段结构', async () => {
 
 同文件增加六个精确用例：任务不少于 3 条时 `order` 长度为 3–5；任务不足 3 条时不得超过任务数；不存在或已删除的 `taskId` 触发重试；中长期目标的建议必须包含指标或时间节点；单任务不能虚构第二个任务；含原始 HTML 的字符串原样交给前端安全渲染，不在服务端转换为 HTML。
 
-- [ ] **Step 2: 固定报告响应结构**
+- [x] **Step 2: 固定报告响应结构**
 
 ```json
 {
@@ -771,11 +771,11 @@ test('报告只引用当前任务并保留三段结构', async () => {
 
 报告正文不得用自由文本替代结构化字段；`reason`、`energyRules`、`adjustments` 可以包含安全 Markdown。
 
-- [ ] **Step 3: 实现引用完整性校验**
+- [x] **Step 3: 实现引用完整性校验**
 
 `order[*].taskId` 必须存在于当前 `tasks`，不可重复；报告生成输入使用当前任务列表和当前矩阵，而不是步骤 2 的旧快照，确保用户增删任务后下游一致。
 
-- [ ] **Step 4: 注册路由、运行测试并提交**
+- [x] **Step 4: 注册路由、运行测试并提交**
 
 ```powershell
 npm.cmd run test:server -- tests/server/generate-report.test.js
