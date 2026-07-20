@@ -365,23 +365,23 @@ git commit -m "feat: enforce actionable task granularity"
 
 ### 步骤
 
-- [ ] 在 `tests/frontend.spec.js` 现有矩阵方向测试中增加视觉布局失败断言：顶部标签的 `boundingBox().y` 小于底部标签，计算样式不得包含 180 度旋转，两个标签使用正常的竖排直立文字方向。
-- [ ] 增加 375×812 窄屏回归断言：两个纵轴标签完整位于 `.matrix-wrap` 边界内，且不与任一 `.quad` 的边界相交。
-- [ ] 运行并确认新增断言在当前 `.axis-y{ transform:rotate(180deg) }` 下按预期失败：
+- [x] 在 `tests/frontend.spec.js` 现有矩阵方向测试中增加视觉布局失败断言：顶部标签的 `boundingBox().y` 小于底部标签，计算样式不得包含 180 度旋转，两个标签使用正常的竖排直立文字方向。
+- [x] 增加 375×812 窄屏回归断言：两个纵轴标签完整位于 `.matrix-wrap` 边界内，且不与任一 `.quad` 的边界相交。
+- [x] 运行并确认新增断言在当前 `.axis-y{ transform:rotate(180deg) }` 下按预期失败：
 
 ```powershell
 npx playwright test tests/frontend.spec.js --grep "矩阵方向|纵轴文字"
 ```
 
-- [ ] 最小修改 `.axis-y`：移除整个纵轴容器的 180 度旋转，使用明确的纵向 flex 布局固定上下位置，并在标签元素上设置 `writing-mode: vertical-rl` 与 `text-orientation: upright`；不要改动象限数据或矩阵业务逻辑。
-- [ ] 重跑上述定向测试，预期桌面端与窄屏断言全部通过。
-- [ ] 运行完整前端回归，确认矩阵、报告和窄屏布局未受影响：
+- [x] 最小修改 `.axis-y`：移除整个纵轴容器的 180 度旋转，使用明确的纵向 flex 布局固定上下位置，并在标签元素上设置 `writing-mode: vertical-rl` 与 `text-orientation: upright`；不要改动象限数据或矩阵业务逻辑。
+- [x] 重跑上述定向测试，预期桌面端与窄屏断言全部通过。
+- [x] 运行完整前端回归，确认矩阵、报告和窄屏布局未受影响：
 
 ```powershell
 npm run test:e2e
 ```
 
-- [ ] 勾选 Task 8 并提交：
+- [x] 勾选 Task 8 并提交：
 
 ```powershell
 git add frontend/index.html tests/frontend.spec.js docs/agent-plans/2026-07-20-manual-test-findings-remediation-plan.md

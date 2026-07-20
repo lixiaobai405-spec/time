@@ -123,7 +123,8 @@ textarea{min-height:66px}
 
 /* matrix */
 .matrix-wrap{display:grid;grid-template-columns:26px 1fr;gap:10px}
-.axis-y{writing-mode:vertical-rl;transform:rotate(180deg);text-align:center;font-size:12px;font-weight:700;color:var(--muted);display:flex;justify-content:space-between;padding:6px 0}
+.axis-y{text-align:center;font-size:12px;font-weight:700;color:var(--muted);display:flex;flex-direction:column;align-items:center;justify-content:space-between;padding:6px 0}
+.axis-y span{writing-mode:vertical-rl;text-orientation:upright}
 .matrix{display:grid;grid-template-columns:1fr 1fr;grid-template-rows:1fr 1fr;gap:10px}
 .axis-x{grid-column:2;display:flex;justify-content:space-between;font-size:12px;font-weight:700;color:var(--muted);margin-top:4px}
 .quad{border-radius:12px;padding:13px;min-height:132px;position:relative;border:1.5px solid transparent}

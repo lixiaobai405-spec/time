@@ -421,7 +421,7 @@ test('手动任务把耗时字段当作文本而不是 HTML', async ({ page }) =
   await expect(page.locator('.task.manual .tags')).toContainText('<img data-xss="1" src="x">');
 });
 
-test('矩阵按左侧不紧急、右侧紧急排列四个象限', async ({ page }) => {
+test('矩阵方向按左侧不紧急、右侧紧急排列四个象限', async ({ page }) => {
   await advanceToMatrix(page);
 
   const quadrantOrder = await page.locator('.matrix .quad').evaluateAll((nodes) =>
@@ -433,6 +433,52 @@ test('矩阵按左侧不紧急、右侧紧急排列四个象限', async ({ page 
   expect(quadrantOrder).toEqual(['q2', 'q1', 'q4', 'q3']);
   expect(horizontalAxis).toEqual(['不紧急', '紧急']);
   expect(verticalAxis).toEqual(['重要', '不重要']);
+
+  const verticalLabels = page.locator('.axis-y span');
+  const topBox = await verticalLabels.nth(0).boundingBox();
+  const bottomBox = await verticalLabels.nth(1).boundingBox();
+  expect(topBox.y).toBeLessThan(bottomBox.y);
+  const verticalStyles = await verticalLabels.evaluateAll(nodes => nodes.map((node) => {
+    const style = getComputedStyle(node);
+    return { writingMode: style.writingMode, textOrientation: style.textOrientation };
+  }));
+  expect(verticalStyles).toEqual([
+    { writingMode: 'vertical-rl', textOrientation: 'upright' },
+    { writingMode: 'vertical-rl', textOrientation: 'upright' },
+  ]);
+  expect(await page.locator('.axis-y').evaluate(node => getComputedStyle(node).transform))
+    .toBe('none');
+});
+
+test('375px 窄屏纵轴文字完整且不与矩阵卡片重叠', async ({ page }) => {
+  await page.setViewportSize({ width: 375, height: 812 });
+  await advanceToMatrix(page);
+
+  const layout = await page.evaluate(() => {
+    const rect = element => {
+      const box = element.getBoundingClientRect();
+      return { left: box.left, right: box.right, top: box.top, bottom: box.bottom };
+    };
+    const wrap = rect(document.querySelector('.matrix-wrap'));
+    const labels = [...document.querySelectorAll('.axis-y span')].map(rect);
+    const quadrants = [...document.querySelectorAll('.matrix .quad')].map(rect);
+    const intersects = (a, b) => (
+      a.left < b.right && a.right > b.left && a.top < b.bottom && a.bottom > b.top
+    );
+    return {
+      wrap,
+      labels,
+      overlaps: labels.map(label => quadrants.some(quad => intersects(label, quad))),
+    };
+  });
+
+  for (const label of layout.labels) {
+    expect(label.left).toBeGreaterThanOrEqual(layout.wrap.left);
+    expect(label.right).toBeLessThanOrEqual(layout.wrap.right);
+    expect(label.top).toBeGreaterThanOrEqual(layout.wrap.top);
+    expect(label.bottom).toBeLessThanOrEqual(layout.wrap.bottom);
+  }
+  expect(layout.overlaps).toEqual([false, false]);
 });
 
 test('复制报告会把当前报告正文写入剪贴板', async ({ page }) => {
