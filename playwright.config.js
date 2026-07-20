@@ -1,7 +1,4 @@
 const { defineConfig } = require('@playwright/test');
-const path = require('path');
-
-const frontendDir = path.join(__dirname, 'frontend');
 
 module.exports = defineConfig({
   testDir: './tests',
@@ -15,8 +12,13 @@ module.exports = defineConfig({
     screenshot: 'only-on-failure',
   },
   webServer: {
-    command: `python -m http.server 4174 --directory "${frontendDir}"`,
-    url: 'http://127.0.0.1:4174',
+    command: 'npm.cmd run dev',
+    url: 'http://127.0.0.1:4174/api/health',
     reuseExistingServer: false,
+    env: {
+      MODEL_API_BASE_URL: 'http://127.0.0.1:4999/v1',
+      MODEL_API_KEY: 'fake-key',
+      MODEL_NAME: 'fake-model',
+    },
   },
 });
