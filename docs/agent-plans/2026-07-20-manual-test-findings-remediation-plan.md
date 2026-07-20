@@ -197,16 +197,16 @@ git commit -m "fix: apply deadline urgency after extraction"
 
 ### 步骤
 
-- [ ] 先写失败测试，覆盖 16:00 早于 17:00、当天第三象限早于未来第二象限、未知期限靠后、同期限保持输入顺序、任务不足五条和超过五条。
-- [ ] 运行并确认失败：
+- [x] 先写失败测试，覆盖 16:00 早于 17:00、当天第三象限早于未来第二象限、未知期限靠后、同期限保持输入顺序、任务不足五条和超过五条。
+- [x] 运行并确认失败：
 
 ```powershell
 node --test tests/server/report-priority.test.js
 ```
 
-- [ ] 最小实现 `buildReportPriorityContext({ tasks, matrix, now, timeZone })`，返回 `recommendedTaskIds`、`protectedTaskIds`、`remainingProtectedTaskIds` 和每条任务的行动类型。
-- [ ] 重跑测试，预期全部通过。
-- [ ] 勾选 Task 4 并提交：
+- [x] 最小实现 `buildReportPriorityContext({ tasks, matrix, now, timeZone })`，返回 `recommendedTaskIds`、`protectedTaskIds`、`remainingProtectedTaskIds` 和每条任务的行动类型。
+- [x] 重跑测试，预期全部通过。
+- [x] 勾选 Task 4 并提交：
 
 ```powershell
 git add server/policies/report-priority.js tests/server/report-priority.test.js docs/agent-plans/2026-07-20-manual-test-findings-remediation-plan.md
