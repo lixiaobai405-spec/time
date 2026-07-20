@@ -47,6 +47,7 @@ const validateRequest = ajv.compile({
               maxLength: TEXT_LIMITS.acceptanceCriteria,
             },
           },
+          nextAction: { type: 'string', maxLength: TEXT_LIMITS.nextAction },
           status: { enum: TASK_STATUS },
         },
       },

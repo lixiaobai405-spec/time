@@ -26,6 +26,7 @@ const TEXT_LIMITS = Object.freeze({
   due: 80,
   est: 40,
   acceptanceCriteria: 200,
+  nextAction: 200,
 });
 
 const MANUAL_FLAGS = Object.freeze({
@@ -59,6 +60,15 @@ function normalizedText(value, fallback = '') {
   return text || fallback;
 }
 
+function parseEstimatedMinutes(est) {
+  if (typeof est !== 'string') return null;
+  const value = est.trim().replace(/\s+/g, '').replace(/^约/, '');
+  const hours = value.match(/^(\d+(?:\.\d+)?)(?:h|小时)$/i);
+  if (hours) return Number(hours[1]) * 60;
+  const minutes = value.match(/^(\d+)分钟$/);
+  return minutes ? Number(minutes[1]) : null;
+}
+
 function normalizeTask(task) {
   const hasClassification = IMPORTANCE.includes(task.importance)
     && URGENCY.includes(task.urgency);
@@ -75,6 +85,7 @@ function normalizeTask(task) {
     due: normalizedText(task.due, '待确认'),
     est: normalizedText(task.est),
     acceptanceCriteria,
+    nextAction: normalizedText(task.nextAction),
     status: task.status || 'pending',
     classificationSource: task.classificationSource
       || (hasClassification ? 'ai-extraction' : 'unclassified'),
@@ -94,5 +105,6 @@ module.exports = {
   TEXT_LIMITS,
   URGENCY,
   normalizeTask,
+  parseEstimatedMinutes,
   quadrantFor,
 };

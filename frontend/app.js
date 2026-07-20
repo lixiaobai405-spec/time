@@ -307,6 +307,18 @@ function createTaskElement(task) {
     }
     criteriaBlock.append(title, list);
   }
+  const nextAction = typeof task.nextAction === 'string' ? task.nextAction.trim() : '';
+  let nextActionBlock;
+  if (nextAction) {
+    nextActionBlock = document.createElement('div');
+    nextActionBlock.className = 'task-detail next-action';
+    const title = document.createElement('div');
+    title.className = 'task-detail-title';
+    title.textContent = '下一步';
+    const action = document.createElement('div');
+    action.textContent = nextAction;
+    nextActionBlock.append(title, action);
+  }
   const remove = document.createElement('button');
   remove.className = 'task-del';
   remove.type = 'button';
@@ -315,6 +327,7 @@ function createTaskElement(task) {
   remove.addEventListener('click', () => deleteTask(task.id));
   main.append(nameRow, tags);
   if (criteriaBlock) main.appendChild(criteriaBlock);
+  if (nextActionBlock) main.appendChild(nextActionBlock);
   element.append(main, remove);
   return element;
 }
@@ -647,6 +660,7 @@ function addTask() {
     due,
     est: est.startsWith('约') ? est : `约${est}`,
     acceptanceCriteria: [],
+    nextAction: '',
     status: 'pending',
     ...(flags[flag] || flags.unclassified),
   });

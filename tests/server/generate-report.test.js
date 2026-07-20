@@ -232,6 +232,7 @@ test('报告入口接受任务验收标准并保持外部响应结构', async ()
   const tasks = [task('smart', {
     source: '短期目标',
     acceptanceCriteria: ['形成 4 个模块', '完成 2 次模拟', '评分不低于 80 分'],
+    nextAction: '先列出模块清单',
   })];
   const expected = reportFor(tasks);
   const result = await generateReport({

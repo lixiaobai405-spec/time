@@ -152,6 +152,46 @@ test('中短期任务缺少验收标准时重试一次', async () => {
   assert.equal(modelClient.calls.length, 2);
 });
 
+test('今天来源的 12h 大任务被拒绝并要求模型拆分', async () => {
+  const invalid = { tasks: [modelTask({ est: '12h' })] };
+  const modelClient = queuedModel([invalid, invalid]);
+  await assert.rejects(
+    extractTasks({ goals: goals({ 今天: '今天完成预计 12h 的发布工作' }), modelClient }),
+    error => error.code === 'MODEL_OUTPUT_INVALID',
+  );
+  assert.equal(modelClient.calls.length, 2);
+});
+
+test('中长期 16h 里程碑有下一步时接受且无下一步时重试', async () => {
+  const invalid = { tasks: [modelTask({
+    source: '中长期',
+    est: '16h',
+    acceptanceCriteria: ['完成第一阶段里程碑'],
+  })] };
+  const valid = { tasks: [modelTask({
+    source: '中长期',
+    est: '16h',
+    acceptanceCriteria: ['完成第一阶段里程碑'],
+    nextAction: '今天先列出里程碑所需的 4 个模块',
+  })] };
+  const modelClient = queuedModel([invalid, valid]);
+  const result = await extractTasks({
+    goals: goals({ 后天: '推进长期项目第一阶段里程碑' }),
+    modelClient,
+  });
+  assert.equal(result.tasks[0].nextAction, '今天先列出里程碑所需的 4 个模块');
+  assert.equal(modelClient.calls.length, 2);
+});
+
+test('不可解析耗时原样保留且不猜测任务粒度', async () => {
+  const result = await extractTasks({
+    goals: goals({ 今天: '今天梳理需求，预计半天' }),
+    modelClient: queuedModel([{ tasks: [modelTask({ est: '半天' })] }]),
+  });
+  assert.equal(result.tasks[0].est, '半天');
+  assert.equal(result.tasks[0].nextAction, '');
+});
+
 test('超过 100 条任务时重试一次后拒绝', async () => {
   const invalid = { tasks: Array.from({ length: 101 }, (_, index) => (
     modelTask({ name: `任务${index}` })

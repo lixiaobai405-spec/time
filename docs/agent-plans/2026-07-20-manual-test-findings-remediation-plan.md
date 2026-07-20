@@ -327,18 +327,18 @@ git commit -m "feat: preserve task acceptance criteria"
 
 ### 步骤
 
-- [ ] 先写失败单元测试，覆盖 `20分钟`、`0.5h`、`8h`、`12h`、不可解析耗时；断言今天 12h 被拒绝，中长期 16h 有下一步时被接受、无下一步时被拒绝。
-- [ ] 写 Playwright 失败测试，断言长期任务卡展示“下一步”，普通任务不显示空区域。
-- [ ] 运行并确认新增测试失败：
+- [x] 先写失败单元测试，覆盖 `20分钟`、`0.5h`、`8h`、`12h`、不可解析耗时；断言今天 12h 被拒绝，中长期 16h 有下一步时被接受、无下一步时被拒绝。
+- [x] 写 Playwright 失败测试，断言长期任务卡展示“下一步”，普通任务不显示空区域。
+- [x] 运行并确认新增测试失败：
 
 ```powershell
 node --test tests/server/contracts.test.js tests/server/extract-tasks.test.js
 npx playwright test tests/frontend.spec.js --grep "下一步|长期任务"
 ```
 
-- [ ] 实现纯函数 `parseEstimatedMinutes(est)`、schema/语义校验、提示词约束和安全 UI 渲染；不做基于自然语言的自动拆分，避免服务端伪造任务。
-- [ ] 重跑上述测试，预期全部通过。
-- [ ] 勾选 Task 7 并提交：
+- [x] 实现纯函数 `parseEstimatedMinutes(est)`、schema/语义校验、提示词约束和安全 UI 渲染；不做基于自然语言的自动拆分，避免服务端伪造任务。
+- [x] 重跑上述测试，预期全部通过。
+- [x] 勾选 Task 7 并提交：
 
 ```powershell
 git add server/contracts/time-management.js server/workflows/extract-tasks.js prompts/system.md frontend/app.js frontend/index.html tests/server/contracts.test.js tests/server/extract-tasks.test.js tests/frontend.spec.js docs/agent-plans/2026-07-20-manual-test-findings-remediation-plan.md

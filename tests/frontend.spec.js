@@ -309,6 +309,32 @@ test('任务卡安全展示完成标准且手动任务流程保持可用', async
   await expect(page.locator('.task').filter({ hasText: '手动补充任务' })).toBeVisible();
 });
 
+test('长期任务卡展示下一步且普通任务不显示空区域', async ({ page }) => {
+  await advanceToTasks(page, {
+    extractTasks: [
+      {
+        ...MOCK_TASKS[0],
+        name: '推进长期课程里程碑',
+        source: '中长期',
+        est: '16h',
+        acceptanceCriteria: ['完成第一阶段里程碑'],
+        nextAction: '今天先列出 4 个课程模块',
+      },
+      {
+        ...MOCK_TASKS[1],
+        name: '发送今天的会议纪要',
+        nextAction: '',
+      },
+    ],
+  });
+
+  const longTermTask = page.locator('.task').filter({ hasText: '推进长期课程里程碑' });
+  await expect(longTermTask).toContainText('下一步');
+  await expect(longTermTask.locator('.next-action')).toContainText('今天先列出 4 个课程模块');
+  const ordinaryTask = page.locator('.task').filter({ hasText: '发送今天的会议纪要' });
+  await expect(ordinaryTask.locator('.next-action')).toHaveCount(0);
+});
+
 test('未完成目标检查时不能进入任务提取', async ({ page }) => {
   await page.goto('/');
   await page.getByRole('button', { name: /开始梳理/ }).click();

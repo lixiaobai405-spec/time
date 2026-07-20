@@ -8,6 +8,7 @@ const {
   TEXT_LIMITS,
   URGENCY,
   normalizeTask,
+  parseEstimatedMinutes,
 } = require('../contracts/time-management');
 const { applyDeadlineUrgency } = require('../policies/deadline');
 const { loadStepPrompt } = require('../prompts/load-step-prompt');
@@ -60,6 +61,7 @@ const validateResponse = ajv.compile({
               maxLength: TEXT_LIMITS.acceptanceCriteria,
             },
           },
+          nextAction: { type: 'string', maxLength: TEXT_LIMITS.nextAction },
           status: { const: 'pending' },
         },
       },
@@ -102,6 +104,11 @@ function assertTaskSemantics(output, goals) {
     if (acceptanceCriteria.some(item => !item.trim())
         || (['短期目标', '中长期'].includes(task.source)
           && acceptanceCriteria.length === 0)) {
+      throw outputError();
+    }
+    const estimatedMinutes = parseEstimatedMinutes(task.est);
+    if (estimatedMinutes !== null && estimatedMinutes > 8 * 60
+        && (task.source !== '中长期' || !task.nextAction?.trim())) {
       throw outputError();
     }
   }

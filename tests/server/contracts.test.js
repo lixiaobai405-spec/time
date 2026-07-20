@@ -12,6 +12,7 @@ const {
   TASK_STATUS,
   URGENCY,
   normalizeTask,
+  parseEstimatedMinutes,
   quadrantFor,
 } = require('../../server/contracts/time-management');
 
@@ -97,6 +98,37 @@ test('任务验收标准缺省为空数组并保留最多五条文本', () => {
   assert.deepEqual(withCriteria.acceptanceCriteria, criteria);
 });
 
+test('仅解析确定性的小时和分钟耗时', () => {
+  assert.equal(parseEstimatedMinutes('20分钟'), 20);
+  assert.equal(parseEstimatedMinutes('0.5h'), 30);
+  assert.equal(parseEstimatedMinutes('8h'), 480);
+  assert.equal(parseEstimatedMinutes('12小时'), 720);
+  assert.equal(parseEstimatedMinutes('约 1.5 h'), 90);
+  assert.equal(parseEstimatedMinutes('1–2h'), null);
+  assert.equal(parseEstimatedMinutes('半天'), null);
+});
+
+test('下一步缺省为空字符串并保留明确动作', () => {
+  const withoutNextAction = normalizeTask({
+    name: '提交方案',
+    importance: '高',
+    urgency: '中',
+    source: '今天',
+    est: '约1h',
+  });
+  assert.equal(withoutNextAction.nextAction, '');
+
+  const withNextAction = normalizeTask({
+    name: '推进长期课程',
+    importance: '高',
+    urgency: '低',
+    source: '中长期',
+    est: '16h',
+    nextAction: '今天先列出 4 个课程模块',
+  });
+  assert.equal(withNextAction.nextAction, '今天先列出 4 个课程模块');
+});
+
 test('运行提示词声明正式任务、矩阵和报告契约', () => {
   const prompt = readFileSync(
     path.join(__dirname, '..', '..', 'prompts', 'system.md'),
@@ -111,4 +143,6 @@ test('运行提示词声明正式任务、矩阵和报告契约', () => {
   assert.match(prompt, /"order":\[\{"taskId":"","reason":""\}\]/);
   assert.match(prompt, /acceptanceCriteria/);
   assert.match(prompt, /短期目标.*中长期.*至少.*验收标准/s);
+  assert.match(prompt, /nextAction/);
+  assert.match(prompt, /超过 8h.*拆分|超过 8 小时.*拆分/);
 });
