@@ -34,7 +34,7 @@ npx.cmd playwright install chromium
 
 ## 服务端配置
 
-服务端直接读取进程环境变量，不会自动加载真实 `.env`。变量名和假占位值见 `.env.example`：
+服务端直接读取进程环境变量；直接运行 `npm.cmd run dev` 时不会自动加载 `.env`，一键启动脚本则使用 Node.js 20 原生参数安全加载。变量名和假占位值见 `.env.example`：
 
 | 变量 | 必填 | 说明 |
 |---|---:|---|
@@ -52,6 +52,18 @@ npm.cmd run dev
 ```
 
 访问 `http://127.0.0.1:4174/`。不要把真实 key 写入 `.env.example`、源码、测试或文档。
+
+### Windows 一键启动
+
+首次使用时，在项目根目录复制配置模板：
+
+```powershell
+Copy-Item .env.example .env
+```
+
+只在本机 `.env` 中填写真实模型配置，然后双击项目根目录的 `start.bat`。脚本会使用项目专用 `.conda` 环境，通过 Node.js 原生 `--env-file=.env` 加载配置；服务健康后会自动打开浏览器。
+
+`.env` 已加入 `.gitignore`。不要提交、分享或把 `.env` 中的 API key 复制到源码、测试及文档中。
 
 ## API
 
