@@ -25,6 +25,7 @@ const TEXT_LIMITS = Object.freeze({
   taskName: 200,
   due: 80,
   est: 40,
+  acceptanceCriteria: 200,
 });
 
 const MANUAL_FLAGS = Object.freeze({
@@ -61,6 +62,9 @@ function normalizedText(value, fallback = '') {
 function normalizeTask(task) {
   const hasClassification = IMPORTANCE.includes(task.importance)
     && URGENCY.includes(task.urgency);
+  const acceptanceCriteria = Array.isArray(task.acceptanceCriteria)
+    ? task.acceptanceCriteria.map(item => normalizedText(item)).filter(Boolean).slice(0, 5)
+    : [];
 
   return {
     id: task.id || randomUUID(),
@@ -70,6 +74,7 @@ function normalizeTask(task) {
     source: task.source,
     due: normalizedText(task.due, '待确认'),
     est: normalizedText(task.est),
+    acceptanceCriteria,
     status: task.status || 'pending',
     classificationSource: task.classificationSource
       || (hasClassification ? 'ai-extraction' : 'unclassified'),

@@ -75,6 +75,28 @@ test('手动任务未标注时保留空等级等待矩阵 AI 判定', () => {
   assert.equal(task.classificationSource, 'unclassified');
 });
 
+test('任务验收标准缺省为空数组并保留最多五条文本', () => {
+  const withoutCriteria = normalizeTask({
+    name: '提交方案',
+    importance: '高',
+    urgency: '中',
+    source: '今天',
+    est: '约1h',
+  });
+  assert.deepEqual(withoutCriteria.acceptanceCriteria, []);
+
+  const criteria = ['形成 4 个模块', '完成 2 次模拟', '评分不低于 80 分'];
+  const withCriteria = normalizeTask({
+    name: '完成训练计划',
+    importance: '高',
+    urgency: '中',
+    source: '短期目标',
+    est: '约6h',
+    acceptanceCriteria: criteria,
+  });
+  assert.deepEqual(withCriteria.acceptanceCriteria, criteria);
+});
+
 test('运行提示词声明正式任务、矩阵和报告契约', () => {
   const prompt = readFileSync(
     path.join(__dirname, '..', '..', 'prompts', 'system.md'),
@@ -87,4 +109,6 @@ test('运行提示词声明正式任务、矩阵和报告契约', () => {
   assert.match(prompt, /55、25、15、5/);
   assert.match(prompt, /"energyRules":\["",""\]/);
   assert.match(prompt, /"order":\[\{"taskId":"","reason":""\}\]/);
+  assert.match(prompt, /acceptanceCriteria/);
+  assert.match(prompt, /短期目标.*中长期.*至少.*验收标准/s);
 });

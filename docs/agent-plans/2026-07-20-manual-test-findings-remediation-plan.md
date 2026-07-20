@@ -283,18 +283,18 @@ git commit -m "fix: enforce deadline-aware report guidance"
 
 ### 步骤
 
-- [ ] 先增加服务端失败测试：保留“4 个模块、2 次模拟、评分不低于 80 分”，缺少中短期验收标准时触发重试，普通今天任务允许空数组。
-- [ ] 增加 Playwright 失败测试：任务卡显示三条验收标准，恶意 HTML 不执行，手动任务仍可正常添加。
-- [ ] 运行并确认新增测试失败：
+- [x] 先增加服务端失败测试：保留“4 个模块、2 次模拟、评分不低于 80 分”，缺少中短期验收标准时触发重试，普通今天任务允许空数组。
+- [x] 增加 Playwright 失败测试：任务卡显示三条验收标准，恶意 HTML 不执行，手动任务仍可正常添加。
+- [x] 运行并确认新增测试失败：
 
 ```powershell
 node --test tests/server/contracts.test.js tests/server/extract-tasks.test.js
 npx playwright test tests/frontend.spec.js --grep "完成标准|手动任务"
 ```
 
-- [ ] 扩展 schema、标准化函数、提取提示词和任务卡渲染；同步更新所有受影响的假模型 fixture。
-- [ ] 重跑上述测试，预期全部通过。
-- [ ] 勾选 Task 6 并提交：
+- [x] 扩展 schema、标准化函数、提取提示词和任务卡渲染；同步更新所有受影响的假模型 fixture。
+- [x] 重跑上述测试，预期全部通过。
+- [x] 勾选 Task 6 并提交：
 
 ```powershell
 git add server/contracts/time-management.js server/workflows/extract-tasks.js prompts/system.md frontend/app.js frontend/index.html tests/server/contracts.test.js tests/server/extract-tasks.test.js tests/frontend.spec.js docs/agent-plans/2026-07-20-manual-test-findings-remediation-plan.md

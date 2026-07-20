@@ -289,6 +289,24 @@ function createTaskElement(task) {
     tag.textContent = text;
     tags.appendChild(tag);
   }
+  const acceptanceCriteria = Array.isArray(task.acceptanceCriteria)
+    ? task.acceptanceCriteria.filter(item => typeof item === 'string' && item.trim())
+    : [];
+  let criteriaBlock;
+  if (acceptanceCriteria.length > 0) {
+    criteriaBlock = document.createElement('div');
+    criteriaBlock.className = 'task-detail acceptance-criteria';
+    const title = document.createElement('div');
+    title.className = 'task-detail-title';
+    title.textContent = '完成标准';
+    const list = document.createElement('ul');
+    for (const criterion of acceptanceCriteria) {
+      const item = document.createElement('li');
+      item.textContent = criterion;
+      list.appendChild(item);
+    }
+    criteriaBlock.append(title, list);
+  }
   const remove = document.createElement('button');
   remove.className = 'task-del';
   remove.type = 'button';
@@ -296,6 +314,7 @@ function createTaskElement(task) {
   remove.innerHTML = ICONS.trash;
   remove.addEventListener('click', () => deleteTask(task.id));
   main.append(nameRow, tags);
+  if (criteriaBlock) main.appendChild(criteriaBlock);
   element.append(main, remove);
   return element;
 }
@@ -627,6 +646,7 @@ function addTask() {
     source,
     due,
     est: est.startsWith('约') ? est : `约${est}`,
+    acceptanceCriteria: [],
     status: 'pending',
     ...(flags[flag] || flags.unclassified),
   });

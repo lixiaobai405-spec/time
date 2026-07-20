@@ -45,6 +45,7 @@ async function installWorkflowMocks(page, {
   onExtract,
   onMatrix,
   onReport,
+  extractTasks = MOCK_TASKS,
 } = {}) {
   await page.route('**/api/time-management/goals/check', async route => {
     onGoals?.(route.request().postDataJSON());
@@ -67,7 +68,7 @@ async function installWorkflowMocks(page, {
     await route.fulfill({
       status: 200,
       contentType: 'application/json',
-      body: JSON.stringify({ tasks: MOCK_TASKS }),
+      body: JSON.stringify({ tasks: extractTasks }),
     });
   });
   await page.route('**/api/time-management/matrix/classify', async route => {
@@ -275,6 +276,37 @@ test('模型任务名使用行内 Markdown 且不露出标记', async ({ page })
   const firstTask = page.locator('#tasklist .task').first();
   await expect(firstTask.locator('.task-name strong')).toHaveText('校对今天的方案终稿');
   await expect(firstTask.locator('.task-name')).not.toContainText('**校对今天的方案终稿**');
+});
+
+test('任务卡安全展示完成标准且手动任务流程保持可用', async ({ page }) => {
+  await page.addInitScript(() => { window.__criteriaXss = false; });
+  const criteria = [
+    '形成 4 个模块',
+    '完成 2 次模拟',
+    '<img src=x onerror="window.__criteriaXss=true">评分不低于 80 分',
+  ];
+  await advanceToTasks(page, {
+    extractTasks: [{
+      ...MOCK_TASKS[0],
+      name: '完成管理课程训练材料',
+      source: '短期目标',
+      acceptanceCriteria: criteria,
+    }],
+  });
+
+  const smartTask = page.locator('.task').filter({ hasText: '完成管理课程训练材料' });
+  await expect(smartTask).toContainText('完成标准');
+  await expect(smartTask.locator('.acceptance-criteria li')).toHaveText(criteria);
+  await expect(smartTask.locator('img')).toHaveCount(0);
+  expect(await page.evaluate(() => window.__criteriaXss)).toBe(false);
+
+  await page.getByRole('button', { name: /手动添加任务/ }).click();
+  await page.locator('#f-name').fill('手动补充任务');
+  await page.locator('#f-src').selectOption({ label: '临时' });
+  await page.locator('#f-due').fill('2026-08-01');
+  await page.locator('#f-cost').fill('1h');
+  await page.getByRole('button', { name: /添加到列表/ }).click();
+  await expect(page.locator('.task').filter({ hasText: '手动补充任务' })).toBeVisible();
 });
 
 test('未完成目标检查时不能进入任务提取', async ({ page }) => {

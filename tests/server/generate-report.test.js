@@ -228,6 +228,21 @@ test('无明确期限的第四象限任务仍可建议推迟或取消', async ()
   assert.equal(result.order[0].reason, '可推迟或取消整理旧标签');
 });
 
+test('报告入口接受任务验收标准并保持外部响应结构', async () => {
+  const tasks = [task('smart', {
+    source: '短期目标',
+    acceptanceCriteria: ['形成 4 个模块', '完成 2 次模拟', '评分不低于 80 分'],
+  })];
+  const expected = reportFor(tasks);
+  const result = await generateReport({
+    tasks,
+    matrix: matrixFor(tasks),
+    goals: { 昨天: '', 后天: '' },
+    modelClient: queuedModel([expected]),
+  });
+  assert.deepEqual(result, expected);
+});
+
 test('当天第三象限任务缺少授权语义时重试', async () => {
   const tasks = [task('delegate', {
     name: '发送项目会议纪要',

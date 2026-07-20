@@ -51,6 +51,15 @@ const validateResponse = ajv.compile({
           source: { enum: SOURCES },
           due: { type: 'string', maxLength: TEXT_LIMITS.due },
           est: { type: 'string', minLength: 1, maxLength: TEXT_LIMITS.est },
+          acceptanceCriteria: {
+            type: 'array',
+            maxItems: 5,
+            items: {
+              type: 'string',
+              minLength: 1,
+              maxLength: TEXT_LIMITS.acceptanceCriteria,
+            },
+          },
           status: { const: 'pending' },
         },
       },
@@ -89,6 +98,12 @@ function assertTaskSemantics(output, goals) {
     }
     const sourceKey = SOURCE_GOAL_KEY[task.source];
     if (sourceKey && !goals[sourceKey].trim()) throw outputError();
+    const acceptanceCriteria = task.acceptanceCriteria || [];
+    if (acceptanceCriteria.some(item => !item.trim())
+        || (['短期目标', '中长期'].includes(task.source)
+          && acceptanceCriteria.length === 0)) {
+      throw outputError();
+    }
   }
 }
 

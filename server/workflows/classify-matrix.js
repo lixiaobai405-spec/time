@@ -38,6 +38,15 @@ const validateRequest = ajv.compile({
           source: { enum: SOURCES },
           due: { type: 'string', maxLength: TEXT_LIMITS.due },
           est: { type: 'string', minLength: 1, maxLength: TEXT_LIMITS.est },
+          acceptanceCriteria: {
+            type: 'array',
+            maxItems: 5,
+            items: {
+              type: 'string',
+              minLength: 1,
+              maxLength: TEXT_LIMITS.acceptanceCriteria,
+            },
+          },
           status: { enum: TASK_STATUS },
         },
       },

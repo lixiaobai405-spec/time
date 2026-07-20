@@ -41,6 +41,15 @@ const validateRequest = ajv.compile({
           urgency: nullableUrgency,
           due: { type: 'string', maxLength: TEXT_LIMITS.due },
           est: { type: 'string', maxLength: TEXT_LIMITS.est },
+          acceptanceCriteria: {
+            type: 'array',
+            maxItems: 5,
+            items: {
+              type: 'string',
+              minLength: 1,
+              maxLength: TEXT_LIMITS.acceptanceCriteria,
+            },
+          },
           status: { enum: TASK_STATUS },
           classificationSource: { enum: CLASSIFICATION_SOURCE },
         },
