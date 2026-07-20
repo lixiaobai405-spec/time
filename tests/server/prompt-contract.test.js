@@ -159,3 +159,18 @@ test('提示词用例文档分开自动化覆盖与人工模型评测', () => {
   assert.match(source, /人工\/模型评测/);
   assert.match(source, /模型名.*日期.*通过项.*失败样例/s);
 });
+
+test('人工业务回归文档记录评测元数据和五类语义问题', () => {
+  const source = readFileSync(path.join(__dirname, '..', 'prompt-cases.md'), 'utf8');
+  assert.match(source, /## 2026-07-20 人工业务回归/);
+  assert.match(source, /模型名.*评测日期.*参考时区.*通过项.*失败样例/s);
+  for (const finding of [
+    '当天截止紧急度',
+    '报告排序',
+    '禁止延后',
+    '任务粒度',
+    'SMART 验收条件',
+  ]) {
+    assert.match(source, new RegExp(finding));
+  }
+});
