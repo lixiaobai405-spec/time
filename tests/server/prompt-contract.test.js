@@ -175,6 +175,14 @@ test('人工业务回归文档记录评测元数据和五类语义问题', () =>
   }
 });
 
+test('人工业务回归文档记录十二任务的假模型端到端证据', () => {
+  const source = readFileSync(path.join(__dirname, '..', 'prompt-cases.md'), 'utf8');
+  assert.match(source, /12 条任务.*任务卡.*矩阵.*报告/s);
+  assert.match(source, /55\/25\/15\/5/);
+  assert.match(source, /UUID.*8 位前缀/s);
+  assert.match(source, /假模型/);
+});
+
 test('报告提示词声明确定性顺序和到期任务保护规则', () => {
   const source = readFileSync(
     path.join(__dirname, '..', '..', 'prompts', 'system.md'),

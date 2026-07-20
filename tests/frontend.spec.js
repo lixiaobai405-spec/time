@@ -1,4 +1,8 @@
 const { test, expect } = require('@playwright/test');
+const {
+  goals: MANUAL_GOALS,
+  expectedTasks: MANUAL_EXPECTED_TASKS,
+} = require('./fixtures/manual-test-2026-07-20');
 
 const MOCK_TASKS = [
   { id: 'task-1', name: '**校对今天的方案终稿**', importance: '低', urgency: '高', source: '今天', due: '今天 18:00', est: '约1h', status: 'pending', classificationSource: 'ai-extraction' },
@@ -8,6 +12,13 @@ const MOCK_TASKS = [
   { id: 'task-5', name: '搭建团队分层培养框架', importance: '高', urgency: '低', source: '中长期', due: 'Q3', est: '约4h', status: 'pending', classificationSource: 'ai-extraction' },
   { id: 'task-6', name: '回复非紧急群消息', importance: '低', urgency: '低', source: '临时', due: '待确认', est: '约0.5h', status: 'pending', classificationSource: 'ai-extraction' },
 ];
+
+const MANUAL_WORKFLOW_TASKS = MANUAL_EXPECTED_TASKS.map(task => ({
+  ...task,
+  urgency: task.due.startsWith('2026-07-20') ? '高' : task.urgency,
+  status: 'pending',
+  classificationSource: 'ai-extraction',
+}));
 
 function matrixPayload(tasks) {
   const classifications = tasks.map(item => ({
@@ -855,6 +866,122 @@ test('用户输入会真实贯穿任务、矩阵和报告', async ({ page }) => 
   expect(bodies).toHaveLength(4);
   expect(bodies[2].body.tasks[0].id).toBe('task-1');
   expect(bodies[3].body.matrix.quadrants[0].taskIds[0]).toBe('task-1');
+});
+
+test('2026-07-20 人工业务回归完整贯穿任务、矩阵和报告', async ({ page }) => {
+  expect(Object.keys(MANUAL_GOALS)).toEqual(['昨天', '今天', '明天', '后天']);
+  const seen = {};
+  const priorityIds = MANUAL_WORKFLOW_TASKS.slice(0, 5).map(task => task.id);
+  const report = {
+    order: [
+      { taskId: priorityIds[0], reason: '15:00 前完成补齐经营复盘原因分析' },
+      { taskId: priorityIds[1], reason: '16:00 前提交经营数据核对表' },
+      { taskId: priorityIds[2], reason: '17:00 前确认客户投诉处理方案' },
+      { taskId: priorityIds[3], reason: '18:00 前立即委派同事发送项目会议纪要' },
+      { taskId: priorityIds[4], reason: '明天 10:00 前更新下周排期' },
+    ],
+    energyRules: ['第一象限优先完成', '为第二象限保留整块时间'],
+    adjustments: ['今天完成三项第一象限工作，并立即授权发送项目会议纪要'],
+  };
+  await page.addInitScript(() => {
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText: async text => { window.__copiedText = text; } },
+    });
+  });
+  await page.route('**/api/time-management/**', async route => {
+    const requestPath = new URL(route.request().url()).pathname;
+    const body = route.request().postDataJSON();
+    seen[requestPath] = body;
+    let response;
+    if (requestPath.endsWith('/goals/check')) {
+      response = {
+        fields: ['昨天', '今天', '明天', '后天']
+          .map(key => ({ key, status: 'ok', issue: '', suggestion: '' })),
+        overall: 'pass',
+      };
+    } else if (requestPath.endsWith('/tasks/extract')) {
+      response = { tasks: MANUAL_WORKFLOW_TASKS };
+    } else if (requestPath.endsWith('/matrix/classify')) {
+      response = matrixPayload(body.tasks);
+      seen.matrixResponse = response;
+    } else {
+      response = report;
+    }
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify(response),
+    });
+  });
+
+  await page.goto('/');
+  await page.getByRole('button', { name: /开始梳理/ }).click();
+  for (const [selector, key] of [
+    ['#g-昨', '昨天'],
+    ['#g-今', '今天'],
+    ['#g-明', '明天'],
+    ['#g-后', '后天'],
+  ]) {
+    await page.locator(selector).fill(MANUAL_GOALS[key]);
+  }
+  await page.getByRole('button', { name: /AI 检查并补全/ }).click();
+  await page.getByRole('button', { name: /提取任务/ }).click();
+  await expect(page.locator('#tasklist .task')).toHaveCount(MANUAL_EXPECTED_TASKS.length);
+  const expectedIds = MANUAL_WORKFLOW_TASKS.map(task => task.id);
+  expect(await page.locator('#tasklist .task').evaluateAll(nodes => (
+    nodes.map(node => node.dataset.taskId)
+  ))).toEqual(expectedIds);
+
+  await page.getByRole('button', { name: /矩阵判定/ }).click();
+  await expect(page.locator('[data-quadrant="q1"]')).toContainText('补齐经营复盘原因分析');
+  await expect(page.locator('[data-quadrant="q1"]')).toContainText('提交经营数据核对表');
+  await expect(page.locator('[data-quadrant="q1"]')).toContainText('确认客户投诉处理方案');
+  await expect(page.locator('[data-quadrant="q3"]')).toContainText('发送项目会议纪要');
+  for (const [quadrant, percent] of [['q1', '55%'], ['q2', '25%'], ['q3', '15%'], ['q4', '5%']]) {
+    await expect(page.locator(`[data-quadrant="${quadrant}"] .energy`)).toHaveText(percent);
+  }
+  expect(seen['/api/time-management/tasks/extract'].goals).toEqual(MANUAL_GOALS);
+  expect(seen['/api/time-management/matrix/classify'].tasks.map(task => task.id))
+    .toEqual(expectedIds);
+  expect(seen.matrixResponse.quadrants.flatMap(quadrant => quadrant.taskIds).sort())
+    .toEqual([...expectedIds].sort());
+
+  await page.getByRole('button', { name: /生成报告/ }).click();
+  await expect(page.locator('.panel-h')).toHaveText('优先级报告');
+  const reportText = await page.locator('#report-markdown').innerText();
+  expect(reportText.indexOf('提交经营数据核对表'))
+    .toBeLessThan(reportText.indexOf('确认客户投诉处理方案'));
+  expect(reportText).toMatch(/授权|委派|交办/);
+  expect(reportText).not.toMatch(/推迟|延后|取消|暂缓|搁置/);
+  expect(seen['/api/time-management/report/generate'].tasks.map(task => task.id))
+    .toEqual(expectedIds);
+  expect(report.order.map(item => item.taskId)).toEqual(priorityIds);
+  for (const id of expectedIds) {
+    expect(reportText).not.toContain(id);
+    expect(reportText.toLowerCase()).not.toContain(id.slice(0, 8).toLowerCase());
+  }
+
+  await page.getByRole('button', { name: /复制报告/ }).click();
+  await expect.poll(() => page.evaluate(() => window.__copiedText || ''))
+    .not.toBe('');
+  const copiedText = await page.evaluate(() => window.__copiedText);
+  for (const id of expectedIds) {
+    expect(copiedText).not.toContain(id);
+    expect(copiedText.toLowerCase()).not.toContain(id.slice(0, 8).toLowerCase());
+  }
+});
+
+test('人工业务回归固定比例在空第三象限时仍正常渲染', async ({ page }) => {
+  const tasks = MANUAL_WORKFLOW_TASKS.map(task => (
+    task.urgency === '高' && task.importance !== '高'
+      ? { ...task, importance: '高' }
+      : task
+  ));
+  await advanceToMatrix(page, { extractTasks: tasks });
+  await expect(page.locator('[data-quadrant="q3"]')).toBeVisible();
+  await expect(page.locator('[data-quadrant="q3"] .energy')).toHaveText('15%');
+  await expect(page.locator('[data-quadrant="q3"] .qtask')).toHaveCount(0);
 });
 
 test('窄屏异步步骤完成后新页面标题回到可视区', async ({ page }) => {

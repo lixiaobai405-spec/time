@@ -455,13 +455,13 @@ git commit -m "fix: prevent task IDs from leaking into reports"
 
 ### 步骤
 
-- [ ] 使用 Task 1 的 fixture 增加完整假模型 E2E：目标检查通过 → 提取 12 条任务 → 矩阵 → 报告。
-- [ ] 断言四个人工测试关键任务归类正确：重要且当天到期进入第一象限，不重要且当天到期进入第三象限。
-- [ ] 断言报告中 16:00 在 17:00 之前，第三象限建议包含授权语义，当天任务没有延后/取消建议。
-- [ ] 断言 12 个服务端稳定 ID 在任务卡 `data-task-id`、矩阵 `taskIds` 和报告 `order.taskId` 中一致；同时断言报告正文和复制内容不显示 UUID 或其 8 位前缀。
-- [ ] 断言精力比例仍为 55/25/15/5，空第三象限仍可正常渲染。
-- [ ] 先让至少一个断言因未接入新 fixture 而失败，再完成最小测试路由与 fixture 接入。
-- [ ] 运行：
+- [x] 使用 Task 1 的 fixture 增加完整假模型 E2E：目标检查通过 → 提取 12 条任务 → 矩阵 → 报告。
+- [x] 断言四个人工测试关键任务归类正确：重要且当天到期进入第一象限，不重要且当天到期进入第三象限。
+- [x] 断言报告中 16:00 在 17:00 之前，第三象限建议包含授权语义，当天任务没有延后/取消建议。
+- [x] 断言 12 个服务端稳定 ID 在任务卡 `data-task-id`、矩阵 `taskIds` 和报告 `order.taskId` 中一致；同时断言报告正文和复制内容不显示 UUID 或其 8 位前缀。
+- [x] 断言精力比例仍为 55/25/15/5，空第三象限仍可正常渲染。
+- [x] 先让至少一个断言因未接入新 fixture 而失败，再完成最小测试路由与 fixture 接入。
+- [x] 运行：
 
 ```powershell
 npx playwright test tests/frontend.spec.js --grep "人工业务回归"
@@ -470,7 +470,7 @@ node --test tests/server/prompt-contract.test.js
 
 预期：全部通过，且没有真实网络模型调用。
 
-- [ ] 勾选 Task 10 并提交：
+- [x] 勾选 Task 10 并提交：
 
 ```powershell
 git add tests/frontend.spec.js tests/server/prompt-contract.test.js tests/prompt-cases.md docs/agent-plans/2026-07-20-manual-test-findings-remediation-plan.md
