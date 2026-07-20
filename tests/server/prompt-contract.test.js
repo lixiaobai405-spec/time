@@ -183,6 +183,20 @@ test('人工业务回归文档记录十二任务的假模型端到端证据', ()
   assert.match(source, /假模型/);
 });
 
+test('人工复测说明包含完整步骤、观察点和付费 API 边界', () => {
+  const source = readFileSync(path.join(__dirname, '..', 'prompt-cases.md'), 'utf8');
+  assert.match(source, /### 人工复测步骤/);
+  assert.match(source, /参考时区.*Asia\/Shanghai/s);
+  assert.match(source, /当天截止.*urgency="高"/s);
+  assert.match(source, /完成标准.*acceptanceCriteria/s);
+  assert.match(source, /下一步.*nextAction/s);
+  assert.match(source, /期望观察点.*16:00.*17:00.*授权/s);
+  assert.match(
+    source,
+    /不自动调用.*付费 API.*(?:用户自行决定.*真实模型|真实模型.*用户自行决定)/s,
+  );
+});
+
 test('报告提示词声明确定性顺序和到期任务保护规则', () => {
   const source = readFileSync(
     path.join(__dirname, '..', '..', 'prompts', 'system.md'),

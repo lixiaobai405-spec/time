@@ -489,27 +489,27 @@ git commit -m "test: cover deadline-aware workflow end to end"
 
 ### 步骤
 
-- [ ] 运行全部服务端测试：
+- [x] 运行全部服务端测试：
 
 ```powershell
 npm run test:server
 ```
 
-- [ ] 运行全部 Playwright 测试：
+- [x] 运行全部 Playwright 测试：
 
 ```powershell
 npm run test:e2e
 ```
 
-- [ ] 不修改当前已有用户改动的 `README.md`；在 `tests/prompt-cases.md` 写明参考时区、当天截止纠偏、完成标准、下一步字段、人工复测步骤和期望观察点。
-- [ ] 不自动调用付费 API。人工复测由用户自行决定是否使用真实模型。
-- [ ] 重跑文档契约测试：
+- [x] 不修改当前已有用户改动的 `README.md`；在 `tests/prompt-cases.md` 写明参考时区、当天截止纠偏、完成标准、下一步字段、人工复测步骤和期望观察点。
+- [x] 不自动调用付费 API。人工复测由用户自行决定是否使用真实模型。
+- [x] 重跑文档契约测试：
 
 ```powershell
 node --test tests/server/delivery-docs.test.js tests/server/prompt-contract.test.js
 ```
 
-- [ ] 勾选 Task 11 并提交：
+- [x] 勾选 Task 11 并提交：
 
 ```powershell
 git add tests/prompt-cases.md docs/agent-plans/2026-07-20-manual-test-findings-remediation-plan.md
