@@ -124,16 +124,16 @@ git commit -m "test: capture manual time management regressions"
 
 ### 步骤
 
-- [ ] 先写失败单元测试，至少覆盖：当天有时间、当天仅日期、已逾期、未来日期、“待确认”、不可解析期限、时区跨日和输入对象不被修改。
-- [ ] 运行并确认因模块不存在或行为未实现而失败：
+- [x] 先写失败单元测试，至少覆盖：当天有时间、当天仅日期、已逾期、未来日期、“待确认”、不可解析期限、时区跨日和输入对象不被修改。
+- [x] 运行并确认因模块不存在或行为未实现而失败：
 
 ```powershell
 node --test tests/server/deadline-policy.test.js
 ```
 
-- [ ] 最小实现 `referenceDateInTimeZone(now, timeZone)`、`parseExplicitDue(due)` 和 `applyDeadlineUrgency(task, context)`；不引入新依赖。
-- [ ] 重跑该测试，预期全部通过。
-- [ ] 勾选 Task 2 并提交：
+- [x] 最小实现 `referenceDateInTimeZone(now, timeZone)`、`parseExplicitDue(due)` 和 `applyDeadlineUrgency(task, context)`；不引入新依赖。
+- [x] 重跑该测试，预期全部通过。
+- [x] 勾选 Task 2 并提交：
 
 ```powershell
 git add server/policies/deadline.js tests/server/deadline-policy.test.js docs/agent-plans/2026-07-20-manual-test-findings-remediation-plan.md
