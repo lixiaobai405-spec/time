@@ -25,7 +25,7 @@ function writeLog(logger, entry) {
   else if (logger && typeof logger.info === 'function') logger.info(entry);
 }
 
-function createApp({ modelClient, logger } = {}) {
+function createApp({ modelClient, logger, now = Date.now } = {}) {
   const app = express();
   app.disable('x-powered-by');
   app.locals.modelClient = modelClient;
@@ -73,6 +73,7 @@ function createApp({ modelClient, logger } = {}) {
         goals: request.body?.goals,
         modelClient,
         requestBody: request.body,
+        now,
       }));
     } catch (error) {
       next(error);

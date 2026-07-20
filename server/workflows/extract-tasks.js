@@ -9,6 +9,7 @@ const {
   URGENCY,
   normalizeTask,
 } = require('../contracts/time-management');
+const { applyDeadlineUrgency } = require('../policies/deadline');
 const { loadStepPrompt } = require('../prompts/load-step-prompt');
 
 const ajv = new Ajv({ allErrors: true, strict: true });
@@ -102,7 +103,7 @@ function normalizeModelError(error) {
   return error;
 }
 
-async function extractTasks({ goals, modelClient, requestBody }) {
+async function extractTasks({ goals, modelClient, requestBody, now }) {
   const input = requestBody || { goals };
   if (!validateRequest(input)) {
     throw publicError('INPUT_INVALID', '输入内容不符合要求。', 400);
@@ -121,10 +122,14 @@ async function extractTasks({ goals, modelClient, requestBody }) {
       const output = await modelClient.completeJson(request);
       if (!validateResponse(output)) throw outputError();
       assertTaskSemantics(output, validatedGoals);
+      const tasks = output.tasks.map(task => normalizeTask({
+        ...task,
+        classificationSource: 'ai-extraction',
+      }));
       return {
-        tasks: output.tasks.map(task => normalizeTask({
-          ...task,
-          classificationSource: 'ai-extraction',
+        tasks: tasks.map(task => applyDeadlineUrgency(task, {
+          now: now || Date.now,
+          timeZone: 'Asia/Shanghai',
         })),
       };
     } catch (error) {

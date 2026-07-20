@@ -154,19 +154,19 @@ git commit -m "feat: normalize urgency for due tasks"
 
 ### 步骤
 
-- [ ] 先增加失败测试：固定 `now()` 为 `2026-07-20T04:00:00.000Z`，断言 `2026-07-20 17:00` 被归一化为“高”，未来日期和“待确认”不变。
-- [ ] 增加 API 级失败测试，确认 `createApp({ now })` 会把服务端时钟传给提取 workflow；请求体不得新增 `referenceDate`。
-- [ ] 增加矩阵回归测试：纠偏后的“高”可以进入第一/第三象限，但矩阵仍拒绝修改任何已有非空标签。
-- [ ] 运行并确认新增测试失败：
+- [x] 先增加失败测试：固定 `now()` 为 `2026-07-20T04:00:00.000Z`，断言 `2026-07-20 17:00` 被归一化为“高”，未来日期和“待确认”不变。
+- [x] 增加 API 级失败测试，确认 `createApp({ now })` 会把服务端时钟传给提取 workflow；请求体不得新增 `referenceDate`。
+- [x] 增加矩阵回归测试：纠偏后的“高”可以进入第一/第三象限，但矩阵仍拒绝修改任何已有非空标签。
+- [x] 运行并确认新增测试失败：
 
 ```powershell
 node --test tests/server/extract-tasks.test.js tests/server/classify-matrix.test.js
 ```
 
-- [ ] 在 `extractTasks` 完成 schema 和语义校验、生成稳定 ID 后应用 `applyDeadlineUrgency`。
-- [ ] 给 `createApp` 增加仅供依赖注入的 `now` 选项，默认值仍为服务端真实当前时间；不要把参考日期暴露为客户端参数。
-- [ ] 重跑上述测试，预期全部通过。
-- [ ] 勾选 Task 3 并提交：
+- [x] 在 `extractTasks` 完成 schema 和语义校验、生成稳定 ID 后应用 `applyDeadlineUrgency`。
+- [x] 给 `createApp` 增加仅供依赖注入的 `now` 选项，默认值仍为服务端真实当前时间；不要把参考日期暴露为客户端参数。
+- [x] 重跑上述测试，预期全部通过。
+- [x] 勾选 Task 3 并提交：
 
 ```powershell
 git add server/workflows/extract-tasks.js server/app.js tests/server/extract-tasks.test.js tests/server/classify-matrix.test.js docs/agent-plans/2026-07-20-manual-test-findings-remediation-plan.md

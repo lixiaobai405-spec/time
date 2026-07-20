@@ -174,6 +174,27 @@ test('模型修改已有人工或提取标签时拒绝结果', async () => {
   assert.equal(modelClient.calls.length, 2);
 });
 
+test('日期纠偏后的高紧急度进入第一或第三象限且标签保持不变', async () => {
+  const tasks = [
+    task({ id: 'important-due', importance: '高', urgency: '高' }),
+    task({ id: 'delegated-due', importance: '低', urgency: '高' }),
+  ];
+  const result = await classifyMatrix({
+    tasks,
+    modelClient: queuedModel([{
+      classifications: tasks.map(item => classification(item)),
+      note: '',
+    }]),
+  });
+
+  assert.deepEqual(result.quadrants[0].taskIds, ['important-due']);
+  assert.deepEqual(result.quadrants[2].taskIds, ['delegated-due']);
+  assert.deepEqual(
+    result.classifications.map(item => [item.importance, item.urgency]),
+    [['高', '高'], ['低', '高']],
+  );
+});
+
 test('未标注任务在模型返回后仍缺等级时拒绝结果', async () => {
   const tasks = [task({
     importance: null,

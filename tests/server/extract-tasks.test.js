@@ -109,6 +109,20 @@ test('模型缺少截止时间时标准化为待确认', async () => {
   assert.match(result.tasks[0].id, /^[0-9a-f-]{36}$/i);
 });
 
+test('任务提取后按服务端日期纠偏当天紧急度且不猜测其他期限', async () => {
+  const result = await extractTasks({
+    goals: goals({ 今天: '处理当天、未来和待确认事项' }),
+    now: () => new Date('2026-07-20T04:00:00.000Z'),
+    modelClient: queuedModel([{ tasks: [
+      modelTask({ name: '当天事项', due: '2026-07-20 17:00', urgency: '中' }),
+      modelTask({ name: '未来事项', due: '2026-07-21 09:00', urgency: '低' }),
+      modelTask({ name: '待确认事项', due: '待确认', urgency: '中' }),
+    ] }]),
+  });
+
+  assert.deepEqual(result.tasks.map(item => item.urgency), ['高', '低', '中']);
+});
+
 test('超过 100 条任务时重试一次后拒绝', async () => {
   const invalid = { tasks: Array.from({ length: 101 }, (_, index) => (
     modelTask({ name: `任务${index}` })
@@ -172,6 +186,44 @@ test('POST /api/time-management/tasks/extract 返回标准任务', async () => {
     assert.equal(response.status, 200);
     assert.equal(payload.tasks[0].name, '提交方案');
     assert.equal(payload.tasks[0].classificationSource, 'ai-extraction');
+  } finally {
+    await close(server);
+  }
+});
+
+test('提取 API 使用注入的服务端时钟且拒绝客户端 referenceDate', async () => {
+  const { createApp } = require('../../server/app');
+  const modelClient = queuedModel([{ tasks: [modelTask({
+    due: '2026-07-20 17:00',
+    urgency: '中',
+  })] }]);
+  const app = createApp({
+    modelClient,
+    now: () => new Date('2026-07-20T04:00:00.000Z'),
+  });
+  const server = await listen(app);
+
+  try {
+    const endpoint = `http://127.0.0.1:${server.address().port}/api/time-management/tasks/extract`;
+    const accepted = await fetch(endpoint, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ goals: goals({ 今天: '提交方案' }) }),
+    });
+    assert.equal(accepted.status, 200);
+    assert.equal((await accepted.json()).tasks[0].urgency, '高');
+
+    const rejected = await fetch(endpoint, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        goals: goals({ 今天: '提交方案' }),
+        referenceDate: '2099-01-01',
+      }),
+    });
+    assert.equal(rejected.status, 400);
+    assert.equal((await rejected.json()).error.code, 'INPUT_INVALID');
+    assert.equal(modelClient.calls.length, 1);
   } finally {
     await close(server);
   }
