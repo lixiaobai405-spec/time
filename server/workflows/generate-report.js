@@ -10,6 +10,7 @@ const {
   TEXT_LIMITS,
   URGENCY,
 } = require('../contracts/time-management');
+const { buildReportPriorityContext } = require('../policies/report-priority');
 const { loadStepPrompt } = require('../prompts/load-step-prompt');
 
 const ajv = new Ajv({ allErrors: true, strict: true });
@@ -148,7 +149,41 @@ function hasLongTermMeasure(adjustments) {
   return /\d|(?:每[日周月季年])|截止|之前|前完成|指标|里程碑|节点|数量|比例/.test(content);
 }
 
-function assertReportSemantics(report, tasks, goals) {
+const PROHIBITED_DELAY = /推迟|延后|取消|暂缓|搁置/;
+const DELEGATION_ACTION = /授权|委派|交办/;
+const EXPLICIT_SCHEDULE = /(?:[01]?\d|2[0-3]):[0-5]\d|立即授权/;
+
+function visibleTextForTask(report, task) {
+  const orderReason = report.order.find(item => item.taskId === task.id)?.reason;
+  return [
+    orderReason,
+    ...report.energyRules.filter(text => text.includes(task.name)),
+    ...report.adjustments.filter(text => text.includes(task.name)),
+  ].filter(Boolean);
+}
+
+function assertProtectedGuidance(report, tasks, priorityContext) {
+  const taskById = new Map(tasks.map(task => [task.id, task]));
+  for (const taskId of priorityContext.protectedTaskIds) {
+    const task = taskById.get(taskId);
+    const related = visibleTextForTask(report, task);
+    if (related.some(text => PROHIBITED_DELAY.test(text))) throw outputError();
+    if (priorityContext.actionByTaskId[taskId] === '立即授权'
+        && !related.some(text => DELEGATION_ACTION.test(text))) {
+      throw outputError();
+    }
+  }
+
+  for (const taskId of priorityContext.remainingProtectedTaskIds) {
+    const task = taskById.get(taskId);
+    const scheduled = report.adjustments.some(text => (
+      text.includes(task.name) && EXPLICIT_SCHEDULE.test(text)
+    ));
+    if (!scheduled) throw outputError();
+  }
+}
+
+function assertReportSemantics(report, tasks, goals, priorityContext) {
   const taskIds = new Set(tasks.map(task => task.id));
   const orderIds = report.order.map(item => item.taskId);
   if (new Set(orderIds).size !== orderIds.length
@@ -156,15 +191,17 @@ function assertReportSemantics(report, tasks, goals) {
     throw outputError();
   }
 
-  if ((tasks.length >= 3 && report.order.length < 3)
-      || report.order.length > tasks.length
-      || (tasks.length > 0 && report.order.length === 0)) {
+  if (orderIds.length !== priorityContext.recommendedTaskIds.length
+      || orderIds.some((taskId, index) => (
+        taskId !== priorityContext.recommendedTaskIds[index]
+      ))) {
     throw outputError();
   }
 
   if (goals.后天.trim() && !hasLongTermMeasure(report.adjustments)) {
     throw outputError();
   }
+  assertProtectedGuidance(report, tasks, priorityContext);
 }
 
 function normalizeModelError(error) {
@@ -178,14 +215,20 @@ function normalizeModelError(error) {
   return error;
 }
 
-async function generateReport({ tasks, matrix, goals, modelClient, requestBody }) {
+async function generateReport({ tasks, matrix, goals, modelClient, requestBody, now }) {
   const input = requestBody || { tasks, matrix, goals };
   if (!validateRequest(input)) throw inputError();
   assertInputSemantics(input.tasks, input.matrix);
+  const priorityContext = buildReportPriorityContext({
+    tasks: input.tasks,
+    matrix: input.matrix,
+    now: now || Date.now,
+    timeZone: 'Asia/Shanghai',
+  });
 
   const request = {
     system: loadStepPrompt('generate-report'),
-    user: JSON.stringify(input),
+    user: JSON.stringify({ ...input, priorityContext }),
     temperature: 0.5,
     maxAttempts: 1,
   };
@@ -194,7 +237,7 @@ async function generateReport({ tasks, matrix, goals, modelClient, requestBody }
     try {
       const report = await modelClient.completeJson(request);
       if (!validateResponse(report)) throw outputError();
-      assertReportSemantics(report, input.tasks, input.goals);
+      assertReportSemantics(report, input.tasks, input.goals, priorityContext);
       return report;
     } catch (error) {
       const normalized = normalizeModelError(error);

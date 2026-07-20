@@ -174,3 +174,15 @@ test('人工业务回归文档记录评测元数据和五类语义问题', () =>
     assert.match(source, new RegExp(finding));
   }
 });
+
+test('报告提示词声明确定性顺序和到期任务保护规则', () => {
+  const source = readFileSync(
+    path.join(__dirname, '..', '..', 'prompts', 'system.md'),
+    'utf8',
+  );
+  assert.match(source, /recommendedTaskIds.*完全同序/s);
+  assert.match(source, /protectedTaskIds.*推迟.*延后.*取消.*暂缓.*搁置/s);
+  assert.match(source, /remainingProtectedTaskIds/);
+  assert.match(source, /第三象限.*授权.*委派.*交办/s);
+  assert.match(source, /第四象限.*无明确期限.*推迟.*取消/s);
+});

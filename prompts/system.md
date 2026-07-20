@@ -126,9 +126,17 @@
 
 【约束】order 中的 taskId 只能来自当前任务列表且不可重复;不得引用已删除任务或新增任务;语言简洁、给可执行动作,不空泛。字符串可以使用有限 Markdown,不得输出 HTML。
 
+【服务端优先级上下文】
+1. `order[].taskId` 必须与 `priorityContext.recommendedTaskIds` 完全同序,不得自行重排、遗漏或增加。
+2. `priorityContext.protectedTaskIds` 是当天或已逾期任务;针对这些任务的原因或建议不得出现“推迟、延后、取消、暂缓、搁置”。提及具体任务时使用完整任务名。
+3. `priorityContext.remainingProtectedTaskIds` 中每条任务都必须在 adjustments 使用完整任务名给出当天明确时间安排或“立即授权”,不得静默遗漏。
+4. 第三象限的当天任务必须给出立即授权语义,使用“授权、委派、交办”之一。
+5. 第四象限无明确期限任务仍可建议减少、推迟或取消;不得把保护规则扩展为全局关键词禁令。
+
 【输入】
 当前任务:{{tasks_json}}
 四象限:{{quadrants_json}}
+优先级上下文:{{priority_context_json}}
 昨天复盘:{{昨天}}
 中长期目标:{{后天}}
 

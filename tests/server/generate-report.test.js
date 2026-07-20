@@ -59,7 +59,17 @@ test('报告只引用当前任务并保留三段结构', async () => {
   assert.equal(modelClient.calls.length, 1);
   assert.equal(modelClient.calls[0].maxAttempts, 1);
   assert.match(modelClient.calls[0].system, /时间管理报告生成模块/);
-  assert.deepEqual(JSON.parse(modelClient.calls[0].user), { tasks, matrix, goals });
+  assert.deepEqual(JSON.parse(modelClient.calls[0].user), {
+    tasks,
+    matrix,
+    goals,
+    priorityContext: {
+      recommendedTaskIds: ['task-a'],
+      protectedTaskIds: [],
+      remainingProtectedTaskIds: [],
+      actionByTaskId: { 'task-a': '立即处理' },
+    },
+  });
 });
 
 test('任务不少于 3 条时 order 长度必须为 3–5', async () => {
@@ -149,6 +159,115 @@ test('单任务不能虚构第二个任务', async () => {
     }),
     error => error.code === 'MODEL_OUTPUT_INVALID',
   );
+  assert.equal(modelClient.calls.length, 2);
+});
+
+test('报告顺序与服务端候选顺序不一致时重试一次', async () => {
+  const tasks = [
+    task('later', { due: '2026-07-20 17:00' }),
+    task('earlier', { due: '2026-07-20 16:00' }),
+  ];
+  const invalid = reportFor(tasks);
+  const valid = reportFor(tasks, {
+    order: [
+      { taskId: 'earlier', reason: '16:00 截止，先完成' },
+      { taskId: 'later', reason: '17:00 截止，随后完成' },
+    ],
+  });
+  const modelClient = queuedModel([invalid, valid]);
+
+  const result = await generateReport({
+    tasks,
+    matrix: matrixFor(tasks),
+    goals: { 昨天: '', 后天: '' },
+    modelClient,
+    now: () => new Date('2026-07-20T04:00:00.000Z'),
+  });
+
+  assert.deepEqual(result.order.map(item => item.taskId), ['earlier', 'later']);
+  assert.equal(modelClient.calls.length, 2);
+});
+
+test('当天到期任务被建议延后时拒绝并重试', async () => {
+  const tasks = [task('due-today', {
+    name: '发送项目会议纪要',
+    due: '2026-07-20 18:00',
+  })];
+  const invalid = reportFor(tasks, {
+    order: [{ taskId: 'due-today', reason: '建议延后发送项目会议纪要' }],
+  });
+  const valid = reportFor(tasks, {
+    order: [{ taskId: 'due-today', reason: '18:00 前完成发送项目会议纪要' }],
+  });
+  const modelClient = queuedModel([invalid, valid]);
+
+  const result = await generateReport({
+    tasks,
+    matrix: matrixFor(tasks),
+    goals: { 昨天: '', 后天: '' },
+    modelClient,
+    now: () => new Date('2026-07-20T04:00:00.000Z'),
+  });
+
+  assert.match(result.order[0].reason, /18:00/);
+  assert.equal(modelClient.calls.length, 2);
+});
+
+test('无明确期限的第四象限任务仍可建议推迟或取消', async () => {
+  const tasks = [task('optional', { name: '整理旧标签', due: '待确认' })];
+  const expected = reportFor(tasks, {
+    order: [{ taskId: 'optional', reason: '可推迟或取消整理旧标签' }],
+  });
+  const result = await generateReport({
+    tasks,
+    matrix: { quadrants: [{ name: '第四象限', taskIds: ['optional'] }] },
+    goals: { 昨天: '', 后天: '' },
+    modelClient: queuedModel([expected]),
+    now: () => new Date('2026-07-20T04:00:00.000Z'),
+  });
+  assert.equal(result.order[0].reason, '可推迟或取消整理旧标签');
+});
+
+test('当天第三象限任务缺少授权语义时重试', async () => {
+  const tasks = [task('delegate', {
+    name: '发送项目会议纪要',
+    due: '2026-07-20 18:00',
+  })];
+  const invalid = reportFor(tasks, {
+    order: [{ taskId: 'delegate', reason: '今天尽快处理发送项目会议纪要' }],
+  });
+  const valid = reportFor(tasks, {
+    order: [{ taskId: 'delegate', reason: '立即委派他人发送项目会议纪要' }],
+  });
+  const modelClient = queuedModel([invalid, valid]);
+  const result = await generateReport({
+    tasks,
+    matrix: { quadrants: [{ name: '第三象限', taskIds: ['delegate'] }] },
+    goals: { 昨天: '', 后天: '' },
+    modelClient,
+    now: () => new Date('2026-07-20T04:00:00.000Z'),
+  });
+  assert.match(result.order[0].reason, /委派/);
+  assert.equal(modelClient.calls.length, 2);
+});
+
+test('超过五条当天任务时调整建议必须覆盖剩余任务', async () => {
+  const tasks = Array.from({ length: 6 }, (_, index) => task(`due-${index + 1}`, {
+    due: `2026-07-20 ${String(13 + index).padStart(2, '0')}:00`,
+  }));
+  const invalid = reportFor(tasks);
+  const valid = reportFor(tasks, {
+    adjustments: ['任务 due-6 安排在 18:30 完成'],
+  });
+  const modelClient = queuedModel([invalid, valid]);
+  const result = await generateReport({
+    tasks,
+    matrix: matrixFor(tasks),
+    goals: { 昨天: '', 后天: '' },
+    modelClient,
+    now: () => new Date('2026-07-20T04:00:00.000Z'),
+  });
+  assert.match(result.adjustments[0], /任务 due-6.*18:30/);
   assert.equal(modelClient.calls.length, 2);
 });
 

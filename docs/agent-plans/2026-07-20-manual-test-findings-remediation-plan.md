@@ -237,21 +237,21 @@ git commit -m "feat: compute deterministic report priority"
 
 ### 步骤
 
-- [ ] 先写失败测试：模型第一次返回 17:00 在 16:00 之前，第二次返回正确顺序，断言发生一次重试。
-- [ ] 写失败测试：模型建议延后当天任务时被拒绝；建议延后无期限第四象限任务时被接受。
-- [ ] 写失败测试：当天第三象限没有授权语义时重试；超过五条当天任务时，剩余任务必须出现在调整建议中。
-- [ ] 更新 prompt 契约测试，要求系统提示明确包含上述顺序和保护规则。
-- [ ] 运行并确认新增测试失败：
+- [x] 先写失败测试：模型第一次返回 17:00 在 16:00 之前，第二次返回正确顺序，断言发生一次重试。
+- [x] 写失败测试：模型建议延后当天任务时被拒绝；建议延后无期限第四象限任务时被接受。
+- [x] 写失败测试：当天第三象限没有授权语义时重试；超过五条当天任务时，剩余任务必须出现在调整建议中。
+- [x] 更新 prompt 契约测试，要求系统提示明确包含上述顺序和保护规则。
+- [x] 运行并确认新增测试失败：
 
 ```powershell
 node --test tests/server/generate-report.test.js tests/server/prompt-contract.test.js
 ```
 
-- [ ] 在 `generateReport` 内部构造 `priorityContext` 并随模型 user JSON 传入；外部 HTTP 请求和最终响应三段结构保持不变。
-- [ ] 实现精确任务名范围内的禁用动作校验，不使用会误伤第四象限的全局关键词检查。
-- [ ] 把 `now` 从 `createApp` 传入 `generateReport`，生产默认值不变。
-- [ ] 重跑上述测试，预期全部通过。
-- [ ] 勾选 Task 5 并提交：
+- [x] 在 `generateReport` 内部构造 `priorityContext` 并随模型 user JSON 传入；外部 HTTP 请求和最终响应三段结构保持不变。
+- [x] 实现精确任务名范围内的禁用动作校验，不使用会误伤第四象限的全局关键词检查。
+- [x] 把 `now` 从 `createApp` 传入 `generateReport`，生产默认值不变。
+- [x] 重跑上述测试，预期全部通过。
+- [x] 勾选 Task 5 并提交：
 
 ```powershell
 git add server/workflows/generate-report.js server/app.js prompts/system.md tests/server/generate-report.test.js tests/server/prompt-contract.test.js docs/agent-plans/2026-07-20-manual-test-findings-remediation-plan.md

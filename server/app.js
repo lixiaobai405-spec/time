@@ -98,6 +98,7 @@ function createApp({ modelClient, logger, now = Date.now } = {}) {
         goals: request.body?.goals,
         modelClient,
         requestBody: request.body,
+        now,
       }));
     } catch (error) {
       next(error);
