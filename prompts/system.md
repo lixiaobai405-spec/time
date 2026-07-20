@@ -129,6 +129,7 @@
 3. adjustments:结合复盘与目标需要做的调整(2–3 条);可呼应步骤 1 的复盘四步与 SMART——如复盘暴露的短板对应改进项、中长期目标按 SMART 拆里程碑。
 
 【约束】order 中的 taskId 只能来自当前任务列表且不可重复;不得引用已删除任务或新增任务;语言简洁、给可执行动作,不空泛。字符串可以使用有限 Markdown,不得输出 HTML。
+`taskId` 只写入结构化 `taskId` 字段。任何用户可见字符串不得复述完整任务 ID 或其 UUID 前缀;原因和建议提及任务时必须使用完整任务名称,不得附带 ID、UUID 或缩写。
 
 【服务端优先级上下文】
 1. `order[].taskId` 必须与 `priorityContext.recommendedTaskIds` 完全同序,不得自行重排、遗漏或增加。

@@ -162,6 +162,19 @@ function hasLongTermMeasure(adjustments) {
 const PROHIBITED_DELAY = /推迟|延后|取消|暂缓|搁置/;
 const DELEGATION_ACTION = /授权|委派|交办/;
 const EXPLICIT_SCHEDULE = /(?:[01]?\d|2[0-3]):[0-5]\d|立即授权/;
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+function containsTaskIdLeak(text, tasks) {
+  if (typeof text !== 'string') return false;
+  for (const task of tasks) {
+    if (text.includes(task.id)) return true;
+    if (UUID.test(task.id)
+        && text.toLowerCase().includes(task.id.slice(0, 8).toLowerCase())) {
+      return true;
+    }
+  }
+  return false;
+}
 
 function visibleTextForTask(report, task) {
   const orderReason = report.order.find(item => item.taskId === task.id)?.reason;
@@ -207,6 +220,13 @@ function assertReportSemantics(report, tasks, goals, priorityContext) {
       ))) {
     throw outputError();
   }
+
+  const visibleText = [
+    ...report.order.map(item => item.reason),
+    ...report.energyRules,
+    ...report.adjustments,
+  ];
+  if (visibleText.some(text => containsTaskIdLeak(text, tasks))) throw outputError();
 
   if (goals.后天.trim() && !hasLongTermMeasure(report.adjustments)) {
     throw outputError();
@@ -258,4 +278,4 @@ async function generateReport({ tasks, matrix, goals, modelClient, requestBody, 
   throw outputError();
 }
 
-module.exports = { generateReport };
+module.exports = { containsTaskIdLeak, generateReport };

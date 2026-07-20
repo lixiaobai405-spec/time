@@ -455,7 +455,7 @@ function hydrateMatrix() {
 function reportMarkdown() {
   if (!state.report) return '';
   const taskById = new Map(state.tasks.map(task => [task.id, task]));
-  const order = state.report.order.map(item => `- ${taskById.get(item.taskId)?.name || item.taskId} — ${item.reason}`);
+  const order = state.report.order.map(item => `- ${taskById.get(item.taskId).name} — ${item.reason}`);
   const energy = state.report.energyRules.map(item => `- ${item}`);
   const adjustments = state.report.adjustments.map(item => `- ${item}`);
   return [`## 今日优先处理顺序`, '', ...order, '', '## 精力分配原则', '', ...energy, '', '## 需结合复盘与目标的调整', '', ...adjustments].join('\n');

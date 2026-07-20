@@ -504,6 +504,33 @@ test('复制报告会把当前报告正文写入剪贴板', async ({ page }) => 
     .toContain('精力分配原则');
 });
 
+test('内部任务 ID 只用于结构化关联且不会进入报告页面或复制内容', async ({ page }) => {
+  const id = '9a38e8c3-1111-4111-8111-111111111111';
+  await page.addInitScript(() => {
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: {
+        writeText: async (text) => { window.__copiedText = text; },
+      },
+    });
+  });
+  await advanceToMatrix(page, {
+    extractTasks: [{
+      ...MOCK_TASKS[0],
+      id,
+      name: '完成客户方案',
+    }],
+  });
+  await page.getByRole('button', { name: /生成报告/ }).click();
+  await expect(page.locator('.panel-h')).toHaveText('优先级报告');
+  await expect(page.locator('#report-markdown')).not.toContainText(id);
+  await expect(page.locator('#report-markdown')).not.toContainText(id.slice(0, 8));
+
+  await page.getByRole('button', { name: /复制报告/ }).click();
+  await expect.poll(() => page.evaluate(() => window.__copiedText || '')).not.toContain(id);
+  await expect.poll(() => page.evaluate(() => window.__copiedText || '')).not.toContain(id.slice(0, 8));
+});
+
 test('目标修改后必须重新检查才能提取任务', async ({ page }) => {
   await page.route('**/api/time-management/goals/check', route => route.fulfill({
     status: 200,
@@ -741,6 +768,7 @@ test('报告引用已删除 taskId 时不显示混合旧数据', async ({ page }
 
   await expect(page.locator('.panel-h')).toHaveText('矩阵判定');
   await expect(page.locator('#toast')).toContainText('重新生成报告');
+  await expect(page.locator('#toast')).not.toContainText('deleted-task');
   await expect(page.locator('#report-markdown')).toHaveCount(0);
 });
 

@@ -244,6 +244,87 @@ test('报告入口接受任务验收标准并保持外部响应结构', async ()
   assert.deepEqual(result, expected);
 });
 
+test('当前任务 UUID 前缀泄漏时重试并返回纯业务文字', async () => {
+  const id = '9a38e8c3-1111-4111-8111-111111111111';
+  const tasks = [task(id, { name: '完成客户方案' })];
+  const invalid = reportFor(tasks, { energyRules: [`优先处理 ${id.slice(0, 8)}`] });
+  const valid = reportFor(tasks, { energyRules: ['优先处理第一象限任务'] });
+  const modelClient = queuedModel([invalid, valid]);
+  const result = await generateReport({
+    tasks,
+    matrix: matrixFor(tasks),
+    goals: { 昨天: '', 后天: '' },
+    modelClient,
+  });
+  assert.equal(modelClient.calls.length, 2);
+  const visibleText = [
+    ...result.order.map(item => item.reason),
+    ...result.energyRules,
+    ...result.adjustments,
+  ].join('\n');
+  assert.doesNotMatch(visibleText, new RegExp(id.slice(0, 8), 'i'));
+});
+
+test('完整 UUID 和九位以上前缀在全部用户可见字段中都会触发重试', async () => {
+  const id = '9a38e8c3-1111-4111-8111-111111111111';
+  const tasks = [task(id, { name: '完成客户方案' })];
+  const clean = reportFor(tasks);
+  const leaks = [
+    reportFor(tasks, { order: [{ taskId: id, reason: `优先完成 ${id}` }] }),
+    reportFor(tasks, { energyRules: [`集中精力处理 ${id.slice(0, 12)}`] }),
+    reportFor(tasks, { adjustments: [`复盘 ${id}`] }),
+  ];
+
+  for (const leak of leaks) {
+    const modelClient = queuedModel([leak, clean]);
+    await generateReport({
+      tasks,
+      matrix: matrixFor(tasks),
+      goals: { 昨天: '', 后天: '' },
+      modelClient,
+    });
+    assert.equal(modelClient.calls.length, 2);
+  }
+});
+
+test('连续两次返回当前任务 ID 泄漏时拒绝报告', async () => {
+  const id = '9a38e8c3-1111-4111-8111-111111111111';
+  const tasks = [task(id, { name: '完成客户方案' })];
+  const invalid = reportFor(tasks, {
+    adjustments: [`检查内部任务 ${id.slice(0, 9)}`],
+  });
+  const modelClient = queuedModel([invalid, invalid]);
+  await assert.rejects(
+    generateReport({
+      tasks,
+      matrix: matrixFor(tasks),
+      goals: { 昨天: '', 后天: '' },
+      modelClient,
+    }),
+    error => error.code === 'MODEL_OUTPUT_INVALID',
+  );
+  assert.equal(modelClient.calls.length, 2);
+});
+
+test('时间比例日期指标和无关业务编号不会被误判为任务 ID', async () => {
+  const id = '9a38e8c3-1111-4111-8111-111111111111';
+  const tasks = [task(id, { name: '完成客户方案' })];
+  const expected = reportFor(tasks, {
+    order: [{ taskId: id, reason: '11:00 前先完成客户方案' }],
+    energyRules: ['投入 55% 精力，保留业务编号 deadbeef'],
+    adjustments: ['2026-07-20 前整理不少于10个案例'],
+  });
+  const modelClient = queuedModel([expected]);
+  const result = await generateReport({
+    tasks,
+    matrix: matrixFor(tasks),
+    goals: { 昨天: '', 后天: '' },
+    modelClient,
+  });
+  assert.deepEqual(result, expected);
+  assert.equal(modelClient.calls.length, 1);
+});
+
 test('当天第三象限任务缺少授权语义时重试', async () => {
   const tasks = [task('delegate', {
     name: '发送项目会议纪要',
@@ -269,11 +350,12 @@ test('当天第三象限任务缺少授权语义时重试', async () => {
 
 test('超过五条当天任务时调整建议必须覆盖剩余任务', async () => {
   const tasks = Array.from({ length: 6 }, (_, index) => task(`due-${index + 1}`, {
+    name: `当天任务 ${index + 1}`,
     due: `2026-07-20 ${String(13 + index).padStart(2, '0')}:00`,
   }));
   const invalid = reportFor(tasks);
   const valid = reportFor(tasks, {
-    adjustments: ['任务 due-6 安排在 18:30 完成'],
+    adjustments: ['当天任务 6 安排在 18:30 完成'],
   });
   const modelClient = queuedModel([invalid, valid]);
   const result = await generateReport({
@@ -283,7 +365,7 @@ test('超过五条当天任务时调整建议必须覆盖剩余任务', async ()
     modelClient,
     now: () => new Date('2026-07-20T04:00:00.000Z'),
   });
-  assert.match(result.adjustments[0], /任务 due-6.*18:30/);
+  assert.match(result.adjustments[0], /当天任务 6.*18:30/);
   assert.equal(modelClient.calls.length, 2);
 });
 

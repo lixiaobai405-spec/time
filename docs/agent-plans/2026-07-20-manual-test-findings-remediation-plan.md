@@ -413,29 +413,29 @@ git commit -m "fix: correct matrix vertical axis labels"
 
 ### 步骤
 
-- [ ] 在 `tests/server/generate-report.test.js` 先写失败测试：模型第一次在 `energyRules` 返回当前任务 UUID 的前 8 位、第二次返回纯业务文字，断言发生一次重试且最终结果不含 ID。
-- [ ] 再覆盖完整 UUID、9 位以上 UUID 前缀，以及 `order[].reason`、`energyRules[]`、`adjustments[]` 三个位置；连续两次泄漏必须返回 `MODEL_OUTPUT_INVALID`。
-- [ ] 增加不误伤测试：`11:00`、`55%`、`2026-07-20`、`不少于10个案例` 和不属于任何当前任务的普通业务编号均可通过。
-- [ ] 在 `tests/server/prompt-contract.test.js` 增加失败断言，要求报告 Prompt 明确说明“taskId 只写入结构化 taskId 字段，任何用户可见字符串不得复述完整 ID 或其前缀”。
-- [ ] 在 `tests/frontend.spec.js` 增加失败回归：使用固定 UUID `9a38e8c3-1111-4111-8111-111111111111`，断言报告页面和剪贴板文本均不包含 `9a38e8c3` 或完整 UUID；未知 `taskId` 仍显示既有重新生成提示，而不是把 ID 渲染出来。
-- [ ] 运行并确认新增测试按预期失败：
+- [x] 在 `tests/server/generate-report.test.js` 先写失败测试：模型第一次在 `energyRules` 返回当前任务 UUID 的前 8 位、第二次返回纯业务文字，断言发生一次重试且最终结果不含 ID。
+- [x] 再覆盖完整 UUID、9 位以上 UUID 前缀，以及 `order[].reason`、`energyRules[]`、`adjustments[]` 三个位置；连续两次泄漏必须返回 `MODEL_OUTPUT_INVALID`。
+- [x] 增加不误伤测试：`11:00`、`55%`、`2026-07-20`、`不少于10个案例` 和不属于任何当前任务的普通业务编号均可通过。
+- [x] 在 `tests/server/prompt-contract.test.js` 增加失败断言，要求报告 Prompt 明确说明“taskId 只写入结构化 taskId 字段，任何用户可见字符串不得复述完整 ID 或其前缀”。
+- [x] 在 `tests/frontend.spec.js` 增加失败回归：使用固定 UUID `9a38e8c3-1111-4111-8111-111111111111`，断言报告页面和剪贴板文本均不包含 `9a38e8c3` 或完整 UUID；未知 `taskId` 仍显示既有重新生成提示，而不是把 ID 渲染出来。
+- [x] 运行并确认新增测试按预期失败：
 
 ```powershell
 node --test tests/server/generate-report.test.js tests/server/prompt-contract.test.js
 npx playwright test tests/frontend.spec.js --grep "内部任务 ID|复制报告"
 ```
 
-- [ ] 在 `generate-report.js` 实现纯函数 `containsTaskIdLeak(text, tasks)`：对每个当前任务比较完整 ID；仅当 ID 符合标准 UUID 格式时，再比较其前 8 位前缀。将它应用于全部 `reason`、`energyRules` 和 `adjustments` 字符串。
-- [ ] 更新 `prompts/system.md`，明确 ID 只用于 JSON 关联，面向用户的原因和建议必须使用完整任务名称，不得附带 ID、UUID 或缩写。
-- [ ] 删除 `reportMarkdown()` 中 `taskById.get(item.taskId)?.name || item.taskId` 的原始 ID 回退；找不到任务名称时必须由现有 `validateReport()` 在渲染前拒绝响应。
-- [ ] 重跑定向测试，预期全部通过；随后运行完整服务端和前端回归：
+- [x] 在 `generate-report.js` 实现纯函数 `containsTaskIdLeak(text, tasks)`：对每个当前任务比较完整 ID；仅当 ID 符合标准 UUID 格式时，再比较其前 8 位前缀。将它应用于全部 `reason`、`energyRules` 和 `adjustments` 字符串。
+- [x] 更新 `prompts/system.md`，明确 ID 只用于 JSON 关联，面向用户的原因和建议必须使用完整任务名称，不得附带 ID、UUID 或缩写。
+- [x] 删除 `reportMarkdown()` 中 `taskById.get(item.taskId)?.name || item.taskId` 的原始 ID 回退；找不到任务名称时必须由现有 `validateReport()` 在渲染前拒绝响应。
+- [x] 重跑定向测试，预期全部通过；随后运行完整服务端和前端回归：
 
 ```powershell
 npm run test:server
 npm run test:e2e
 ```
 
-- [ ] 勾选 Task 9 并提交：
+- [x] 勾选 Task 9 并提交：
 
 ```powershell
 git add server/workflows/generate-report.js prompts/system.md frontend/app.js tests/server/generate-report.test.js tests/server/prompt-contract.test.js tests/frontend.spec.js docs/agent-plans/2026-07-20-manual-test-findings-remediation-plan.md

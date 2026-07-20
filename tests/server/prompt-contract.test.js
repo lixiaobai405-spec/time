@@ -185,4 +185,6 @@ test('报告提示词声明确定性顺序和到期任务保护规则', () => {
   assert.match(source, /remainingProtectedTaskIds/);
   assert.match(source, /第三象限.*授权.*委派.*交办/s);
   assert.match(source, /第四象限.*无明确期限.*推迟.*取消/s);
+  assert.match(source, /taskId.*只.*结构化.*taskId.*字段/s);
+  assert.match(source, /用户可见.*完整.*ID.*前缀/s);
 });
