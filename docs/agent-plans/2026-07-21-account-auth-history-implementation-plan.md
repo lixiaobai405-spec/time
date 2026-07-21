@@ -289,17 +289,17 @@ git commit -m "feat: add scrypt password service"
 - Create: `tests/server/recovery-code.test.js`
 - Modify: `docs/agent-plans/2026-07-21-account-auth-history-implementation-plan.md`
 
-- [ ] **Step 1: 写 RED 测试**
+- [x] **Step 1: 写 RED 测试**
 
 验证每个恢复码来自 24 个随机字节、以 4 字符分组便于复制、数据库只保存 32 字节 SHA-256 的 base64url、分隔符规范化、错误码失败、轮换后旧码不再匹配且版本递增。
 
-- [ ] **Step 2: 运行 RED**
+- [x] **Step 2: 运行 RED**
 
 ```powershell
 & '.\.conda\node.exe' --test tests/server/recovery-code.test.js
 ```
 
-- [ ] **Step 3: 实现固定接口**
+- [x] **Step 3: 实现固定接口**
 
 ```js
 generateRecoveryCode();
@@ -310,7 +310,7 @@ verifyRecoveryCode(value, storedHash);
 
 明文只作为注册、重置或轮换成功响应的局部值存在，不进入 Repository、日志和错误对象。
 
-- [ ] **Step 4: 运行 GREEN 并提交**
+- [x] **Step 4: 运行 GREEN 并提交**
 
 ```powershell
 & '.\.conda\node.exe' --test tests/server/recovery-code.test.js
