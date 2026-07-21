@@ -242,7 +242,7 @@ git commit -m "feat: add user repository"
 - Create: `tests/server/password.test.js`
 - Modify: `docs/agent-plans/2026-07-21-account-auth-history-implementation-plan.md`
 
-- [ ] **Step 1: 写 RED 测试**
+- [x] **Step 1: 写 RED 测试**
 
 覆盖 10–128 Unicode 字符、禁止与用户名大小写不敏感地相同、16 字节 salt、64 字节输出、版本化格式、正确/错误密码、损坏哈希安全返回 false、`crypto.timingSafeEqual()` 路径，以及最多两个并发 scrypt 工作。
 
@@ -252,13 +252,13 @@ git commit -m "feat: add user repository"
 scrypt$v=1$N=32768$r=8$p=3$<salt-base64url>$<hash-base64url>
 ```
 
-- [ ] **Step 2: 运行 RED**
+- [x] **Step 2: 运行 RED**
 
 ```powershell
 & '.\.conda\node.exe' --test tests/server/password.test.js
 ```
 
-- [ ] **Step 3: 实现密码服务**
+- [x] **Step 3: 实现密码服务**
 
 固定参数：
 
@@ -270,7 +270,7 @@ const KEY_BYTES = 64;
 
 导出 `validatePassword(password, normalizedUsername)`、`hashPassword(password)`、`verifyPassword(password, encoded)` 和可注入 `scryptImpl` 的 `createPasswordService({ concurrency: 2 })`。比较只使用相同长度 Buffer 的 `timingSafeEqual()`。
 
-- [ ] **Step 4: 运行 GREEN 并提交**
+- [x] **Step 4: 运行 GREEN 并提交**
 
 ```powershell
 & '.\.conda\node.exe' --test tests/server/password.test.js
