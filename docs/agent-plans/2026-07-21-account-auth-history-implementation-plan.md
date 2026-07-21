@@ -790,17 +790,17 @@ git commit -m "feat: add history user interface"
 - Modify: `tests/server/start-script.test.js`
 - Modify: `docs/agent-plans/2026-07-21-account-auth-history-implementation-plan.md`
 
-- [ ] **Step 1: 写运维与文档 RED**
+- [x] **Step 1: 写运维与文档 RED**
 
 测试 migration CLI 对失败返回非零；backup 使用 sqlite3 Backup API 创建同目录临时文件、执行 `PRAGMA integrity_check`，成功后原子替换唯一备份，失败不覆盖旧备份；`.gitignore` 覆盖 `data/`、`backups/`、`.sqlite`、WAL、SHM、journal、`.env.*` 并保留 `.env.example`；文档包含新接口、目录、环境变量、备份阻断、恢复和已接受风险。
 
-- [ ] **Step 2: 运行 RED**
+- [x] **Step 2: 运行 RED**
 
 ```powershell
 & '.\.conda\node.exe' --test tests/server/operations.test.js tests/server/delivery-docs.test.js tests/server/start-script.test.js
 ```
 
-- [ ] **Step 3: 实现脚本与配置文档**
+- [x] **Step 3: 实现脚本与配置文档**
 
 增加 npm scripts：
 
@@ -820,14 +820,14 @@ SESSION_MAX_AGE_MS=604800000
 
 部署文档必须把 `/var/lib/time`、`/var/backups/time` 权限、首次迁移、更新前一致性备份、失败停止、恢复步骤、登录/历史验收写入现有 Task 结构；明确 HTTP、root、同盘单份备份风险仍由用户接受，绝不描述为已消除；安全组仍固定 `/32`，不出现 `0.0.0.0/0` 建议。
 
-- [ ] **Step 4: 运行 GREEN 和文档检查**
+- [x] **Step 4: 运行 GREEN 和文档检查**
 
 ```powershell
 & '.\.conda\node.exe' --test tests/server/operations.test.js tests/server/delivery-docs.test.js tests/server/start-script.test.js
 git diff --check
 ```
 
-- [ ] **Step 5: 提交**
+- [x] **Step 5: 提交**
 
 ```powershell
 git add -- scripts/migrate.js scripts/backup-database.js tests/server/operations.test.js package.json .env.example .gitignore README.md docs/agent-plans/部署文档.md docs/acceptance/account-auth-history-v1.md docs/adversarial-review.md tests/server/delivery-docs.test.js tests/server/start-script.test.js docs/agent-plans/2026-07-21-account-auth-history-implementation-plan.md

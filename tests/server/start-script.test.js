@@ -150,15 +150,19 @@ test('start.bat is parsed by cmd.exe and reaches the server command', (t) => {
   );
 });
 
-test('.env is ignored while .env.example remains trackable', () => {
+test('.env variants are ignored while example templates remain trackable', () => {
   const isIgnored = (name) => spawnSync(
     'git',
     ['check-ignore', '--no-index', '--quiet', name],
     { cwd: root },
   ).status === 0;
 
-  assert.equal(isIgnored('.env'), true, '.env must be ignored');
-  assert.equal(isIgnored('.env.example'), false, '.env.example must stay trackable');
+  for (const name of ['.env', '.env.local', '.env.development', '.env.production', '.env.test']) {
+    assert.equal(isIgnored(name), true, `${name} must be ignored`);
+  }
+  for (const name of ['.env.example', '.env.test.example']) {
+    assert.equal(isIgnored(name), false, `${name} must stay trackable`);
+  }
 });
 
 test('README documents one-click startup without committing .env', () => {

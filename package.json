@@ -4,6 +4,8 @@
   "private": true,
   "scripts": {
     "dev": "node server/index.js",
+    "migrate": "node scripts/migrate.js",
+    "backup:database": "node scripts/backup-database.js",
     "test": "npm run test:server && npm run test:e2e",
     "test:server": "node --test",
     "test:e2e": "playwright test"
