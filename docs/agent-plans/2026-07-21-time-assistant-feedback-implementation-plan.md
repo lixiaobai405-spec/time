@@ -420,7 +420,7 @@ git commit -m "fix: hide long-term effort labels"
 **Files:**
 - Modify: `docs/agent-plans/2026-07-21-time-assistant-feedback-implementation-plan.md` (checkboxes only)
 
-- [ ] **Step 1: Re-run invariant tests**
+- [x] **Step 1: Re-run invariant tests**
 
 ```powershell
 & .\.conda\node.exe --test tests/server/classify-matrix.test.js tests/server/deadline-policy.test.js tests/server/extract-tasks.test.js tests/server/report-schedule.test.js tests/server/generate-report.test.js
@@ -428,7 +428,7 @@ git commit -m "fix: hide long-term effort labels"
 
 Expected: PASS, including single membership, empty quadrants, only `高` mapping, and 55/25/15/5.
 
-- [ ] **Step 2: Run the full suite**
+- [x] **Step 2: Run the full suite**
 
 ```powershell
 & .\.conda\npm.cmd test
@@ -436,7 +436,7 @@ Expected: PASS, including single membership, empty quadrants, only `高` mapping
 
 Expected: server and Playwright suites PASS with fake model configuration only.
 
-- [ ] **Step 3: Run repository gates**
+- [x] **Step 3: Run repository gates**
 
 ```powershell
 git diff --check
@@ -447,7 +447,9 @@ git hook run pre-push
 
 Expected: no whitespace errors; hooks PASS; only the four pre-existing unrelated untracked paths remain outside this work.
 
-- [ ] **Step 4: Commit plan completion marks**
+Verification note: `git diff --check` and the global `pre-commit` hook passed. This repository has no `pre-push` hook configured, so `git hook run pre-push` reported `cannot find a hook named pre-push` rather than executing a check.
+
+- [x] **Step 4: Commit plan completion marks**
 
 ```powershell
 git add -- docs/agent-plans/2026-07-21-time-assistant-feedback-implementation-plan.md
@@ -455,6 +457,6 @@ git diff --cached --check
 git commit -m "docs: complete time assistant feedback plan"
 ```
 
-- [ ] **Step 5: Final audit**
+- [x] **Step 5: Final audit**
 
 Run `git status --short --branch` and `git log --oneline -8`. Report changed files, test counts/results, remaining unrelated files, risks, branch status, and commits. Do not deploy or push.
