@@ -4,6 +4,9 @@ const { readdir, readFile } = require('node:fs/promises');
 const path = require('node:path');
 
 const { createApp } = require('../../server/app');
+const { AuthClient } = require('../helpers/auth-client');
+const { historySnapshot } = require('../helpers/history-fixture');
+const { createAuthTestApp } = require('../helpers/test-app');
 const { createTestAuthBoundary } = require('../helpers/test-auth-boundary');
 
 const COMPLETE_GOALS = Object.freeze({
@@ -144,6 +147,35 @@ test('错误响应不含用户目标、模型原文或 stack', async () => {
   } finally {
     await close(server);
   }
+});
+
+test('历史数据库错误返回稳定错误且不泄漏 SQL、路径、正文或参数', async (t) => {
+  const { baseUrl, database } = await createAuthTestApp(t);
+  const client = new AuthClient(baseUrl);
+  const username = 'History_Db_Error';
+  const password = 'History-Database-2026';
+  assert.equal((await client.register(username, password)).status, 201);
+  assert.equal((await client.login(username, password)).status, 200);
+  assert.equal((await client.me()).status, 200);
+  await database.exec('DROP TABLE time_management_runs');
+
+  const marker = 'PRIVATE_HISTORY_BODY_MARKER';
+  const saveResponse = await client.request('/api/time-management/history', {
+    method: 'POST',
+    csrfToken: client.sessionCsrfToken,
+    body: historySnapshot({ title: marker }),
+  });
+  const saveBody = JSON.stringify(await saveResponse.json());
+  assert.equal(saveResponse.status, 500);
+  assert.match(saveBody, /HISTORY_SAVE_FAILED/);
+  assert.doesNotMatch(saveBody, /SQLITE|time_management_runs|DROP TABLE|auth\.sqlite/i);
+  assert.doesNotMatch(saveBody, new RegExp(marker));
+
+  const listResponse = await client.request('/api/time-management/history');
+  const listBody = JSON.stringify(await listResponse.json());
+  assert.equal(listResponse.status, 503);
+  assert.match(listBody, /DATABASE_UNAVAILABLE/);
+  assert.doesNotMatch(listBody, /SQLITE|time_management_runs|SELECT|auth\.sqlite/i);
 });
 
 test('内存日志只记录 requestId、路径、状态和耗时', async () => {

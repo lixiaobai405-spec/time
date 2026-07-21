@@ -626,7 +626,7 @@ git commit -m "feat: add isolated history repository"
 - Modify: `tests/server/security.test.js`
 - Modify: `docs/agent-plans/2026-07-21-account-auth-history-implementation-plan.md`
 
-- [ ] **Step 1: 写 API RED**
+- [x] **Step 1: 写 API RED**
 
 覆盖：
 
@@ -639,17 +639,17 @@ DELETE /api/time-management/history/:id
 
 断言保存首次 201、同一 clientRunId 重试 200 且 ID 相同；列表默认 20、最大 50、游标无重复；详情只读；A 对 B 和不存在 ID 均得到相同 404 `HISTORY_NOT_FOUND`；删除需要 CSRF；请求体中的 `user_id`/`userId` 被 Schema 拒绝；数据库错误不泄漏 SQL、路径、正文或参数。
 
-- [ ] **Step 2: 运行 RED**
+- [x] **Step 2: 运行 RED**
 
 ```powershell
 & '.\.conda\node.exe' --test tests/server/history-api.test.js tests/server/security.test.js
 ```
 
-- [ ] **Step 3: 实现 Router**
+- [x] **Step 3: 实现 Router**
 
 Router 只从 `request.auth.userId` 取用户 ID，所有输入先经过 Ajv 和语义验证。统一错误：`HISTORY_NOT_FOUND` 404、`HISTORY_SAVE_FAILED` 500、`DATABASE_UNAVAILABLE` 503；problem handler 不返回原始 SQLite error。
 
-- [ ] **Step 4: 运行 GREEN 并提交**
+- [x] **Step 4: 运行 GREEN 并提交**
 
 ```powershell
 & '.\.conda\node.exe' --test tests/server/history-api.test.js tests/server/security.test.js
