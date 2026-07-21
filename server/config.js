@@ -16,6 +16,13 @@ function positiveInteger(value, key, fallback, maximum = Number.MAX_SAFE_INTEGER
   return candidate;
 }
 
+function requiredBoolean(environment, key) {
+  const value = requiredText(environment, key).toLowerCase();
+  if (value === 'true') return true;
+  if (value === 'false') return false;
+  throw configError(`Invalid boolean environment variable: ${key}`);
+}
+
 function loadConfig(environment = {}) {
   const modelApiBaseUrl = requiredText(environment, 'MODEL_API_BASE_URL');
   let parsedUrl;
@@ -28,6 +35,19 @@ function loadConfig(environment = {}) {
     throw configError('MODEL_API_BASE_URL must be an absolute HTTP(S) URL');
   }
 
+  const sessionSecret = requiredText(environment, 'SESSION_SECRET');
+  if (Buffer.byteLength(sessionSecret, 'utf8') < 48) {
+    throw configError('SESSION_SECRET must contain at least 48 bytes');
+  }
+  const sessionMaxAgeMs = positiveInteger(
+    environment.SESSION_MAX_AGE_MS,
+    'SESSION_MAX_AGE_MS',
+    604_800_000,
+  );
+  if (sessionMaxAgeMs !== 604_800_000) {
+    throw configError('SESSION_MAX_AGE_MS must be 604800000');
+  }
+
   return Object.freeze({
     port: positiveInteger(environment.PORT, 'PORT', 4174, 65535),
     modelApiBaseUrl: modelApiBaseUrl.replace(/\/+$/, ''),
@@ -38,6 +58,10 @@ function loadConfig(environment = {}) {
       'MODEL_TIMEOUT_MS',
       30_000,
     ),
+    databasePath: requiredText(environment, 'DATABASE_PATH'),
+    sessionSecret,
+    sessionCookieSecure: requiredBoolean(environment, 'SESSION_COOKIE_SECURE'),
+    sessionMaxAgeMs,
   });
 }
 

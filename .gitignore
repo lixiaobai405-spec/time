@@ -5,3 +5,8 @@ playwright-report/
 .conda-pkgs/
 .npm-cache/
 .env
+data/
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+*.sqlite-journal

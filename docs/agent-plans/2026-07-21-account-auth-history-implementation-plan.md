@@ -120,7 +120,7 @@ git commit -m "build: add authentication database dependencies"
 - Modify: `tests/server/start-script.test.js`
 - Modify: `docs/agent-plans/2026-07-21-account-auth-history-implementation-plan.md`
 
-- [ ] **Step 1: 写数据库 RED 测试**
+- [x] **Step 1: 写数据库 RED 测试**
 
 覆盖：文件数据库启用 WAL、外键、5000ms busy timeout；`schema_migrations` 只按版本执行一次；坏 SQL 在事务中回滚且 `openDatabase()` 拒绝启动；`loadConfig()` 接受并校验 `DATABASE_PATH`、48 字节以上 `SESSION_SECRET`、布尔 Cookie 配置和 7 天毫秒数；启动脚本的假 `.env` 包含全部新增变量且不引用真实配置。
 
@@ -136,7 +136,7 @@ assert.deepEqual(
 );
 ```
 
-- [ ] **Step 2: 运行 RED**
+- [x] **Step 2: 运行 RED**
 
 ```powershell
 & '.\.conda\node.exe' --test tests/server/database.test.js tests/server/api.test.js tests/server/start-script.test.js
@@ -144,7 +144,7 @@ assert.deepEqual(
 
 Expected: 因 `server/database/sqlite.js` 不存在和配置字段缺失而失败。
 
-- [ ] **Step 3: 实现串行数据库适配器和事务迁移**
+- [x] **Step 3: 实现串行数据库适配器和事务迁移**
 
 `server/database/sqlite.js` 导出：
 
@@ -170,7 +170,7 @@ PRAGMA busy_timeout = 5000;
 
 同一任务更新 `.env.example` 的假 `DATABASE_PATH`、`SESSION_SECRET`、`SESSION_COOKIE_SECURE`、`SESSION_MAX_AGE_MS`，并让 `start-script.test.js` 写入同等假变量。先将 `data/`、`*.sqlite`、`*.sqlite-wal`、`*.sqlite-shm`、`*.sqlite-journal` 加入 `.gitignore`，避免本地验证产生可暂存数据库文件；保留 `.env.example` 可跟踪。
 
-- [ ] **Step 4: 运行 GREEN**
+- [x] **Step 4: 运行 GREEN**
 
 ```powershell
 & '.\.conda\node.exe' --test tests/server/database.test.js tests/server/api.test.js tests/server/start-script.test.js
@@ -178,7 +178,7 @@ PRAGMA busy_timeout = 5000;
 
 Expected: 全部通过，测试数据库只存在于 `os.tmpdir()` 并由 `t.after()` 关闭删除。
 
-- [ ] **Step 5: 提交**
+- [x] **Step 5: 提交**
 
 ```powershell
 git add -- server/database/sqlite.js server/database/migrations.js server/database/migrations/001-auth-history.js server/config.js .env.example .gitignore tests/helpers/test-database.js tests/server/database.test.js tests/server/api.test.js tests/server/start-script.test.js docs/agent-plans/2026-07-21-account-auth-history-implementation-plan.md

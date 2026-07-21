@@ -85,6 +85,10 @@ test('start.bat is parsed by cmd.exe and reaches the server command', (t) => {
       'MODEL_API_BASE_URL=http://127.0.0.1:9',
       'MODEL_API_KEY=fake-batch-test-key',
       'MODEL_NAME=fake-batch-test-model',
+      'DATABASE_PATH=fake-batch-test.sqlite',
+      'SESSION_SECRET=fake-batch-session-secret-with-at-least-forty-eight-bytes',
+      'SESSION_COOKIE_SECURE=false',
+      'SESSION_MAX_AGE_MS=604800000',
       '',
     ].join('\n'),
     'utf8',
@@ -111,6 +115,10 @@ test('start.bat is parsed by cmd.exe and reaches the server command', (t) => {
     'MODEL_API_KEY',
     'MODEL_NAME',
     'MODEL_TIMEOUT_MS',
+    'DATABASE_PATH',
+    'SESSION_SECRET',
+    'SESSION_COOKIE_SECURE',
+    'SESSION_MAX_AGE_MS',
   ]) {
     delete environment[key];
   }
@@ -171,6 +179,10 @@ test('the Node env-file startup command works with fake model settings', async (
       'MODEL_API_KEY=fake-start-script-key',
       'MODEL_NAME=fake-start-script-model',
       'MODEL_TIMEOUT_MS=1000',
+      `DATABASE_PATH=${path.join(tempDirectory, 'test.sqlite')}`,
+      'SESSION_SECRET=fake-start-session-secret-with-at-least-forty-eight-bytes',
+      'SESSION_COOKIE_SECURE=false',
+      'SESSION_MAX_AGE_MS=604800000',
       '',
     ].join('\n'),
     'utf8',
