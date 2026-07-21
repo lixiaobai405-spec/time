@@ -25,9 +25,21 @@ function writeLog(logger, entry) {
   else if (logger && typeof logger.info === 'function') logger.info(entry);
 }
 
-function createApp({ modelClient, logger, now = Date.now } = {}) {
+function createApp({ modelClient, authBoundary, logger, now = Date.now } = {}) {
+  if (
+    !authBoundary
+    || typeof authBoundary.sessionMiddleware !== 'function'
+    || typeof authBoundary.router !== 'function'
+    || typeof authBoundary.requireAuth !== 'function'
+    || typeof authBoundary.requireSessionCsrf !== 'function'
+  ) {
+    throw Object.assign(new Error('A complete authBoundary is required.'), {
+      code: 'CONFIG_INVALID',
+    });
+  }
   const app = express();
   app.disable('x-powered-by');
+  app.set('trust proxy', 1);
   app.locals.modelClient = modelClient;
 
   app.use((_request, response, next) => {
@@ -56,6 +68,8 @@ function createApp({ modelClient, logger, now = Date.now } = {}) {
   });
   app.use(express.json({ limit: '64kb', strict: true }));
   app.get('/api/health', (_request, response) => response.json({ status: 'ok' }));
+  app.use(authBoundary.sessionMiddleware);
+  app.use('/api/auth', authBoundary.router);
   app.post('/api/time-management/goals/check', async (request, response, next) => {
     try {
       response.json(await checkGoals({

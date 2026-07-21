@@ -409,14 +409,21 @@ git commit -m "feat: enforce auth CSRF and rate limits"
 - Create: `server/runtime.js`
 - Create: `tests/helpers/auth-client.js`
 - Create: `tests/helpers/test-app.js`
+- Create: `tests/helpers/test-auth-boundary.js`
 - Create: `tests/server/auth-api.test.js`
+- Modify: `playwright.config.js`
 - Modify: `server/app.js`
 - Modify: `server/index.js`
 - Modify: `tests/server/api.test.js`
 - Modify: `tests/server/security.test.js`
+- Modify: `tests/server/check-goals.test.js`
+- Modify: `tests/server/classify-matrix.test.js`
+- Modify: `tests/server/extract-tasks.test.js`
+- Modify: `tests/server/generate-report.test.js`
+- Modify: `tests/server/start-script.test.js`
 - Modify: `docs/agent-plans/2026-07-21-account-auth-history-implementation-plan.md`
 
-- [ ] **Step 1: 写 API RED**
+- [x] **Step 1: 写 API RED**
 
 覆盖：
 
@@ -430,13 +437,13 @@ GET  /api/auth/me
 
 断言注册只返回一次恢复码、不自动登录；重复用户名 409；未知用户和错误密码统一 `AUTH_INVALID_CREDENTIALS`；登录响应设置 `time.sid` 且登录前 sid 不被复用；Cookie 为 HttpOnly、SameSite=Strict、Path=/、Max-Age=604800、Secure=false；`me` 返回 `{user:{id,username},csrfToken}`；退出只销毁当前 Session。
 
-- [ ] **Step 2: 运行 RED**
+- [x] **Step 2: 运行 RED**
 
 ```powershell
 & '.\.conda\node.exe' --test tests/server/auth-api.test.js tests/server/api.test.js tests/server/security.test.js
 ```
 
-- [ ] **Step 3: 实现 Auth Service、Router 和运行时组合**
+- [x] **Step 3: 实现 Auth Service、Router 和运行时组合**
 
 `createRuntime(config)` 打开数据库、运行迁移、创建 Repository/Service/Store 和 `express-session` middleware。固定 Session 配置：
 
@@ -454,16 +461,16 @@ GET  /api/auth/me
 
 `createApp()` 必须显式接收完整 `authBoundary`，缺失时抛出配置错误而不是默认为公开业务 API。`GET /api/health` 保持在认证 middleware 之前。登录使用 `req.session.regenerate()`，设置 `userId` 后显式保存。
 
-- [ ] **Step 4: 运行 GREEN 和安全回归**
+- [x] **Step 4: 运行 GREEN 和安全回归**
 
 ```powershell
 & '.\.conda\node.exe' --test tests/server/auth-api.test.js tests/server/api.test.js tests/server/security.test.js
 ```
 
-- [ ] **Step 5: 提交**
+- [x] **Step 5: 提交**
 
 ```powershell
-git add -- server/auth/auth-service.js server/auth/router.js server/auth/middleware.js server/runtime.js server/app.js server/index.js tests/helpers/auth-client.js tests/helpers/test-app.js tests/server/auth-api.test.js tests/server/api.test.js tests/server/security.test.js docs/agent-plans/2026-07-21-account-auth-history-implementation-plan.md
+git add -- playwright.config.js server/auth/auth-service.js server/auth/router.js server/auth/middleware.js server/runtime.js server/app.js server/index.js tests/helpers/auth-client.js tests/helpers/test-app.js tests/helpers/test-auth-boundary.js tests/server/auth-api.test.js tests/server/api.test.js tests/server/check-goals.test.js tests/server/classify-matrix.test.js tests/server/extract-tasks.test.js tests/server/generate-report.test.js tests/server/security.test.js tests/server/start-script.test.js docs/agent-plans/2026-07-21-account-auth-history-implementation-plan.md
 git diff --cached --check
 git commit -m "feat: add account authentication APIs"
 ```

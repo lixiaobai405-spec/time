@@ -1,6 +1,8 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
+const { createTestAuthBoundary } = require('../helpers/test-auth-boundary');
+
 async function listen(app) {
   return new Promise((resolve, reject) => {
     const server = app.listen(0, '127.0.0.1', () => resolve(server));
@@ -16,7 +18,10 @@ async function close(server) {
 
 test('GET /api/health 返回 ok 且隐藏 Express 标识', async () => {
   const { createApp } = require('../../server/app');
-  const app = createApp({ modelClient: { completeJson: async () => ({}) } });
+  const app = createApp({
+    authBoundary: createTestAuthBoundary(),
+    modelClient: { completeJson: async () => ({}) },
+  });
   const server = await listen(app);
 
   try {
@@ -31,7 +36,10 @@ test('GET /api/health 返回 ok 且隐藏 Express 标识', async () => {
 
 test('GET / 从同一服务返回前端页面', async () => {
   const { createApp } = require('../../server/app');
-  const app = createApp({ modelClient: { completeJson: async () => ({}) } });
+  const app = createApp({
+    authBoundary: createTestAuthBoundary(),
+    modelClient: { completeJson: async () => ({}) },
+  });
   const server = await listen(app);
 
   try {
@@ -45,7 +53,10 @@ test('GET / 从同一服务返回前端页面', async () => {
 
 test('未知 API 返回安全统一错误结构', async () => {
   const { createApp } = require('../../server/app');
-  const app = createApp({ modelClient: { completeJson: async () => ({}) } });
+  const app = createApp({
+    authBoundary: createTestAuthBoundary(),
+    modelClient: { completeJson: async () => ({}) },
+  });
   const server = await listen(app);
 
   try {

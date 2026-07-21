@@ -1,5 +1,6 @@
 const assert = require('node:assert/strict');
 const { spawn, spawnSync } = require('node:child_process');
+const { once } = require('node:events');
 const fs = require('node:fs');
 const net = require('node:net');
 const os = require('node:os');
@@ -198,9 +199,18 @@ test('the Node env-file startup command works with fake model settings', async (
     stderr += chunk.toString();
   });
 
-  t.after(() => {
-    if (child.exitCode === null) child.kill();
-    fs.rmSync(tempDirectory, { recursive: true, force: true });
+  t.after(async () => {
+    if (child.exitCode === null) {
+      const exited = once(child, 'exit');
+      child.kill();
+      await exited;
+    }
+    fs.rmSync(tempDirectory, {
+      recursive: true,
+      force: true,
+      maxRetries: 20,
+      retryDelay: 100,
+    });
   });
 
   const response = await waitForHealth(

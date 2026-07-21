@@ -3,6 +3,7 @@ const assert = require('node:assert/strict');
 
 const { MANUAL_FLAGS } = require('../../server/contracts/time-management');
 const { extractTasks } = require('../../server/workflows/extract-tasks');
+const { createTestAuthBoundary } = require('../helpers/test-auth-boundary');
 
 function goals(overrides = {}) {
   return { 昨天: '', 今天: '', 明天: '', 后天: '', ...overrides };
@@ -239,7 +240,10 @@ test('手动任务四种标注映射保留未标注 null/null', () => {
 
 test('POST /api/time-management/tasks/extract 返回标准任务', async () => {
   const { createApp } = require('../../server/app');
-  const app = createApp({ modelClient: queuedModel([{ tasks: [modelTask()] }]) });
+  const app = createApp({
+    authBoundary: createTestAuthBoundary(),
+    modelClient: queuedModel([{ tasks: [modelTask()] }]),
+  });
   const server = await listen(app);
 
   try {
@@ -267,6 +271,7 @@ test('提取 API 使用注入的服务端时钟且拒绝客户端 referenceDate'
     urgency: '中',
   })] }]);
   const app = createApp({
+    authBoundary: createTestAuthBoundary(),
     modelClient,
     now: () => new Date('2026-07-20T04:00:00.000Z'),
   });

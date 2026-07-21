@@ -4,6 +4,7 @@ const { readdir, readFile } = require('node:fs/promises');
 const path = require('node:path');
 
 const { createApp } = require('../../server/app');
+const { createTestAuthBoundary } = require('../helpers/test-auth-boundary');
 
 const COMPLETE_GOALS = Object.freeze({
   昨天: '已记录目标、结果、原因和改进',
@@ -45,7 +46,7 @@ test('用户提示注入只进入 user JSON，不改变 system prompt', async ()
       return passingReview();
     },
   };
-  const app = createApp({ modelClient });
+  const app = createApp({ authBoundary: createTestAuthBoundary(), modelClient });
   const server = await listen(app);
 
   try {
@@ -68,7 +69,10 @@ test('用户提示注入只进入 user JSON，不改变 system prompt', async ()
 });
 
 test('65KB 请求体返回安全 413 JSON', async () => {
-  const app = createApp({ modelClient: { completeJson: async () => passingReview() } });
+  const app = createApp({
+    authBoundary: createTestAuthBoundary(),
+    modelClient: { completeJson: async () => passingReview() },
+  });
   const server = await listen(app);
   try {
     const response = await fetch(
@@ -90,7 +94,10 @@ test('65KB 请求体返回安全 413 JSON', async () => {
 
 test('额外字段在模型调用前返回 INPUT_INVALID', async () => {
   let calls = 0;
-  const app = createApp({ modelClient: { completeJson: async () => { calls += 1; } } });
+  const app = createApp({
+    authBoundary: createTestAuthBoundary(),
+    modelClient: { completeJson: async () => { calls += 1; } },
+  });
   const server = await listen(app);
   try {
     const response = await fetch(
@@ -119,7 +126,7 @@ test('错误响应不含用户目标、模型原文或 stack', async () => {
       });
     },
   };
-  const app = createApp({ modelClient });
+  const app = createApp({ authBoundary: createTestAuthBoundary(), modelClient });
   const server = await listen(app);
   try {
     const response = await fetch(
@@ -142,6 +149,7 @@ test('错误响应不含用户目标、模型原文或 stack', async () => {
 test('内存日志只记录 requestId、路径、状态和耗时', async () => {
   const entries = [];
   const app = createApp({
+    authBoundary: createTestAuthBoundary(),
     modelClient: { completeJson: async () => passingReview() },
     logger: entry => entries.push(entry),
   });
@@ -169,7 +177,10 @@ test('内存日志只记录 requestId、路径、状态和耗时', async () => {
 });
 
 test('API 响应包含安全头和 UUID 请求标识', async () => {
-  const app = createApp({ modelClient: { completeJson: async () => passingReview() } });
+  const app = createApp({
+    authBoundary: createTestAuthBoundary(),
+    modelClient: { completeJson: async () => passingReview() },
+  });
   const server = await listen(app);
   try {
     const response = await fetch(`http://127.0.0.1:${server.address().port}/api/health`);

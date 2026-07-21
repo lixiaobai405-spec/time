@@ -2,6 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 
 const { generateReport } = require('../../server/workflows/generate-report');
+const { createTestAuthBoundary } = require('../helpers/test-auth-boundary');
 
 function task(id, overrides = {}) {
   return { id, name: `任务 ${id}`, source: '今天', ...overrides };
@@ -388,7 +389,10 @@ test('POST /api/time-management/report/generate 返回结构化报告', async ()
   const tasks = [task('task-a')];
   const matrix = matrixFor(tasks);
   const expected = reportFor(tasks);
-  const app = createApp({ modelClient: queuedModel([expected]) });
+  const app = createApp({
+    authBoundary: createTestAuthBoundary(),
+    modelClient: queuedModel([expected]),
+  });
   const server = await listen(app);
 
   try {
