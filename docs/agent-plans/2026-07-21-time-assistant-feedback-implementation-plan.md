@@ -379,13 +379,13 @@ git commit -m "fix: reject conflicting report schedules"
 - Modify: `frontend/app.js`
 - Modify: `frontend/history-ui.js`
 
-- [ ] **Step 1: Write failing Playwright assertions**
+- [x] **Step 1: Write failing Playwright assertions**
 
 In the existing long-term current-card test, assert the long-term card does not contain `16h`, and add a normal task with `1h` that still displays it.
 
 In the history fixture, change one task to `source: '中长期'`, retain a unique `est: '长期工时16h'`, add `nextAction`, then assert the history detail omits that unique effort while still showing its due date, acceptance criterion, and next action. Assert a normal task's unique effort remains visible.
 
-- [ ] **Step 2: Run the focused browser tests and confirm RED**
+- [x] **Step 2: Run the focused browser tests and confirm RED**
 
 ```powershell
 & .\.conda\npx.cmd playwright test tests/frontend.spec.js tests/auth-history.spec.js --grep "长期任务卡|历史详情"
@@ -393,7 +393,7 @@ In the history fixture, change one task to `source: '中长期'`, retain a uniqu
 
 Expected: FAIL because both renderers currently include long-term `est`.
 
-- [ ] **Step 3: Apply the minimal render filters**
+- [x] **Step 3: Apply the minimal render filters**
 
 In `frontend/app.js`:
 
@@ -403,11 +403,11 @@ if (task.source !== '中长期' && task.est) tags.push([task.est, '']);
 
 In `frontend/history-ui.js`, construct metadata from an array and include `task.est` only when `task.source !== '中长期'`; retain due, criteria, and next action rendering unchanged.
 
-- [ ] **Step 4: Run focused browser tests and confirm GREEN**
+- [x] **Step 4: Run focused browser tests and confirm GREEN**
 
 Run the same Playwright command. Expected: both selected tests PASS.
 
-- [ ] **Step 5: Commit Task 4**
+- [x] **Step 5: Commit Task 4**
 
 ```powershell
 git add -- frontend/app.js frontend/history-ui.js tests/frontend.spec.js tests/auth-history.spec.js

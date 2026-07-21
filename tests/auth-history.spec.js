@@ -25,8 +25,9 @@ const TASKS = [
     status: 'pending', classificationSource: 'ai-extraction',
   },
   {
-    id: TASK_IDS[2], name: '整理临时资料', importance: '低', urgency: '低', source: '临时',
-    due: '待确认', est: '30分钟', acceptanceCriteria: [], nextAction: '',
+    id: TASK_IDS[2], name: '建立团队复盘机制', importance: '低', urgency: '低', source: '中长期',
+    due: '年底', est: '长期工时16h', acceptanceCriteria: ['形成季度复盘机制'],
+    nextAction: '今天先列出复盘里程碑',
     status: 'pending', classificationSource: 'ai-extraction',
   },
 ];
@@ -335,6 +336,11 @@ test('注册登录后完成四步会先显示报告再自动保存并可查看�
   await expect(page.getByRole('heading', { name: /时间管理报告/ })).toBeVisible();
   await expect(page.locator('.history-detail')).toContainText('提交方案');
   await expect(page.locator('.history-detail')).toContainText('方案已提交');
+  await expect(page.locator('.history-detail')).toContainText('约1h');
+  await expect(page.locator('.history-detail')).toContainText('截止：年底');
+  await expect(page.locator('.history-detail')).toContainText('形成季度复盘机制');
+  await expect(page.locator('.history-detail')).toContainText('今天先列出复盘里程碑');
+  await expect(page.locator('.history-detail')).not.toContainText('长期工时16h');
   const visible = await page.locator('.history-detail').innerText();
   for (const id of TASK_IDS) {
     expect(visible).not.toContain(id);

@@ -129,8 +129,14 @@ export function renderHistoryDetail(item) {
     const title = document.createElement('h3');
     title.textContent = task.name;
     const metaText = document.createElement('p');
-    const source = task.classificationSource === 'ai-matrix' ? ' · AI 判定' : '';
-    metaText.textContent = `${task.importance}/${task.urgency} · ${task.source} · 截止：${task.due || '待确认'} · ${task.est}${source}`;
+    const metadata = [
+      `${task.importance}/${task.urgency}`,
+      task.source,
+      `截止：${task.due || '待确认'}`,
+    ];
+    if (task.source !== '中长期' && task.est) metadata.push(task.est);
+    if (task.classificationSource === 'ai-matrix') metadata.push('AI 判定');
+    metaText.textContent = metadata.join(' · ');
     card.append(title, metaText);
     if (task.acceptanceCriteria.length > 0) {
       const criteriaTitle = document.createElement('strong');

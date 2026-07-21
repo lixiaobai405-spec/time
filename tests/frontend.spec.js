@@ -368,8 +368,10 @@ test('长期任务卡展示下一步且普通任务不显示空区域', async ({
   const longTermTask = page.locator('.task').filter({ hasText: '推进长期课程里程碑' });
   await expect(longTermTask).toContainText('下一步');
   await expect(longTermTask.locator('.next-action')).toContainText('今天先列出 4 个课程模块');
+  await expect(longTermTask).not.toContainText('16h');
   const ordinaryTask = page.locator('.task').filter({ hasText: '发送今天的会议纪要' });
   await expect(ordinaryTask.locator('.next-action')).toHaveCount(0);
+  await expect(ordinaryTask).toContainText('约1.5h');
 });
 
 test('未完成目标检查时不能进入任务提取', async ({ page }) => {
