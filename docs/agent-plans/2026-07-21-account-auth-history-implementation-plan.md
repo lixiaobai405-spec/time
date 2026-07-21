@@ -885,7 +885,7 @@ Expected: 所有 Node/API、Playwright 和完整 npm 测试通过；全局 Git h
 
 除明确要求修改的 `docs/agent-plans/部署文档.md` 外，重新计算以下文件 SHA-256 并与 Task 0 基线一致：设计文档、高密度部署人工测试、`docs/superpowers/` 两个文件、`tests/manual-test-input-template.md`。
 
-- [ ] **Step 6: 勾选全部计划并提交最终测试证据**
+- [x] **Step 6: 勾选全部计划并提交最终测试证据**
 
 ```powershell
 git add -- tests/server/security.test.js tests/server/delivery-docs.test.js tests/auth-history.spec.js docs/agent-plans/2026-07-21-account-auth-history-implementation-plan.md
@@ -895,7 +895,7 @@ git commit -m "test: verify authenticated history workflow"
 
 若 Step 2 产生最小实现修复，提交前根据 `git status --short` 将实际改动的实现文件逐个写出完整相对路径追加暂存；禁止暂存整个目录、使用通配符或扩大到未改动文件。
 
-- [ ] **Step 7: 最终审计**
+- [x] **Step 7: 最终审计**
 
 ```powershell
 git diff --check
