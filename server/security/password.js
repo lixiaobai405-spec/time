@@ -14,18 +14,17 @@ const ENCODED_PATTERN = /^scrypt\$v=1\$N=32768\$r=8\$p=3\$([A-Za-z0-9_-]+)\$([A-
 
 function passwordError() {
   return Object.assign(
-    new Error('Password must contain 10 to 128 Unicode characters and differ from the username.'),
+    new Error('Password must be non-empty and differ from the username.'),
     { code: 'INPUT_INVALID' },
   );
 }
 
 function validatePassword(value, normalizedUsername) {
   if (typeof value !== 'string') throw passwordError();
-  const length = Array.from(value).length;
-  if (length < 10 || length > 128) throw passwordError();
+  if (value.length === 0) throw passwordError();
   if (
     typeof normalizedUsername === 'string'
-    && value.toLowerCase() === normalizedUsername.toLowerCase()
+    && value === normalizedUsername
   ) {
     throw passwordError();
   }

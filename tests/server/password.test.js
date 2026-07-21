@@ -9,18 +9,20 @@ const {
   verifyPassword,
 } = require('../../server/security/password');
 
-test('password validation counts Unicode characters and rejects the normalized username', () => {
+test('password validation accepts any non-empty length and compares usernames case-sensitively', () => {
   assert.equal(validatePassword('Correct-Horse-2026', 'manager_01'), 'Correct-Horse-2026');
-  assert.equal(validatePassword('😀'.repeat(10), 'manager_01'), '😀'.repeat(10));
+  assert.equal(validatePassword('短', 'manager_01'), '短');
+  assert.equal(validatePassword('x'.repeat(10_000), 'manager_01'), 'x'.repeat(10_000));
+  assert.equal(validatePassword('MANAGER_01', 'manager_01'), 'MANAGER_01');
 
-  for (const value of ['', 'short123', '😀'.repeat(9), 'x'.repeat(129), null]) {
+  for (const value of ['', null]) {
     assert.throws(
       () => validatePassword(value, 'manager_01'),
       (error) => error.code === 'INPUT_INVALID',
     );
   }
   assert.throws(
-    () => validatePassword('MANAGER_01', 'manager_01'),
+    () => validatePassword('manager_01', 'manager_01'),
     (error) => error.code === 'INPUT_INVALID',
   );
 });

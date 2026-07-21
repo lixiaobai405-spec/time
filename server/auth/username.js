@@ -1,6 +1,8 @@
 function inputError() {
   return Object.assign(
-    new Error('Username must contain 3 to 32 ASCII letters, numbers, or underscores.'),
+    new Error(
+      'Username must be non-empty and contain only Chinese characters, ASCII letters, numbers, or underscores.',
+    ),
     { code: 'INPUT_INVALID' },
   );
 }
@@ -8,12 +10,12 @@ function inputError() {
 function validateUsername(value) {
   if (typeof value !== 'string') throw inputError();
   const display = value.trim();
-  if (!/^[A-Za-z0-9_]{3,32}$/.test(display)) throw inputError();
+  if (!/^[\p{Script=Han}A-Za-z0-9_]+$/u.test(display)) throw inputError();
   return display;
 }
 
 function normalizeUsername(value) {
-  return validateUsername(value).toLowerCase();
+  return validateUsername(value);
 }
 
 module.exports = { normalizeUsername, validateUsername };

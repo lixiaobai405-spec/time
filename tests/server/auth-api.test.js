@@ -37,12 +37,22 @@ test('registration returns one recovery code without logging the user in', async
   assert.equal(row.recovery_code_hash, hashRecoveryCode(payload.recoveryCode));
 });
 
-test('duplicate usernames return a stable 409 response', async (t) => {
+test('registration accepts Chinese, unlimited validation lengths, and case-sensitive usernames', async (t) => {
+  const { baseUrl } = await createAuthTestApp(t);
+  const client = new AuthClient(baseUrl);
+  assert.equal((await client.register('管理者A', '短')).status, 201);
+  assert.equal((await client.register('管理者a', 'x'.repeat(1_000))).status, 201);
+  assert.equal((await client.login('管理者A', '短')).status, 200);
+  assert.equal((await client.login('管理者a', 'x'.repeat(1_000))).status, 200);
+});
+
+test('only exact duplicate usernames return a stable 409 response', async (t) => {
   const { baseUrl } = await createAuthTestApp(t);
   const client = new AuthClient(baseUrl);
   assert.equal((await client.register(USERNAME, PASSWORD)).status, 201);
+  assert.equal((await client.register('manager_01', 'Different-Horse-2026')).status, 201);
 
-  const response = await client.register('manager_01', 'Different-Horse-2026');
+  const response = await client.register(USERNAME, 'Different-Horse-2026');
   const payload = await response.json();
   assert.equal(response.status, 409);
   assert.equal(payload.error.code, 'AUTH_USERNAME_TAKEN');

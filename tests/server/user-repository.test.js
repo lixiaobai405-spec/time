@@ -17,15 +17,16 @@ function user(overrides = {}) {
   };
 }
 
-test('username validation trims display text and normalizes ASCII case', () => {
+test('username validation trims text and preserves case for ASCII and Chinese names', () => {
   assert.equal(validateUsername('  Manager_01  '), 'Manager_01');
-  assert.equal(normalizeUsername('  Manager_01  '), 'manager_01');
-  assert.equal(validateUsername('abc'), 'abc');
-  assert.equal(validateUsername('A'.repeat(32)), 'A'.repeat(32));
+  assert.equal(normalizeUsername('  Manager_01  '), 'Manager_01');
+  assert.equal(validateUsername('管_理者01'), '管_理者01');
+  assert.equal(validateUsername('A'), 'A');
+  assert.equal(validateUsername('长'.repeat(1_000)), '长'.repeat(1_000));
 });
 
-test('username validation rejects invalid length, characters, and types', () => {
-  for (const value of ['', 'ab', 'A'.repeat(33), 'manager-name', '管理者', 'manager name', null]) {
+test('username validation rejects empty values, unsupported characters, and types', () => {
+  for (const value of ['', '   ', 'manager-name', 'manager name', '管理者！', null]) {
     assert.throws(
       () => validateUsername(value),
       (error) => error.code === 'INPUT_INVALID' && !/SQLITE|SELECT|INSERT/i.test(error.message),
@@ -39,11 +40,11 @@ test('user repository preserves display value and finds users by normalized name
 
   await database.transaction((transaction) => repository.createUser(transaction, user()));
 
-  const byName = await repository.findByNormalizedUsername('manager_01');
+  const byName = await repository.findByNormalizedUsername('Manager_01');
   assert.deepEqual(byName, {
     id: '11111111-1111-4111-8111-111111111111',
     username: 'Manager_01',
-    normalizedUsername: 'manager_01',
+    normalizedUsername: 'Manager_01',
     passwordHash: 'password-hash',
     recoveryCodeHash: 'recovery-hash',
     recoveryCodeVersion: 1,
@@ -54,15 +55,22 @@ test('user repository preserves display value and finds users by normalized name
   assert.equal(await repository.findById('missing-user'), null);
 });
 
-test('normalized username is case-insensitively unique with a stable safe error', async (t) => {
+test('username uniqueness is case-sensitive and exact duplicates return a safe error', async (t) => {
   const { database } = await createTestDatabase(t);
   const repository = createUserRepository({ database, now: () => NOW });
 
   await database.transaction((transaction) => repository.createUser(transaction, user()));
+  const lowercase = await database.transaction((transaction) => repository.createUser(transaction, user({
+    id: '22222222-2222-4222-8222-222222222222',
+    username: 'manager_01',
+  })));
+  assert.equal(lowercase.username, 'manager_01');
+  assert.equal(lowercase.normalizedUsername, 'manager_01');
+
   await assert.rejects(
     database.transaction((transaction) => repository.createUser(transaction, user({
-      id: '22222222-2222-4222-8222-222222222222',
-      username: 'manager_01',
+      id: '33333333-3333-4333-8333-333333333333',
+      username: 'Manager_01',
     }))),
     (error) => error.code === 'AUTH_USERNAME_TAKEN'
       && !/SQLITE|users|normalized_username|INSERT/i.test(error.message),

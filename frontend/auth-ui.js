@@ -77,7 +77,10 @@ export function renderLogin() {
 }
 
 export function renderRegister() {
-  const section = authShell('创建账号', '无需邮箱。请妥善保存注册后仅展示一次的恢复码。');
+  const section = authShell(
+    '创建账号',
+    '无需邮箱。用户名支持中文并区分大小写；用户名和密码均无应用级长度限制。请妥善保存注册后仅展示一次的恢复码。',
+  );
   const form = document.createElement('form');
   form.className = 'auth-form';
   form.dataset.authForm = 'register';

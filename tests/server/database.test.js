@@ -7,6 +7,7 @@ const test = require('node:test');
 const sqlite3 = require('sqlite3');
 
 const { openDatabase } = require('../../server/database/sqlite');
+const migration001 = require('../../server/database/migrations/001-auth-history');
 const { createTestDatabase } = require('../helpers/test-database');
 
 function rawGet(filename, sql) {
@@ -24,7 +25,7 @@ function rawGet(filename, sql) {
   });
 }
 
-test('openDatabase enables required pragmas and applies migration 1 once', async (t) => {
+test('openDatabase enables required pragmas and applies all migrations once', async (t) => {
   const fixture = await createTestDatabase(t);
 
   assert.equal((await fixture.database.get('PRAGMA journal_mode')).journal_mode, 'wal');
@@ -33,7 +34,7 @@ test('openDatabase enables required pragmas and applies migration 1 once', async
   assert.deepEqual(
     (await fixture.database.all('SELECT version FROM schema_migrations ORDER BY version'))
       .map((row) => row.version),
-    [1],
+    [1, 2],
   );
 
   for (const table of ['users', 'sessions', 'time_management_runs']) {
@@ -48,9 +49,38 @@ test('openDatabase enables required pragmas and applies migration 1 once', async
   const reopened = await openDatabase({ filename: fixture.filename });
   assert.equal(
     (await reopened.get('SELECT COUNT(*) AS count FROM schema_migrations')).count,
-    1,
+    2,
   );
   await reopened.close();
+});
+
+test('migration 2 preserves the original case of existing usernames', async (t) => {
+  const fixture = await createTestDatabase(t, { migrations: [migration001] });
+  await fixture.database.run(
+    `INSERT INTO users (
+      id, username, normalized_username, password_hash, recovery_code_hash,
+      recovery_code_version, created_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    ['legacy-user', 'Manager_旧账号', 'manager_旧账号', 'password-hash', 'recovery-hash', 1,
+      '2026-07-21T00:00:00.000Z', '2026-07-21T00:00:00.000Z'],
+  );
+  await fixture.close();
+
+  const migrated = await openDatabase({ filename: fixture.filename });
+  try {
+    assert.equal(
+      (await migrated.get('SELECT normalized_username FROM users WHERE id = ?', ['legacy-user']))
+        .normalized_username,
+      'Manager_旧账号',
+    );
+    assert.deepEqual(
+      (await migrated.all('SELECT version FROM schema_migrations ORDER BY version'))
+        .map((row) => row.version),
+      [1, 2],
+    );
+  } finally {
+    await migrated.close();
+  }
 });
 
 test('transaction rolls back all writes when work rejects', async (t) => {

@@ -128,7 +128,7 @@ test('pre-auth middleware requires a valid header token', async () => {
   }
 });
 
-test('register, login, and reset limiters combine IP with normalized username', async (t) => {
+test('register, login, and reset limiters combine IP with the case-sensitive username', async (t) => {
   const limiters = createAuthRateLimiters();
   for (const [name, middleware, limit] of [
     ['register', limiters.register, 5],
@@ -151,13 +151,20 @@ test('register, login, and reset limiters combine IP with normalized username', 
       });
       assert.equal(response.status, 200);
     }
-    const sameNormalizedUser = await fetch(url, {
+    const differentlyCasedUser = await fetch(url, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ username: 'manager_01' }),
     });
-    assert.equal(sameNormalizedUser.status, 429);
-    assert.equal((await sameNormalizedUser.json()).error.code, 'AUTH_RATE_LIMITED');
+    assert.equal(differentlyCasedUser.status, 200);
+
+    const sameExactUser = await fetch(url, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ username: 'Manager_01' }),
+    });
+    assert.equal(sameExactUser.status, 429);
+    assert.equal((await sameExactUser.json()).error.code, 'AUTH_RATE_LIMITED');
 
     const differentUser = await fetch(url, {
       method: 'POST',

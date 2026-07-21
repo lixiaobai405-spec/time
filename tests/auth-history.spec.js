@@ -171,20 +171,23 @@ test('未登录显示登录页且不能进入工作区', async ({ page }) => {
   await expect(page).toHaveURL(/\/$/);
 });
 
-test('注册验证确认密码且恢复码只显示到用户确认保存', async ({ page }) => {
-  const username = 'Ui_Register_01';
+test('注册支持中文大小写敏感用户名和任意非空密码且恢复码只显示到确认保存', async ({ page }) => {
+  const username = '界面注册A';
+  const password = '短';
   await page.goto('/');
   await page.getByRole('button', { name: '注册账号' }).click();
   await expect(page.getByRole('heading', { name: '创建账号' })).toBeVisible();
+  await expect(page.getByText('用户名支持中文并区分大小写；用户名和密码均无应用级长度限制。'))
+    .toBeVisible();
 
   await page.getByLabel('用户名').fill(username);
-  await page.getByLabel('密码', { exact: true }).fill(PASSWORD);
+  await page.getByLabel('密码', { exact: true }).fill(password);
   await page.getByLabel('确认密码').fill('Different-Horse-2026');
   await page.getByRole('button', { name: '创建账号' }).click();
   await expect(page.locator('.auth-error')).toContainText('两次输入的密码不一致');
   await expect(page.getByText('请立即保存恢复码')).toHaveCount(0);
 
-  await page.getByLabel('确认密码').fill(PASSWORD);
+  await page.getByLabel('确认密码').fill(password);
   await page.getByRole('button', { name: '创建账号' }).click();
   await expect(page.getByRole('heading', { name: '请立即保存恢复码' })).toBeVisible();
   const recoveryCode = await page.locator('#recovery-code').innerText();
@@ -201,7 +204,7 @@ test('注册验证确认密码且恢复码只显示到用户确认保存', async
     hiddenValues: [...document.querySelectorAll('input[type="hidden"]')].map(input => input.value),
   }));
   const serialized = JSON.stringify(persisted);
-  expect(serialized).not.toContain(PASSWORD);
+  expect(serialized).not.toContain(password);
   expect(serialized).not.toContain(recoveryCode);
   const localState = await page.evaluate(async () => {
     const { state } = await import('/state.js');
