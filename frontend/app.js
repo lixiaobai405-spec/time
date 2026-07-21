@@ -1,5 +1,6 @@
 import {
   cancelActiveRequest,
+  deleteJson,
   getJson,
   postJson,
   setCsrfToken,
@@ -11,6 +12,7 @@ import {
   renderRecoveryCode,
   renderRegister,
 } from './auth-ui.js';
+import { renderHistoryDetail, renderHistoryList } from './history-ui.js';
 import {
   goalSnapshot,
   invalidateAfterGoals,
@@ -48,9 +50,11 @@ const app = () => document.getElementById('app');
 function updateAuthBar() {
   const user = document.getElementById('auth-user');
   const logout = document.getElementById('auth-logout');
+  const history = document.getElementById('auth-history');
   const authenticated = Boolean(state.authReady && state.user);
   user.classList.toggle('hidden', !authenticated);
   logout.classList.toggle('hidden', !authenticated);
+  history.classList.toggle('hidden', !authenticated);
   user.textContent = authenticated ? `已登录：${state.user.username}` : '';
 }
 
@@ -190,7 +194,7 @@ function day(field) {
 function goalsBody() {
   return `${head('节点 ① · 输入', '目标梳理', '按“昨天-今天-明天-后天”四维梳理你手头的事。填完点“AI 检查并补全”，内容不到位时会给出修正建议。')}
     <div class="panel-body">
-      <div class="ai-check-bar"><span class="spark">${ICONS.spark}</span><span>你填写的目标和任务仅用于完成本次会话，不会保存为历史记录。<br>请勿填写客户隐私、密码或其他敏感信息。</span></div>
+      <div class="ai-check-bar"><span class="spark">${ICONS.spark}</span><span>草稿不会保存；报告生成成功后会保存到你的账号历史。<br>请勿填写客户隐私、密码或其他敏感信息。</span></div>
       <div class="grid4day">${GOAL_FIELDS.map(day).join('')}</div>
     </div>
     ${nav({
@@ -236,6 +240,7 @@ function reportBody() {
     <div class="panel-body"><div class="report">
       <div class="bank"><div class="bankb" style="background:var(--purple)"><div class="big">55%</div><div class="lbl">重要且紧急</div></div><div class="bankb" style="background:var(--purple-300)"><div class="big">25%</div><div class="lbl">重要不紧急</div></div><div class="bankb" style="background:var(--orange)"><div class="big">15%</div><div class="lbl">紧急不重要</div></div><div class="bankb" style="background:#B9AFBE"><div class="big">5%</div><div class="lbl">不重要不紧急</div></div></div>
       <div id="report-markdown" class="markdown-report"></div>
+      <div class="history-save-status" id="history-save-status"><span id="history-save-message"></span><button class="btn btn-ghost btn-sm hidden" id="history-save-retry" data-action="history-retry">重试保存</button></div>
     </div></div>
     ${nav({ back: true, extra: `<button class="btn btn-ghost btn-sm" data-action="copy-report">${ICONS.copy} 复制报告</button><button class="btn btn-ghost btn-sm" data-action="restart">${ICONS.refresh} 重新梳理</button>`, next: 'finish', label: '完成', className: 'btn-accent' })}`;
 }
@@ -275,12 +280,34 @@ function renderAuthScreen() {
   if (error && state.authError) error.textContent = state.authError.message || '请求失败，请重试。';
 }
 
+function renderHistoryScreen() {
+  app().replaceChildren(renderHistoryList({
+    items: state.historyItems,
+    nextCursor: state.historyCursor,
+    loading: state.pending === 'history-list',
+    error: state.error?.message || '',
+  }));
+}
+
+function renderHistoryDetailScreen() {
+  if (!state.historyDetail) return renderHistoryScreen();
+  app().replaceChildren(renderHistoryDetail(state.historyDetail));
+  window.renderMarkdown(
+    document.getElementById('history-report-markdown'),
+    buildReportMarkdown(state.historyDetail.tasks, state.historyDetail.report),
+  );
+}
+
 function render() {
   updateAuthBar();
   if (!state.authReady || state.screen === 'boot' || state.screen === 'recovery-code') {
     renderAuthScreen();
   } else if (!state.user) {
     renderAuthScreen();
+  } else if (state.screen === 'history') {
+    renderHistoryScreen();
+  } else if (state.screen === 'history-detail') {
+    renderHistoryDetailScreen();
   } else if (state.screen === 'home') {
     renderHome();
   } else {
@@ -528,13 +555,17 @@ function hydrateMatrix() {
   }
 }
 
-function reportMarkdown() {
-  if (!state.report) return '';
-  const taskById = new Map(state.tasks.map(task => [task.id, task]));
-  const order = state.report.order.map(item => `- ${taskById.get(item.taskId).name} — ${item.reason}`);
-  const energy = state.report.energyRules.map(item => `- ${item}`);
-  const adjustments = state.report.adjustments.map(item => `- ${item}`);
+function buildReportMarkdown(tasks, report) {
+  if (!report) return '';
+  const taskById = new Map(tasks.map(task => [task.id, task]));
+  const order = report.order.map(item => `- ${taskById.get(item.taskId).name} — ${item.reason}`);
+  const energy = report.energyRules.map(item => `- ${item}`);
+  const adjustments = report.adjustments.map(item => `- ${item}`);
   return [`## 今日优先处理顺序`, '', ...order, '', '## 精力分配原则', '', ...energy, '', '## 需结合复盘与目标的调整', '', ...adjustments].join('\n');
+}
+
+function reportMarkdown() {
+  return buildReportMarkdown(state.tasks, state.report);
 }
 
 function validateReport(tasks, report) {
@@ -563,6 +594,18 @@ function validateReport(tasks, report) {
 
 function hydrateReport() {
   window.renderMarkdown(document.getElementById('report-markdown'), reportMarkdown());
+  const status = document.getElementById('history-save-status');
+  const message = document.getElementById('history-save-message');
+  const retry = document.getElementById('history-save-retry');
+  const messages = {
+    idle: '报告生成后将自动保存历史。',
+    saving: '正在保存历史…',
+    saved: '历史已保存。',
+    failed: '报告已生成，但历史保存失败。',
+  };
+  status.classList.toggle('failed', state.historySave.status === 'failed');
+  message.textContent = messages[state.historySave.status] || state.historySave.message;
+  retry.classList.toggle('hidden', state.historySave.status !== 'failed');
 }
 
 function hydrateStep() {
@@ -703,6 +746,7 @@ async function generateReport() {
     state.maxStep = 4;
     clearToast();
     renderAtTop();
+    saveCurrentHistory();
   } catch (error) {
     handleWorkflowError(error, id);
   }
@@ -758,6 +802,138 @@ async function copyReport() {
   try {
     await navigator.clipboard.writeText(text);
     toast('已复制报告');
+  } catch {
+    toast('复制失败，请手动选择内容');
+  }
+}
+
+function currentHistoryTitle() {
+  const parts = Object.fromEntries(new Intl.DateTimeFormat('zh-CN', {
+    timeZone: 'Asia/Shanghai',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(new Date()).map(part => [part.type, part.value]));
+  return `${parts.year}-${parts.month}-${parts.day} 时间管理报告`;
+}
+
+function currentHistorySnapshot() {
+  return {
+    clientRunId: state.clientRunId,
+    title: currentHistoryTitle(),
+    goals: state.goals,
+    tasks: state.tasks,
+    matrix: state.matrix,
+    report: state.report,
+  };
+}
+
+function renderCurrentHistoryStatus() {
+  if (state.screen === 'workspace' && state.step === 4) render();
+}
+
+async function saveCurrentHistory() {
+  if (!state.report || !state.matrix || state.historySave.status === 'saving') return;
+  const clientRunId = state.clientRunId;
+  const snapshot = currentHistorySnapshot();
+  state.historySave = { status: 'saving', id: state.historySave.id, message: '' };
+  renderCurrentHistoryStatus();
+  try {
+    const item = await postJson('/api/time-management/history', snapshot);
+    if (state.clientRunId !== clientRunId) return;
+    state.historySave = { status: 'saved', id: item.id, message: '' };
+    renderCurrentHistoryStatus();
+  } catch {
+    if (state.clientRunId !== clientRunId) return;
+    state.historySave = {
+      status: 'failed',
+      id: state.historySave.id,
+      message: '报告已生成，但历史保存失败。',
+    };
+    renderCurrentHistoryStatus();
+  }
+}
+
+async function loadHistory({ append = false } = {}) {
+  if (state.pending === 'history-list') return;
+  const cursor = append ? state.historyCursor : null;
+  if (!append) {
+    state.historyItems = [];
+    state.historyCursor = null;
+  }
+  state.pending = 'history-list';
+  state.error = null;
+  render();
+  try {
+    const query = new URLSearchParams({ limit: '20' });
+    if (cursor) query.set('cursor', cursor);
+    const result = await getJson(`/api/time-management/history?${query}`);
+    state.historyItems = append ? [...state.historyItems, ...result.items] : result.items;
+    state.historyCursor = result.nextCursor;
+    state.pending = null;
+    if (state.screen === 'history') render();
+  } catch (error) {
+    state.pending = null;
+    state.error = error;
+    if (state.screen === 'history') render();
+  }
+}
+
+function openHistory() {
+  operationId += 1;
+  if (state.pending) cancelActiveRequest();
+  state.pending = null;
+  state.error = null;
+  state.historyDetail = null;
+  state.screen = 'history';
+  render();
+  loadHistory();
+}
+
+async function openHistoryDetail(id) {
+  if (state.pending) return;
+  state.pending = 'history-detail';
+  state.error = null;
+  try {
+    state.historyDetail = await getJson(`/api/time-management/history/${encodeURIComponent(id)}`);
+    state.pending = null;
+    state.screen = 'history-detail';
+    render();
+  } catch (error) {
+    state.pending = null;
+    state.error = error;
+    state.screen = 'history';
+    render();
+  }
+}
+
+async function deleteHistory(id) {
+  if (!window.confirm('确定删除这条历史记录吗？')) return;
+  if (state.pending) return;
+  state.pending = 'history-delete';
+  try {
+    await deleteJson(`/api/time-management/history/${encodeURIComponent(id)}`);
+    state.historyItems = state.historyItems.filter(item => item.id !== id);
+    if (state.historyDetail?.id === id) {
+      state.historyDetail = null;
+      state.screen = 'history';
+    }
+    state.pending = null;
+    state.error = null;
+    render();
+  } catch (error) {
+    state.pending = null;
+    state.error = error;
+    render();
+  }
+}
+
+async function copyHistory() {
+  const text = document.querySelector('.history-detail-content')?.innerText.trim();
+  if (!text) return toast('没有可复制内容');
+  try {
+    await navigator.clipboard.writeText(text);
+    toast('已复制历史报告');
   } catch {
     toast('复制失败，请手动选择内容');
   }
@@ -891,7 +1067,8 @@ document.addEventListener('submit', event => {
 document.addEventListener('click', event => {
   const step = event.target.closest('[data-step]');
   if (step) return navigateStep(Number(step.dataset.step));
-  const action = event.target.closest('[data-action]')?.dataset.action;
+  const actionElement = event.target.closest('[data-action]');
+  const action = actionElement?.dataset.action;
   if (!action) return;
   if (action === 'start') startFlow();
   else if (action === 'home' || action === 'finish') goHome();
@@ -910,6 +1087,17 @@ document.addEventListener('click', event => {
   else if (action === 'show-login') showAuthScreen('login');
   else if (action === 'confirm-recovery-code') showAuthScreen(state.user ? 'home' : 'login');
   else if (action === 'logout') logout();
+  else if (action === 'history-open') openHistory();
+  else if (action === 'history-home') goHome();
+  else if (action === 'history-back') {
+    state.historyDetail = null;
+    state.screen = 'history';
+    render();
+  } else if (action === 'history-more') loadHistory({ append: true });
+  else if (action === 'history-detail') openHistoryDetail(actionElement.dataset.historyId);
+  else if (action === 'history-delete') deleteHistory(actionElement.dataset.historyId);
+  else if (action === 'history-copy') copyHistory();
+  else if (action === 'history-retry') saveCurrentHistory();
 });
 
 document.querySelector('.brand').addEventListener('click', goHome);

@@ -4,6 +4,10 @@ function emptyGoals() {
   return Object.fromEntries(GOAL_KEYS.map(key => [key, '']));
 }
 
+function idleHistorySave() {
+  return { status: 'idle', id: null, message: '' };
+}
+
 export const state = {
   authReady: false,
   user: null,
@@ -19,6 +23,11 @@ export const state = {
   tasks: [],
   matrix: null,
   report: null,
+  clientRunId: crypto.randomUUID(),
+  historySave: idleHistorySave(),
+  historyItems: [],
+  historyCursor: null,
+  historyDetail: null,
   pending: null,
   error: null,
 };
@@ -33,12 +42,14 @@ export function invalidateAfterGoals() {
   state.tasks = [];
   state.matrix = null;
   state.report = null;
+  state.historySave = idleHistorySave();
   state.maxStep = 1;
 }
 
 export function invalidateAfterTasks() {
   state.matrix = null;
   state.report = null;
+  state.historySave = idleHistorySave();
   state.maxStep = Math.min(state.maxStep, 2);
 }
 
@@ -52,6 +63,11 @@ export function resetState() {
   state.tasks = [];
   state.matrix = null;
   state.report = null;
+  state.clientRunId = crypto.randomUUID();
+  state.historySave = idleHistorySave();
+  state.historyItems = [];
+  state.historyCursor = null;
+  state.historyDetail = null;
   state.pending = null;
   state.error = null;
 }

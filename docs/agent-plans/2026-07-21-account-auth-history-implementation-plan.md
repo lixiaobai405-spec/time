@@ -732,17 +732,17 @@ git commit -m "feat: add account authentication UI"
 - Modify: `tests/frontend.spec.js`
 - Modify: `docs/agent-plans/2026-07-21-account-auth-history-implementation-plan.md`
 
-- [ ] **Step 1: 写 Playwright RED**
+- [x] **Step 1: 写 Playwright RED**
 
 覆盖：注册→保存恢复码→登录→四步→报告立即显示→自动保存历史→列表→详情；保存失败时报告保留并显示重试；同一 `clientRunId` 重试不重复；两个 browser context 用户隔离；删除二次确认；恢复码重置后旧 Session 失效、新恢复码只显示一次、新密码登录且原历史保留；历史详情/复制不显示任务 UUID 或 8 位前缀。
 
-- [ ] **Step 2: 运行 RED**
+- [x] **Step 2: 运行 RED**
 
 ```powershell
 & '.\.conda\npx.cmd' playwright test tests/auth-history.spec.js
 ```
 
-- [ ] **Step 3: 实现历史状态与 UI**
+- [x] **Step 3: 实现历史状态与 UI**
 
 每次 `resetState()` 生成新的 `clientRunId=crypto.randomUUID()`；报告校验并写入 `state.report` 后立即渲染，再异步 POST 历史。保存状态固定为：
 
@@ -755,14 +755,14 @@ historyDetail: null,
 
 历史详情用当前安全 Markdown renderer 渲染报告，目标/任务字段用 `textContent`；删除按钮先调用 `window.confirm()`，确认后 DELETE。恢复密码成功清空本地用户与 CSRF，展示新恢复码，确认保存后回登录页。
 
-- [ ] **Step 4: 运行 GREEN 和完整 Playwright**
+- [x] **Step 4: 运行 GREEN 和完整 Playwright**
 
 ```powershell
 & '.\.conda\npx.cmd' playwright test tests/auth-history.spec.js
 & '.\.conda\npm.cmd' run test:e2e
 ```
 
-- [ ] **Step 5: 提交**
+- [x] **Step 5: 提交**
 
 ```powershell
 git add -- frontend/history-ui.js frontend/app.js frontend/state.js frontend/index.html tests/auth-history.spec.js tests/frontend.spec.js docs/agent-plans/2026-07-21-account-auth-history-implementation-plan.md

@@ -13,6 +13,21 @@ test.beforeEach(async ({ page }) => {
       csrfToken: 'fake-session-csrf-token',
     }),
   }));
+  await page.route('**/api/time-management/history', async route => {
+    if (route.request().method() !== 'POST') return route.fallback();
+    const body = route.request().postDataJSON();
+    return route.fulfill({
+      status: 201,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        id: '99999999-9999-4999-8999-999999999999',
+        ...body,
+        schemaVersion: 1,
+        createdAt: '2026-07-21T08:00:00.000Z',
+        updatedAt: '2026-07-21T08:00:00.000Z',
+      }),
+    });
+  });
 });
 
 const MOCK_TASKS = [
@@ -823,7 +838,7 @@ test('输入错误、模型超时和格式错误保留当前步骤供重试', as
 test('目标输入页明确展示会话隐私和敏感信息提示', async ({ page }) => {
   await page.goto('/');
   await page.getByRole('button', { name: /开始梳理/ }).click();
-  await expect(page.getByText('你填写的目标和任务仅用于完成本次会话，不会保存为历史记录。')).toBeVisible();
+  await expect(page.getByText('草稿不会保存；报告生成成功后会保存到你的账号历史。')).toBeVisible();
   await expect(page.getByText('请勿填写客户隐私、密码或其他敏感信息。')).toBeVisible();
 });
 
@@ -831,7 +846,8 @@ test('用户输入会真实贯穿任务、矩阵和报告', async ({ page }) => 
   const bodies = [];
   await page.route('**/api/time-management/**', async route => {
     const requestPath = new URL(route.request().url()).pathname;
-    bodies.push({ path: requestPath, body: route.request().postDataJSON() });
+    const requestBody = route.request().postDataJSON();
+    bodies.push({ path: requestPath, body: requestBody });
     const responses = {
       '/api/time-management/goals/check': {
         fields: ['昨天', '今天', '明天', '后天'].map(key => ({ key, status: 'ok', issue: '', suggestion: '' })),
@@ -855,6 +871,13 @@ test('用户输入会真实贯穿任务、矩阵和报告', async ({ page }) => 
         energyRules: ['优先完成第一象限'],
         adjustments: ['完成后进行复盘'],
       },
+      '/api/time-management/history': {
+        id: '99999999-9999-4999-8999-999999999999',
+        ...requestBody,
+        schemaVersion: 1,
+        createdAt: '2026-07-21T08:00:00.000Z',
+        updatedAt: '2026-07-21T08:00:00.000Z',
+      },
     };
     await route.fulfill({
       status: 200,
@@ -874,9 +897,13 @@ test('用户输入会真实贯穿任务、矩阵和报告', async ({ page }) => 
   await page.getByRole('button', { name: /矩阵判定/ }).click();
   await page.getByRole('button', { name: /生成报告/ }).click();
   await expect(page.locator('#report-markdown')).toContainText('重要且紧急');
-  expect(bodies).toHaveLength(4);
+  expect(bodies).toHaveLength(5);
   expect(bodies[2].body.tasks[0].id).toBe('task-1');
   expect(bodies[3].body.matrix.quadrants[0].taskIds[0]).toBe('task-1');
+  expect(bodies[4].path).toBe('/api/time-management/history');
+  expect(bodies[4].body.clientRunId).toMatch(/^[0-9a-f-]{36}$/i);
+  expect(bodies[4].body.goals).toEqual(bodies[0].body.goals);
+  expect(bodies[4].body.report.order).toEqual([{ taskId: 'task-1', reason: '重要且紧急' }]);
 });
 
 test('2026-07-20 人工业务回归完整贯穿任务、矩阵和报告', async ({ page }) => {
