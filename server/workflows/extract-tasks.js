@@ -152,6 +152,7 @@ async function extractTasks({ goals, modelClient, requestBody, now }) {
         tasks: tasks.map(task => applyDeadlineUrgency(task, {
           now: now || Date.now,
           timeZone: 'Asia/Shanghai',
+          goalText: validatedGoals[SOURCE_GOAL_KEY[task.source]] || '',
         })),
       };
     } catch (error) {

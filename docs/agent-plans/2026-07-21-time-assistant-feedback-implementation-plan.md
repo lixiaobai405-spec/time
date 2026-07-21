@@ -36,7 +36,7 @@
 - Modify: `server/workflows/extract-tasks.js`
 - Modify: `prompts/system.md`
 
-- [ ] **Step 1: Write failing policy tests**
+- [x] **Step 1: Write failing policy tests**
 
 Add cases equivalent to:
 
@@ -65,7 +65,7 @@ test('明确紧迫信号允许未来任务保持高紧急度', () => {
 
 Extend the extraction test so a future task with no signal becomes `中`, while a future task whose source goal contains `阻塞` remains `高`.
 
-- [ ] **Step 2: Run the tests and confirm RED**
+- [x] **Step 2: Run the tests and confirm RED**
 
 Run:
 
@@ -75,7 +75,7 @@ Run:
 
 Expected: FAIL because `parseDue` and future/long-term downgrading are not implemented.
 
-- [ ] **Step 3: Implement the minimal policy**
+- [x] **Step 3: Implement the minimal policy**
 
 In `server/policies/deadline.js`, add:
 
@@ -156,11 +156,11 @@ goalText: validatedGoals[SOURCE_GOAL_KEY[task.source]] || '',
 
 Update the extraction prompt to state the same deadline/signal rules and explicitly forbid assigning urgency merely to populate quadrants.
 
-- [ ] **Step 4: Run tests and confirm GREEN**
+- [x] **Step 4: Run tests and confirm GREEN**
 
 Run the same command. Expected: all deadline and extraction tests PASS.
 
-- [ ] **Step 5: Commit Task 1**
+- [x] **Step 5: Commit Task 1**
 
 ```powershell
 git add -- server/policies/deadline.js server/workflows/extract-tasks.js prompts/system.md tests/server/deadline-policy.test.js tests/server/extract-tasks.test.js
