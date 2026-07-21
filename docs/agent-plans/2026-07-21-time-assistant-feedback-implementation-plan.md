@@ -449,6 +449,8 @@ Expected: no whitespace errors; hooks PASS; only the four pre-existing unrelated
 
 Verification note: `git diff --check` and the global `pre-commit` hook passed. This repository has no `pre-push` hook configured, so `git hook run pre-push` reported `cannot find a hook named pre-push` rather than executing a check.
 
+Completion audit note: the observed UI format `今天 11:30 前` exposed a missing relative-date suffix case. A RED/GREEN regression test was added and the parser now accepts an optional trailing `前` after an explicit relative time.
+
 - [x] **Step 4: Commit plan completion marks**
 
 ```powershell

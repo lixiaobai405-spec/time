@@ -81,6 +81,11 @@ test('中文相对日期按 Asia/Shanghai 参考日解析', () => {
     time: '09:30',
     sortKey: '2026-07-21T09:30',
   });
+  assert.deepEqual(parseDue('今天 11:30 前', context), {
+    date: '2026-07-20',
+    time: '11:30',
+    sortKey: '2026-07-20T11:30',
+  });
 });
 
 test('当天有时间、当天仅日期和已逾期任务统一为高紧急度', () => {

@@ -1,6 +1,6 @@
 const DEFAULT_TIME_ZONE = 'Asia/Shanghai';
 const EXPLICIT_DUE_PATTERN = /^(\d{4})-(\d{2})-(\d{2})(?:[ T](\d{2}):(\d{2}))?$/;
-const RELATIVE_DUE_PATTERN = /^(今天|今日|明天)(?:\s*([01]?\d|2[0-3]):([0-5]\d))?$/;
+const RELATIVE_DUE_PATTERN = /^(今天|今日|明天)(?:\s*([01]?\d|2[0-3]):([0-5]\d)\s*前?)?$/;
 const URGENCY_SIGNAL = /紧急|立即|马上|尽快|今天必须|今日必须|当天交付|影响当天交付|阻塞/;
 
 function resolveNow(now) {
