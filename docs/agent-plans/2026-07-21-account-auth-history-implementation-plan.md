@@ -574,21 +574,22 @@ git commit -m "feat: protect time management APIs"
 - Create: `server/history/contracts.js`
 - Create: `server/history/cursor.js`
 - Create: `server/repositories/history-repository.js`
+- Create: `tests/helpers/history-fixture.js`
 - Create: `tests/server/history-repository.test.js`
 - Create: `tests/server/history-contracts.test.js`
 - Modify: `docs/agent-plans/2026-07-21-account-auth-history-implementation-plan.md`
 
-- [ ] **Step 1: 写 RED 测试**
+- [x] **Step 1: 写 RED 测试**
 
 覆盖完整 `{clientRunId,title,goals,tasks,matrix,report}` Schema；稳定 UUID；任务守恒；只有“高”映射象限；55/25/15/5；报告只引用当前任务且无 UUID/8 位前缀泄漏；未知 schema version 拒绝。Repository 测试证明所有保存、列表、详情、删除都强制接收服务端 `userId`，A 不能读取/删除 B。
 
-- [ ] **Step 2: 运行 RED**
+- [x] **Step 2: 运行 RED**
 
 ```powershell
 & '.\.conda\node.exe' --test tests/server/history-contracts.test.js tests/server/history-repository.test.js
 ```
 
-- [ ] **Step 3: 实现快照验证、游标和 Repository**
+- [x] **Step 3: 实现快照验证、游标和 Repository**
 
 保存使用唯一 `(user_id, client_run_id)`，重复 clientRunId 返回原记录且不覆盖正文。列表 SQL：
 
@@ -603,11 +604,11 @@ LIMIT ?
 
 无 cursor 时省略游标条件，读取 `limit + 1` 生成 base64url JSON `{createdAt,id}` 游标；默认 20，最大 50。详情 JSON 解析或 schema version 异常转换为稳定安全错误，不返回部分正文。
 
-- [ ] **Step 4: 运行 GREEN 并提交**
+- [x] **Step 4: 运行 GREEN 并提交**
 
 ```powershell
 & '.\.conda\node.exe' --test tests/server/history-contracts.test.js tests/server/history-repository.test.js
-git add -- server/history/contracts.js server/history/cursor.js server/repositories/history-repository.js tests/server/history-contracts.test.js tests/server/history-repository.test.js docs/agent-plans/2026-07-21-account-auth-history-implementation-plan.md
+git add -- server/history/contracts.js server/history/cursor.js server/repositories/history-repository.js tests/helpers/history-fixture.js tests/server/history-contracts.test.js tests/server/history-repository.test.js docs/agent-plans/2026-07-21-account-auth-history-implementation-plan.md
 git diff --cached --check
 git commit -m "feat: add isolated history repository"
 ```
