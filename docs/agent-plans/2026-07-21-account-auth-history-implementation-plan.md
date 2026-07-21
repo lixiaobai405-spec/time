@@ -484,12 +484,11 @@ git commit -m "feat: add account authentication APIs"
 - Modify: `server/auth/auth-service.js`
 - Modify: `server/auth/router.js`
 - Modify: `server/repositories/user-repository.js`
-- Modify: `server/repositories/session-repository.js`
+- Modify: `server/runtime.js`
 - Create: `tests/server/recovery-api.test.js`
-- Modify: `tests/server/auth-api.test.js`
 - Modify: `docs/agent-plans/2026-07-21-account-auth-history-implementation-plan.md`
 
-- [ ] **Step 1: 写 RED 测试**
+- [x] **Step 1: 写 RED 测试**
 
 覆盖：
 
@@ -500,13 +499,13 @@ POST /api/auth/recovery-code/rotate
 
 重置成功必须在同一事务中更新密码哈希、轮换恢复码和版本、删除该用户全部 Session；旧密码、旧恢复码和两个旧 Session 均失效；账号和历史行保持；数据库中途失败时全部回滚。轮换接口要求登录、CSRF 和当前密码，只返回一次新恢复码，不撤销其他有效 Session。
 
-- [ ] **Step 2: 运行 RED**
+- [x] **Step 2: 运行 RED**
 
 ```powershell
 & '.\.conda\node.exe' --test tests/server/recovery-api.test.js tests/server/auth-api.test.js
 ```
 
-- [ ] **Step 3: 实现事务服务**
+- [x] **Step 3: 实现事务服务**
 
 固定服务接口：
 
@@ -517,11 +516,11 @@ authService.rotateRecoveryCode({ userId, password });
 
 用户名不存在、恢复码错误、登录密码错误均使用通用 `AUTH_INVALID_CREDENTIALS` 文案，不返回用户名存在性。事务提交后才把新明文恢复码返回 Router。
 
-- [ ] **Step 4: 运行 GREEN 并提交**
+- [x] **Step 4: 运行 GREEN 并提交**
 
 ```powershell
 & '.\.conda\node.exe' --test tests/server/recovery-api.test.js tests/server/auth-api.test.js
-git add -- server/auth/auth-service.js server/auth/router.js server/repositories/user-repository.js server/repositories/session-repository.js tests/server/recovery-api.test.js tests/server/auth-api.test.js docs/agent-plans/2026-07-21-account-auth-history-implementation-plan.md
+git add -- server/auth/auth-service.js server/auth/router.js server/repositories/user-repository.js server/runtime.js tests/server/recovery-api.test.js docs/agent-plans/2026-07-21-account-auth-history-implementation-plan.md
 git diff --cached --check
 git commit -m "feat: add recovery password reset"
 ```

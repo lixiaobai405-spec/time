@@ -12,6 +12,14 @@ const DUMMY_PASSWORD_HASH = [
   Buffer.alloc(16).toString('base64url'),
   Buffer.alloc(64).toString('base64url'),
 ].join('$');
+const DUMMY_RECOVERY_CODE_HASH = recoveryCodeHashForDummy();
+
+function recoveryCodeHashForDummy() {
+  return crypto
+    .createHash('sha256')
+    .update('0'.repeat(48), 'ascii')
+    .digest('base64url');
+}
 
 function inputProblem() {
   return httpProblem('INPUT_INVALID', '用户名或密码格式不正确。', 400);
@@ -24,6 +32,7 @@ function invalidCredentials() {
 function createAuthService({
   database,
   userRepository,
+  sessionRepository,
   passwordService,
   recoveryCodeService,
   randomUUID = crypto.randomUUID,
@@ -73,6 +82,76 @@ function createAuthService({
         && await passwordService.verifyPassword(password, passwordHash);
       if (!user || !valid) throw invalidCredentials();
       return { id: user.id, username: user.username };
+    },
+
+    async resetWithRecovery({ username, recoveryCode: submittedCode, newPassword }) {
+      let normalizedUsername;
+      try {
+        normalizedUsername = normalizeUsername(username);
+      } catch {
+        throw invalidCredentials();
+      }
+
+      let user = null;
+      try {
+        user = await userRepository.findByNormalizedUsername(normalizedUsername);
+      } catch {
+        // Invalid and unknown usernames share the same recovery-code work.
+      }
+      const recoveryValid = recoveryCodeService.verifyRecoveryCode(
+        submittedCode,
+        user?.recoveryCodeHash || DUMMY_RECOVERY_CODE_HASH,
+      );
+      if (!user || !recoveryValid) throw invalidCredentials();
+
+      try {
+        passwordService.validatePassword(newPassword, normalizedUsername);
+      } catch {
+        throw inputProblem();
+      }
+
+      const passwordHash = await passwordService.hashPassword(newPassword);
+      const recoveryCode = recoveryCodeService.generateRecoveryCode();
+      const recoveryCodeHash = recoveryCodeService.hashRecoveryCode(recoveryCode);
+
+      await database.transaction(async (transaction) => {
+        const current = await userRepository.findById(user.id, transaction);
+        if (
+          !current
+          || !recoveryCodeService.verifyRecoveryCode(submittedCode, current.recoveryCodeHash)
+        ) {
+          throw invalidCredentials();
+        }
+        const update = await userRepository.updateCredentials(transaction, {
+          userId: current.id,
+          passwordHash,
+          recoveryCodeHash,
+        });
+        if (update.changes !== 1) throw invalidCredentials();
+        await sessionRepository.destroyAllForUser(transaction, current.id);
+      });
+
+      return { recoveryCode };
+    },
+
+    async rotateRecoveryCode({ userId, password: submittedPassword }) {
+      const user = await userRepository.findById(userId);
+      const passwordHash = user?.passwordHash || DUMMY_PASSWORD_HASH;
+      const valid = typeof submittedPassword === 'string'
+        && await passwordService.verifyPassword(submittedPassword, passwordHash);
+      if (!user || !valid) throw invalidCredentials();
+
+      const recoveryCode = recoveryCodeService.generateRecoveryCode();
+      const recoveryCodeHash = recoveryCodeService.hashRecoveryCode(recoveryCode);
+      await database.transaction(async (transaction) => {
+        const update = await userRepository.rotateRecoveryCode(transaction, {
+          userId: user.id,
+          expectedPasswordHash: user.passwordHash,
+          recoveryCodeHash,
+        });
+        if (update.changes !== 1) throw invalidCredentials();
+      });
+      return { recoveryCode };
     },
   });
 }
