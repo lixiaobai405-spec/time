@@ -197,7 +197,7 @@ git commit -m "feat: add SQLite migrations"
 - Create: `tests/server/user-repository.test.js`
 - Modify: `docs/agent-plans/2026-07-21-account-auth-history-implementation-plan.md`
 
-- [ ] **Step 1: 写 RED 测试**
+- [x] **Step 1: 写 RED 测试**
 
 覆盖 ASCII 字母/数字/下划线、3–32 字符、trim、大小写唯一性、显示值保留、按 ID 查询和参数化更新凭据。固定接口：
 
@@ -210,7 +210,7 @@ repository.findById(userId);
 repository.updateCredentials(tx, { userId, passwordHash, recoveryCodeHash });
 ```
 
-- [ ] **Step 2: 运行 RED**
+- [x] **Step 2: 运行 RED**
 
 ```powershell
 & '.\.conda\node.exe' --test tests/server/user-repository.test.js
@@ -218,11 +218,11 @@ repository.updateCredentials(tx, { userId, passwordHash, recoveryCodeHash });
 
 Expected: 模块不存在。
 
-- [ ] **Step 3: 实现最小 Repository**
+- [x] **Step 3: 实现最小 Repository**
 
 `validateUsername()` 对非法值抛出 `INPUT_INVALID`；唯一索引冲突转换为 `AUTH_USERNAME_TAKEN`，不把 SQL、路径或参数写入错误消息。所有 SQL 使用 `?` 参数，调用方不得传入或覆盖用户 ID 查询条件。
 
-- [ ] **Step 4: 运行 GREEN 并提交**
+- [x] **Step 4: 运行 GREEN 并提交**
 
 ```powershell
 & '.\.conda\node.exe' --test tests/server/user-repository.test.js
