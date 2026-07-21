@@ -331,7 +331,7 @@ git commit -m "feat: add recovery code primitives"
 - Create: `tests/server/session-store.test.js`
 - Modify: `docs/agent-plans/2026-07-21-account-auth-history-implementation-plan.md`
 
-- [ ] **Step 1: 写 RED 测试**
+- [x] **Step 1: 写 RED 测试**
 
 覆盖：Session ID 为 32 字节安全随机 base64url；数据库仅存在 SHA-256 `token_hash`；Store 的 `set/get/touch/destroy`；7 天到期；过期读取即删除；正常注销只删当前 Session；`destroyAllForUser(tx,userId)` 删除全部；用户 A 的注销不影响用户 B。
 
@@ -343,17 +343,17 @@ assert.notEqual(row.token_hash, rawSessionId);
 assert.equal(row.token_hash, hashToken(rawSessionId));
 ```
 
-- [ ] **Step 2: 运行 RED**
+- [x] **Step 2: 运行 RED**
 
 ```powershell
 & '.\.conda\node.exe' --test tests/server/session-store.test.js
 ```
 
-- [ ] **Step 3: 实现 Repository 和 Store**
+- [x] **Step 3: 实现 Repository 和 Store**
 
 Store 继承 `express-session.Store`，只实现所需的 `get`、`set`、`touch`、`destroy`。`get` 只重建 `{ userId, cookie }`，不把数据库哈希发给浏览器；`touch` 只更新 `last_seen_at`，不突破登录时确定的 `expires_at`。Repository 额外导出 `setCsrfHash`、`findByToken`、`destroyCurrent`、`destroyAllForUser`、`pruneExpired`。
 
-- [ ] **Step 4: 运行 GREEN 并提交**
+- [x] **Step 4: 运行 GREEN 并提交**
 
 ```powershell
 & '.\.conda\node.exe' --test tests/server/session-store.test.js
