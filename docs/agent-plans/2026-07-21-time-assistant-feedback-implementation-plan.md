@@ -174,7 +174,7 @@ git commit -m "fix: correct unsupported task urgency"
 - Create: `server/policies/report-schedule.js`
 - Create: `tests/server/report-schedule.test.js`
 
-- [ ] **Step 1: Write failing focused policy tests**
+- [x] **Step 1: Write failing focused policy tests**
 
 Cover these public functions:
 
@@ -197,7 +197,7 @@ assert.equal(parseEstimatedRangeMinutes('半天'), null);
 
 Build context for `17:00`/`1h` and `18:00`/`30分钟`, then prove `17:00-18:30 推进方案` conflicts, a non-overlapping range does not, arranging the protected task by its full name does not, and a plain `18:00 前完成` deadline mention is not treated as a range.
 
-- [ ] **Step 2: Run the test and confirm RED**
+- [x] **Step 2: Run the test and confirm RED**
 
 ```powershell
 & .\.conda\node.exe --test tests/server/report-schedule.test.js
@@ -205,7 +205,7 @@ Build context for `17:00`/`1h` and `18:00`/`30分钟`, then prove `17:00-18:30 �
 
 Expected: FAIL because `server/policies/report-schedule.js` does not exist.
 
-- [ ] **Step 3: Implement the policy module**
+- [x] **Step 3: Implement the policy module**
 
 Create the module with the following complete behavior (factor repeated conversions into local helpers without changing the exported API):
 
@@ -295,11 +295,11 @@ module.exports = {
 
 Use explicit range syntax `HH:MM-HH:MM`, including ASCII hyphen, en dash, em dash, and `至`. Derive protected windows only for today or overdue tasks with a parsed time; use the maximum duration for a range so protection is conservative. A collision is invalid only when the recommendation does not name the collided task. Do not persist this context.
 
-- [ ] **Step 4: Run the test and confirm GREEN**
+- [x] **Step 4: Run the test and confirm GREEN**
 
 Run the same command. Expected: all schedule-policy tests PASS.
 
-- [ ] **Step 5: Commit Task 2**
+- [x] **Step 5: Commit Task 2**
 
 ```powershell
 git add -- server/policies/report-schedule.js tests/server/report-schedule.test.js
