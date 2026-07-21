@@ -211,6 +211,47 @@ test('注册验证确认密码且恢复码只显示到用户确认保存', async
   expect(localState.csrfToken).not.toBeNull();
 });
 
+test('账号凭据、Session 和业务正文不进入浏览器持久存储', async ({ page, context }) => {
+  const username = 'Ui_Storage_Audit_01';
+  const password = 'Ui-Storage-Secret-2026';
+  const goalMarker = 'PRIVATE_BROWSER_GOAL_STORAGE_MARKER';
+  const historyMarker = 'PRIVATE_BROWSER_HISTORY_STORAGE_MARKER';
+  const recoveryCode = await registerAndLogin(page, username, password);
+  const snapshot = historySnapshot(
+    historyMarker,
+    'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee',
+  );
+  snapshot.goals = { ...snapshot.goals, 今天: goalMarker };
+  expect((await saveThroughApi(page, snapshot)).status).toBe(201);
+
+  const sessionCookie = (await context.cookies()).find(cookie => cookie.name === 'time.sid');
+  expect(sessionCookie).toBeDefined();
+  expect(sessionCookie.httpOnly).toBe(true);
+  const persisted = await page.evaluate(async () => ({
+    local: Object.entries(localStorage),
+    session: Object.entries(sessionStorage),
+    visibleCookie: document.cookie,
+    indexedDatabases: typeof indexedDB.databases === 'function'
+      ? (await indexedDB.databases()).map(database => database.name)
+      : [],
+    hiddenValues: [...document.querySelectorAll('input[type="hidden"]')]
+      .map(input => input.value),
+  }));
+  const serialized = JSON.stringify(persisted);
+  for (const marker of [
+    username,
+    password,
+    recoveryCode,
+    sessionCookie.value,
+    goalMarker,
+    historyMarker,
+  ]) {
+    expect(serialized).not.toContain(marker);
+  }
+  expect(persisted.visibleCookie).not.toContain('time.sid');
+  expect(persisted.indexedDatabases).toEqual([]);
+});
+
 test('登录后刷新恢复身份但不恢复草稿，退出后回到登录页', async ({ page }) => {
   const username = 'Ui_Login_Refresh_01';
   await page.goto('/');

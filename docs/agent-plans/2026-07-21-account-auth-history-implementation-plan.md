@@ -846,11 +846,11 @@ git commit -m "docs: add authenticated SQLite operations"
 - Modify: `tests/auth-history.spec.js`
 - Modify: `docs/agent-plans/2026-07-21-account-auth-history-implementation-plan.md`
 
-- [ ] **Step 1: 补齐最终 RED 安全断言**
+- [x] **Step 1: 补齐最终 RED 安全断言**
 
 扫描服务端日志记录对象和前端存储；注入带标记的用户名、密码、恢复码、Cookie、Session token、目标正文、历史正文和 SQL 错误，断言响应与日志均无标记。直接查询临时 SQLite，断言密码、恢复码和 raw sid 不存在，历史只能由所属 user_id 查询。
 
-- [ ] **Step 2: 运行新增断言并保留 RED 证据**
+- [x] **Step 2: 运行新增断言并保留 RED 证据**
 
 ```powershell
 & '.\.conda\node.exe' --test tests/server/security.test.js tests/server/delivery-docs.test.js
@@ -859,14 +859,14 @@ git commit -m "docs: add authenticated SQLite operations"
 
 Expected: 如果已有实现完全满足断言则直接通过；若任一断言失败，记录失败测试名称和不含敏感值的差异，先做最小安全修复。允许修复的范围仅限 `server/app.js`、`server/auth/`、`server/history/`、`server/repositories/`、`server/security/`、`frontend/` 与对应测试，不增加新功能或依赖。
 
-- [ ] **Step 3: 运行定向 GREEN**
+- [x] **Step 3: 运行定向 GREEN**
 
 ```powershell
 & '.\.conda\node.exe' --test tests/server/password.test.js tests/server/recovery-code.test.js tests/server/session-store.test.js tests/server/auth-security.test.js tests/server/auth-api.test.js tests/server/recovery-api.test.js tests/server/workflow-auth.test.js tests/server/history-contracts.test.js tests/server/history-repository.test.js tests/server/history-api.test.js tests/server/operations.test.js tests/server/security.test.js
 & '.\.conda\npx.cmd' playwright test tests/auth-history.spec.js
 ```
 
-- [ ] **Step 4: 运行所有正式验证**
+- [x] **Step 4: 运行所有正式验证**
 
 ```powershell
 & '.\.conda\npm.cmd' run test:server
@@ -881,7 +881,7 @@ git log --oneline --decorate -20
 
 Expected: 所有 Node/API、Playwright 和完整 npm 测试通过；全局 Git hook 在正常提交中通过；无 `.sqlite`、`-wal`、`-shm`、备份、缓存、日志或真实 secret 出现在状态/提交。
 
-- [ ] **Step 5: 核对用户文件保护哈希**
+- [x] **Step 5: 核对用户文件保护哈希**
 
 除明确要求修改的 `docs/agent-plans/部署文档.md` 外，重新计算以下文件 SHA-256 并与 Task 0 基线一致：设计文档、高密度部署人工测试、`docs/superpowers/` 两个文件、`tests/manual-test-input-template.md`。
 

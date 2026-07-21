@@ -131,6 +131,15 @@ test('account authentication and history acceptance document records evidence an
   }
 });
 
+test('security documentation fixes the log and browser-memory privacy boundary', () => {
+  const readme = read('README.md');
+  const review = read('docs/adversarial-review.md');
+  assert.match(readme, /请求日志只记录 requestId、路径、状态和耗时/);
+  assert.match(readme, /不记录用户名、凭据、Cookie、目标或历史正文/);
+  assert.match(readme, /四步草稿仍只存在浏览器内存/);
+  assert.match(review, /不记录用户名、密码、恢复码、Cookie、Session token、目标正文或历史正文/);
+});
+
 test('甲方验收清单包含 11 项正式交付口径和测试证据', () => {
   const source = read('docs/acceptance/time-management-v1.md');
   const expectations = [
