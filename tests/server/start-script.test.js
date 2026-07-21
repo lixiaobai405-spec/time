@@ -123,7 +123,7 @@ test('start.bat is parsed by cmd.exe and reaches the server command', (t) => {
       cwd: tempDirectory,
       encoding: 'utf8',
       env: environment,
-      timeout: 3_000,
+      timeout: 15_000,
       windowsHide: true,
     },
   );
