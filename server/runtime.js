@@ -95,6 +95,7 @@ async function createRuntime(config) {
     secret: config.sessionSecret,
     sessionRepository,
   });
+  const sameOrigin = requireSameOrigin();
   const router = createAuthRouter({
     authService,
     createPreAuthCsrfToken: () => createPreAuthCsrfToken(config.sessionSecret),
@@ -105,13 +106,14 @@ async function createRuntime(config) {
     limiters: createAuthRateLimiters(),
     requireAuth,
     requirePreAuthCsrf: requirePreAuthCsrf({ secret: config.sessionSecret }),
-    requireSameOrigin: requireSameOrigin(),
+    requireSameOrigin: sameOrigin,
     requireSessionCsrf: sessionCsrf,
     sessionCookie,
   });
   const authBoundary = Object.freeze({
     router,
     requireAuth,
+    requireSameOrigin: sameOrigin,
     requireSessionCsrf: sessionCsrf,
     sessionMiddleware,
   });

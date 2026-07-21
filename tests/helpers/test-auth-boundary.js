@@ -15,6 +15,9 @@ function createTestAuthBoundary() {
       };
       next();
     },
+    requireSameOrigin(_request, _response, next) {
+      next();
+    },
     requireSessionCsrf(_request, _response, next) {
       next();
     },

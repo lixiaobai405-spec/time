@@ -25,12 +25,23 @@ function writeLog(logger, entry) {
   else if (logger && typeof logger.info === 'function') logger.info(entry);
 }
 
+function requireMutationSecurity(authBoundary) {
+  return (request, response, next) => {
+    if (['GET', 'HEAD', 'OPTIONS'].includes(request.method)) return next();
+    return authBoundary.requireSameOrigin(request, response, (originError) => {
+      if (originError) return next(originError);
+      return authBoundary.requireSessionCsrf(request, response, next);
+    });
+  };
+}
+
 function createApp({ modelClient, authBoundary, logger, now = Date.now } = {}) {
   if (
     !authBoundary
     || typeof authBoundary.sessionMiddleware !== 'function'
     || typeof authBoundary.router !== 'function'
     || typeof authBoundary.requireAuth !== 'function'
+    || typeof authBoundary.requireSameOrigin !== 'function'
     || typeof authBoundary.requireSessionCsrf !== 'function'
   ) {
     throw Object.assign(new Error('A complete authBoundary is required.'), {
@@ -70,6 +81,8 @@ function createApp({ modelClient, authBoundary, logger, now = Date.now } = {}) {
   app.get('/api/health', (_request, response) => response.json({ status: 'ok' }));
   app.use(authBoundary.sessionMiddleware);
   app.use('/api/auth', authBoundary.router);
+  app.use('/api/time-management', authBoundary.requireAuth);
+  app.use('/api/time-management', requireMutationSecurity(authBoundary));
   app.post('/api/time-management/goals/check', async (request, response, next) => {
     try {
       response.json(await checkGoals({

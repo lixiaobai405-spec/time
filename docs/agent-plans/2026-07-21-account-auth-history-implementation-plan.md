@@ -532,39 +532,35 @@ git commit -m "feat: add recovery password reset"
 **Files:**
 
 - Modify: `server/app.js`
-- Create: `tests/helpers/test-auth-boundary.js`
-- Modify: `tests/server/check-goals.test.js`
-- Modify: `tests/server/classify-matrix.test.js`
-- Modify: `tests/server/extract-tasks.test.js`
-- Modify: `tests/server/generate-report.test.js`
-- Modify: `tests/server/security.test.js`
+- Modify: `server/runtime.js`
+- Modify: `tests/helpers/test-auth-boundary.js`
 - Create: `tests/server/workflow-auth.test.js`
 - Modify: `docs/agent-plans/2026-07-21-account-auth-history-implementation-plan.md`
 
-- [ ] **Step 1: 写保护 RED**
+- [x] **Step 1: 写保护 RED**
 
 未登录调用四条业务 API 均返回 401 `AUTH_REQUIRED`，没有模型调用；已登录但缺少/错误 CSRF 返回 403；有效 Session、同源 Origin 和 CSRF 时原请求/响应不增删字段。`GET /api/health` 始终公开。
 
-- [ ] **Step 2: 运行 RED**
+- [x] **Step 2: 运行 RED**
 
 ```powershell
 & '.\.conda\node.exe' --test tests/server/workflow-auth.test.js
 ```
 
-- [ ] **Step 3: 在路由层统一加认证和 CSRF**
+- [x] **Step 3: 在路由层统一加认证和 CSRF**
 
 路由顺序固定为：安全头/日志 → JSON → Session → 公开 health/auth → `/api/time-management` 的 `requireAuth` 和 unsafe-method CSRF → 历史及四步路由 → API 404 → 静态前端 → problem handler。旧工作流单元测试使用显式 `createTestAuthBoundary()`，生产代码不存在绕过开关。
 
-- [ ] **Step 4: 运行 GREEN 和全部既有工作流测试**
+- [x] **Step 4: 运行 GREEN 和全部既有工作流测试**
 
 ```powershell
 & '.\.conda\node.exe' --test tests/server/workflow-auth.test.js tests/server/check-goals.test.js tests/server/classify-matrix.test.js tests/server/extract-tasks.test.js tests/server/generate-report.test.js tests/server/security.test.js
 ```
 
-- [ ] **Step 5: 提交**
+- [x] **Step 5: 提交**
 
 ```powershell
-git add -- server/app.js tests/helpers/test-auth-boundary.js tests/server/workflow-auth.test.js tests/server/check-goals.test.js tests/server/classify-matrix.test.js tests/server/extract-tasks.test.js tests/server/generate-report.test.js tests/server/security.test.js docs/agent-plans/2026-07-21-account-auth-history-implementation-plan.md
+git add -- server/app.js server/runtime.js tests/helpers/test-auth-boundary.js tests/server/workflow-auth.test.js docs/agent-plans/2026-07-21-account-auth-history-implementation-plan.md
 git diff --cached --check
 git commit -m "feat: protect time management APIs"
 ```
