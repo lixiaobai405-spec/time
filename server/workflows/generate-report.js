@@ -11,6 +11,10 @@ const {
   URGENCY,
 } = require('../contracts/time-management');
 const { buildReportPriorityContext } = require('../policies/report-priority');
+const {
+  buildReportScheduleContext,
+  hasScheduleConflict,
+} = require('../policies/report-schedule');
 const { loadStepPrompt } = require('../prompts/load-step-prompt');
 
 const ajv = new Ajv({ allErrors: true, strict: true });
@@ -255,10 +259,15 @@ async function generateReport({ tasks, matrix, goals, modelClient, requestBody, 
     now: now || Date.now,
     timeZone: 'Asia/Shanghai',
   });
+  const scheduleContext = buildReportScheduleContext({
+    tasks: input.tasks,
+    now: now || Date.now,
+    timeZone: 'Asia/Shanghai',
+  });
 
   const request = {
     system: loadStepPrompt('generate-report'),
-    user: JSON.stringify({ ...input, priorityContext }),
+    user: JSON.stringify({ ...input, priorityContext, scheduleContext }),
     temperature: 0.5,
     maxAttempts: 1,
   };
@@ -268,6 +277,7 @@ async function generateReport({ tasks, matrix, goals, modelClient, requestBody, 
       const report = await modelClient.completeJson(request);
       if (!validateResponse(report)) throw outputError();
       assertReportSemantics(report, input.tasks, input.goals, priorityContext);
+      if (hasScheduleConflict(report, scheduleContext)) throw outputError();
       return report;
     } catch (error) {
       const normalized = normalizeModelError(error);

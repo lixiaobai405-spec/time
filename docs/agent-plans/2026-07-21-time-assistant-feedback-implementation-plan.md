@@ -314,7 +314,7 @@ git commit -m "feat: derive report schedule constraints"
 - Modify: `server/workflows/generate-report.js`
 - Modify: `prompts/system.md`
 
-- [ ] **Step 1: Write failing workflow and API tests**
+- [x] **Step 1: Write failing workflow and API tests**
 
 Add a workflow test whose first fake response contains `17:00-18:30 推进方案`, whose second response contains a non-conflicting range, and assert two model calls. Parse the first request and assert it contains `scheduleContext.fixedPoints` and `scheduleContext.protectedWindows`.
 
@@ -330,7 +330,7 @@ assert.equal(modelClient.calls.length, 2);
 
 Add an API test that queues two conflicting fake reports and asserts HTTP 502 with only the stable public error shape, not the rejected report text.
 
-- [ ] **Step 2: Run and confirm RED**
+- [x] **Step 2: Run and confirm RED**
 
 ```powershell
 & .\.conda\node.exe --test tests/server/generate-report.test.js
@@ -338,7 +338,7 @@ Add an API test that queues two conflicting fake reports and asserts HTTP 502 wi
 
 Expected: FAIL because the request lacks `scheduleContext` and conflicting reports are accepted.
 
-- [ ] **Step 3: Integrate the policy**
+- [x] **Step 3: Integrate the policy**
 
 In `generate-report.js`:
 
@@ -359,11 +359,11 @@ Send `{ ...input, priorityContext, scheduleContext }` to the fake/real model bou
 
 Update the report prompt to explain `scheduleContext`, require explicit ranges to avoid other tasks' windows/points, and forbid inventing hidden calendar data.
 
-- [ ] **Step 4: Run and confirm GREEN**
+- [x] **Step 4: Run and confirm GREEN**
 
 Run the same test command. Expected: all report workflow/API tests PASS.
 
-- [ ] **Step 5: Commit Task 3**
+- [x] **Step 5: Commit Task 3**
 
 ```powershell
 git add -- server/workflows/generate-report.js prompts/system.md tests/server/generate-report.test.js

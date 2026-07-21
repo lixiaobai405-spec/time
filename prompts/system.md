@@ -140,10 +140,16 @@
 4. 第三象限的当天任务必须给出立即授权语义,使用“授权、委派、交办”之一。
 5. 第四象限无明确期限任务仍可建议减少、推迟或取消;不得把保护规则扩展为全局关键词禁令。
 
+【服务端时间约束】
+1. `scheduleContext.fixedPoints` 是当天任务的明确截止时间点,`scheduleContext.protectedWindows` 是按预估耗时回推的保护时段。
+2. energyRules 或 adjustments 中给出的明确 `HH:MM-HH:MM` 时间段不得与其他任务的截止点或保护时段重叠;若是在安排该任务本身,必须在同一句使用完整任务名。
+3. 无可用时间约束时可以不给具体时段;不得虚构日历事件、工作时间配置或用户未提供的空闲时间。
+
 【输入】
 当前任务:{{tasks_json}}
 四象限:{{quadrants_json}}
 优先级上下文:{{priority_context_json}}
+时间约束:{{schedule_context_json}}
 昨天复盘:{{昨天}}
 中长期目标:{{后天}}
 
