@@ -374,21 +374,21 @@ git commit -m "feat: add SQLite session store"
 - Create: `tests/server/auth-security.test.js`
 - Modify: `docs/agent-plans/2026-07-21-account-auth-history-implementation-plan.md`
 
-- [ ] **Step 1: 写 RED 测试**
+- [x] **Step 1: 写 RED 测试**
 
 测试公开预登录 CSRF token 的 HMAC、10 分钟到期和篡改拒绝；登录后 CSRF token 由 HMAC(`SESSION_SECRET`, `csrf:<sid>`) 派生，数据库只保存 SHA-256；缺少/错误 `Origin`、Host 或 `X-CSRF-Token` 返回 `AUTH_CSRF_INVALID`；限流键同时包含 `ipKeyGenerator(req.ip)` 与规范化用户名；注册、登录、重置分别触发 429。
 
-- [ ] **Step 2: 运行 RED**
+- [x] **Step 2: 运行 RED**
 
 ```powershell
 & '.\.conda\node.exe' --test tests/server/auth-security.test.js
 ```
 
-- [ ] **Step 3: 实现边界**
+- [x] **Step 3: 实现边界**
 
 增加辅助端点所需的 `createPreAuthCsrfToken()` 与 `verifyPreAuthCsrfToken()`；该 token 不含用户名，不写数据库。实现 `requireSameOrigin`、`requirePreAuthCsrf`、`requireSessionCsrf`。限流固定为 15 分钟窗口：注册 5 次、登录 10 次、恢复密码 5 次；handler 统一产生 `AUTH_RATE_LIMITED`。
 
-- [ ] **Step 4: 运行 GREEN 并提交**
+- [x] **Step 4: 运行 GREEN 并提交**
 
 ```powershell
 & '.\.conda\node.exe' --test tests/server/auth-security.test.js
