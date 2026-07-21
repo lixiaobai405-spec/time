@@ -14,14 +14,14 @@ const ENCODED_PATTERN = /^scrypt\$v=1\$N=32768\$r=8\$p=3\$([A-Za-z0-9_-]+)\$([A-
 
 function passwordError() {
   return Object.assign(
-    new Error('Password must be non-empty and differ from the username.'),
+    new Error('Password must contain at least 6 Unicode characters and differ from the username.'),
     { code: 'INPUT_INVALID' },
   );
 }
 
 function validatePassword(value, normalizedUsername) {
   if (typeof value !== 'string') throw passwordError();
-  if (value.length === 0) throw passwordError();
+  if (Array.from(value).length < 6) throw passwordError();
   if (
     typeof normalizedUsername === 'string'
     && value === normalizedUsername

@@ -37,12 +37,13 @@ test('registration returns one recovery code without logging the user in', async
   assert.equal(row.recovery_code_hash, hashRecoveryCode(payload.recoveryCode));
 });
 
-test('registration accepts Chinese, unlimited validation lengths, and case-sensitive usernames', async (t) => {
+test('registration accepts Chinese case-sensitive usernames and passwords of at least six characters', async (t) => {
   const { baseUrl } = await createAuthTestApp(t);
   const client = new AuthClient(baseUrl);
-  assert.equal((await client.register('管理者A', '短')).status, 201);
+  assert.equal((await client.register('管理者A', '五位密码啊')).status, 400);
+  assert.equal((await client.register('管理者A', '六位密码通过')).status, 201);
   assert.equal((await client.register('管理者a', 'x'.repeat(1_000))).status, 201);
-  assert.equal((await client.login('管理者A', '短')).status, 200);
+  assert.equal((await client.login('管理者A', '六位密码通过')).status, 200);
   assert.equal((await client.login('管理者a', 'x'.repeat(1_000))).status, 200);
 });
 

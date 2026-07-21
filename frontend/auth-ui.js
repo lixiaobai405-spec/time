@@ -33,6 +33,11 @@ function field(labelText, name, type, autocomplete) {
   input.type = type;
   input.autocomplete = autocomplete;
   input.required = true;
+  if (name === 'username') input.placeholder = '请输入你的用户名';
+  if (type === 'password') {
+    input.placeholder = '请输入至少6位密码';
+    input.minLength = 6;
+  }
   wrapper.append(label, input);
   return wrapper;
 }
@@ -79,7 +84,7 @@ export function renderLogin() {
 export function renderRegister() {
   const section = authShell(
     '创建账号',
-    '无需邮箱。用户名支持中文并区分大小写；用户名和密码均无应用级长度限制。请妥善保存注册后仅展示一次的恢复码。',
+    '无需邮箱。用户名支持中文并区分大小写；用户名无应用级长度限制，密码至少6位。请妥善保存注册后仅展示一次的恢复码。',
   );
   const form = document.createElement('form');
   form.className = 'auth-form';
