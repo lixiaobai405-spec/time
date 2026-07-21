@@ -674,18 +674,18 @@ git commit -m "feat: add history APIs"
 - Modify: `tests/frontend.spec.js`
 - Modify: `docs/agent-plans/2026-07-21-account-auth-history-implementation-plan.md`
 
-- [ ] **Step 1: 写 Playwright RED**
+- [x] **Step 1: 写 Playwright RED**
 
 新增测试：未登录显示登录页且不能进入工作区；注册验证确认密码；注册成功只显示一次恢复码并要求“已保存”；登录后刷新通过 `/api/auth/me` 恢复身份但不恢复草稿；退出回登录页；密码和恢复码不进入 URL、localStorage、sessionStorage 或 DOM 隐藏字段。
 
-- [ ] **Step 2: 运行 RED**
+- [x] **Step 2: 运行 RED**
 
 ```powershell
 $env:PLAYWRIGHT_BROWSERS_PATH='0'
 & '.\.conda\npx.cmd' playwright test tests/auth-history.spec.js --grep "注册|登录|刷新|退出"
 ```
 
-- [ ] **Step 3: 实现前端认证状态与页面**
+- [x] **Step 3: 实现前端认证状态与页面**
 
 `frontend/api.js` 增加 `getJson`、`deleteJson`、`setCsrfToken`；所有 unsafe 请求自动带当前 `X-CSRF-Token`，不保存 Cookie/token。`state.js` 增加：
 
@@ -701,7 +701,7 @@ recoveryCode: null,
 
 `playwright.config.js` 为测试服务器显式注入假 `SESSION_SECRET`、`SESSION_COOKIE_SECURE=false`、7 天有效期和位于测试临时目录的 `DATABASE_PATH`；测试前后删除该临时数据库及 WAL/SHM，不读取项目 `.env`。
 
-- [ ] **Step 4: 运行 GREEN 与旧前端回归**
+- [x] **Step 4: 运行 GREEN 与旧前端回归**
 
 ```powershell
 & '.\.conda\npx.cmd' playwright test tests/auth-history.spec.js --grep "注册|登录|刷新|退出"
@@ -710,7 +710,7 @@ recoveryCode: null,
 
 Expected: 新认证流程通过；旧 37 项通过显式认证 mock，不被默认绕过。
 
-- [ ] **Step 5: 提交**
+- [x] **Step 5: 提交**
 
 ```powershell
 git add -- frontend/api.js frontend/state.js frontend/app.js frontend/index.html frontend/auth-ui.js tests/auth-history.spec.js tests/frontend.spec.js playwright.config.js docs/agent-plans/2026-07-21-account-auth-history-implementation-plan.md

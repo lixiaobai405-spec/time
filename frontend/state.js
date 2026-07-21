@@ -5,7 +5,12 @@ function emptyGoals() {
 }
 
 export const state = {
-  screen: 'home',
+  authReady: false,
+  user: null,
+  csrfToken: null,
+  screen: 'boot',
+  recoveryCode: null,
+  authError: null,
   step: 1,
   maxStep: 1,
   goals: emptyGoals(),
@@ -38,7 +43,7 @@ export function invalidateAfterTasks() {
 }
 
 export function resetState() {
-  state.screen = 'home';
+  state.screen = state.user ? 'home' : 'login';
   state.step = 1;
   state.maxStep = 1;
   state.goals = emptyGoals();

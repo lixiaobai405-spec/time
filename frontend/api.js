@@ -1,4 +1,5 @@
 let activeController;
+let csrfToken = null;
 
 function apiError(payload, status) {
   const detail = payload?.error || {};
@@ -9,17 +10,24 @@ function apiError(payload, status) {
   );
 }
 
-export async function postJson(path, body) {
-  activeController?.abort();
-  activeController = new AbortController();
+async function requestJson(path, { method = 'GET', body, cancelPrevious = false } = {}) {
+  if (cancelPrevious) activeController?.abort();
+  const controller = new AbortController();
+  if (cancelPrevious) activeController = controller;
+
+  const headers = {};
+  if (body !== undefined) headers['content-type'] = 'application/json';
+  if (!['GET', 'HEAD'].includes(method) && csrfToken) headers['x-csrf-token'] = csrfToken;
 
   try {
     const response = await fetch(path, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(body),
-      signal: activeController.signal,
+      method,
+      headers,
+      body: body === undefined ? undefined : JSON.stringify(body),
+      credentials: 'same-origin',
+      signal: controller.signal,
     });
+    if (response.status === 204) return null;
     const payload = await response.json().catch(() => null);
     if (!response.ok) throw apiError(payload, response.status);
     if (payload == null) throw apiError(null, response.status);
@@ -35,6 +43,22 @@ export async function postJson(path, body) {
     }
     throw error;
   }
+}
+
+export function getJson(path) {
+  return requestJson(path);
+}
+
+export function postJson(path, body) {
+  return requestJson(path, { method: 'POST', body, cancelPrevious: true });
+}
+
+export function deleteJson(path) {
+  return requestJson(path, { method: 'DELETE', cancelPrevious: true });
+}
+
+export function setCsrfToken(value) {
+  csrfToken = typeof value === 'string' && value ? value : null;
 }
 
 export function cancelActiveRequest() {

@@ -1,4 +1,16 @@
-import { cancelActiveRequest, postJson } from './api.js';
+import {
+  cancelActiveRequest,
+  getJson,
+  postJson,
+  setCsrfToken,
+} from './api.js';
+import {
+  renderBoot,
+  renderLogin,
+  renderRecovery,
+  renderRecoveryCode,
+  renderRegister,
+} from './auth-ui.js';
 import {
   goalSnapshot,
   invalidateAfterGoals,
@@ -33,6 +45,48 @@ const ICONS = {
 let operationId = 0;
 const app = () => document.getElementById('app');
 
+function updateAuthBar() {
+  const user = document.getElementById('auth-user');
+  const logout = document.getElementById('auth-logout');
+  const authenticated = Boolean(state.authReady && state.user);
+  user.classList.toggle('hidden', !authenticated);
+  logout.classList.toggle('hidden', !authenticated);
+  user.textContent = authenticated ? `已登录：${state.user.username}` : '';
+}
+
+function rememberCsrfToken(value) {
+  state.csrfToken = typeof value === 'string' && value ? value : null;
+  setCsrfToken(state.csrfToken);
+}
+
+async function loadPreAuthCsrf() {
+  const result = await getJson('/api/auth/csrf');
+  rememberCsrfToken(result.csrfToken);
+}
+
+async function restoreAuth() {
+  try {
+    const session = await getJson('/api/auth/me');
+    state.user = session.user;
+    rememberCsrfToken(session.csrfToken);
+    state.authReady = true;
+    state.authError = null;
+    resetState();
+  } catch (error) {
+    state.user = null;
+    rememberCsrfToken(null);
+    state.authReady = true;
+    resetState();
+    try {
+      await loadPreAuthCsrf();
+      state.authError = error.status === 401 ? null : error;
+    } catch (csrfError) {
+      state.authError = csrfError;
+    }
+  }
+  render();
+}
+
 function toast(message) {
   const element = document.getElementById('toast');
   element.textContent = message;
@@ -59,6 +113,7 @@ function cancelPending() {
 }
 
 function startFlow() {
+  if (!state.user) return;
   cancelPending();
   clearToast();
   resetState();
@@ -207,9 +262,30 @@ function renderWorkspace() {
   hydrateStep();
 }
 
+function renderAuthScreen() {
+  let view;
+  if (!state.authReady || state.screen === 'boot') view = renderBoot();
+  else if (state.screen === 'register') view = renderRegister();
+  else if (state.screen === 'recovery') view = renderRecovery();
+  else if (state.screen === 'recovery-code' && state.recoveryCode) {
+    view = renderRecoveryCode(state.recoveryCode);
+  } else view = renderLogin();
+  app().replaceChildren(view);
+  const error = app().querySelector('.auth-error');
+  if (error && state.authError) error.textContent = state.authError.message || '请求失败，请重试。';
+}
+
 function render() {
-  if (state.screen === 'home') renderHome();
-  else renderWorkspace();
+  updateAuthBar();
+  if (!state.authReady || state.screen === 'boot' || state.screen === 'recovery-code') {
+    renderAuthScreen();
+  } else if (!state.user) {
+    renderAuthScreen();
+  } else if (state.screen === 'home') {
+    renderHome();
+  } else {
+    renderWorkspace();
+  }
 }
 
 function renderAtTop() {
@@ -687,6 +763,131 @@ async function copyReport() {
   }
 }
 
+function showAuthScreen(screen) {
+  cancelPending();
+  state.authError = null;
+  state.recoveryCode = null;
+  state.screen = screen;
+  render();
+}
+
+function authError(form, message) {
+  const element = form.querySelector('.auth-error');
+  element.textContent = message || '请求失败，请重试。';
+}
+
+async function submitLogin(form) {
+  if (state.pending) return;
+  const data = new FormData(form);
+  state.pending = 'auth';
+  authError(form, '');
+  form.querySelector('[type="submit"]').disabled = true;
+  try {
+    await postJson('/api/auth/login', {
+      username: data.get('username'),
+      password: data.get('password'),
+    });
+    const session = await getJson('/api/auth/me');
+    state.user = session.user;
+    rememberCsrfToken(session.csrfToken);
+    state.authReady = true;
+    state.authError = null;
+    state.recoveryCode = null;
+    state.pending = null;
+    resetState();
+    clearToast();
+    render();
+  } catch (error) {
+    state.pending = null;
+    authError(form, error.message);
+    form.querySelector('[type="submit"]').disabled = false;
+  }
+}
+
+async function submitRegister(form) {
+  if (state.pending) return;
+  const data = new FormData(form);
+  if (data.get('password') !== data.get('passwordConfirm')) {
+    authError(form, '两次输入的密码不一致。');
+    return;
+  }
+  state.pending = 'auth';
+  authError(form, '');
+  form.querySelector('[type="submit"]').disabled = true;
+  try {
+    const result = await postJson('/api/auth/register', {
+      username: data.get('username'),
+      password: data.get('password'),
+    });
+    state.pending = null;
+    state.authError = null;
+    state.recoveryCode = result.recoveryCode;
+    state.screen = 'recovery-code';
+    render();
+  } catch (error) {
+    state.pending = null;
+    authError(form, error.message);
+    form.querySelector('[type="submit"]').disabled = false;
+  }
+}
+
+async function submitRecovery(form) {
+  if (state.pending) return;
+  const data = new FormData(form);
+  if (data.get('newPassword') !== data.get('newPasswordConfirm')) {
+    authError(form, '两次输入的新密码不一致。');
+    return;
+  }
+  state.pending = 'auth';
+  authError(form, '');
+  form.querySelector('[type="submit"]').disabled = true;
+  try {
+    const result = await postJson('/api/auth/password/reset-with-recovery', {
+      username: data.get('username'),
+      recoveryCode: data.get('recoveryCode'),
+      newPassword: data.get('newPassword'),
+    });
+    state.pending = null;
+    state.authError = null;
+    state.recoveryCode = result.recoveryCode;
+    state.screen = 'recovery-code';
+    render();
+  } catch (error) {
+    state.pending = null;
+    authError(form, error.message);
+    form.querySelector('[type="submit"]').disabled = false;
+  }
+}
+
+async function logout() {
+  if (state.pending) return;
+  cancelPending();
+  state.pending = 'auth';
+  try {
+    await postJson('/api/auth/logout');
+    state.user = null;
+    rememberCsrfToken(null);
+    state.recoveryCode = null;
+    state.authError = null;
+    state.pending = null;
+    resetState();
+    await loadPreAuthCsrf();
+    render();
+  } catch (error) {
+    state.pending = null;
+    toast(error.message || '退出失败，请重试。');
+  }
+}
+
+document.addEventListener('submit', event => {
+  const form = event.target.closest('[data-auth-form]');
+  if (!form) return;
+  event.preventDefault();
+  if (form.dataset.authForm === 'login') submitLogin(form);
+  else if (form.dataset.authForm === 'register') submitRegister(form);
+  else if (form.dataset.authForm === 'recovery') submitRecovery(form);
+});
+
 document.addEventListener('click', event => {
   const step = event.target.closest('[data-step]');
   if (step) return navigateStep(Number(step.dataset.step));
@@ -704,7 +905,13 @@ document.addEventListener('click', event => {
   else if (action === 'add-task') addTask();
   else if (action === 'copy-report') copyReport();
   else if (action === 'restart') restartFlow();
+  else if (action === 'show-register') showAuthScreen('register');
+  else if (action === 'show-recovery') showAuthScreen('recovery');
+  else if (action === 'show-login') showAuthScreen('login');
+  else if (action === 'confirm-recovery-code') showAuthScreen(state.user ? 'home' : 'login');
+  else if (action === 'logout') logout();
 });
 
 document.querySelector('.brand').addEventListener('click', goHome);
 render();
+restoreAuth();

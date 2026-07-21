@@ -4,6 +4,17 @@ const {
   expectedTasks: MANUAL_EXPECTED_TASKS,
 } = require('./fixtures/manual-test-2026-07-20');
 
+test.beforeEach(async ({ page }) => {
+  await page.route('**/api/auth/me', route => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: JSON.stringify({
+      user: { id: '00000000-0000-4000-8000-000000000000', username: 'Playwright_User' },
+      csrfToken: 'fake-session-csrf-token',
+    }),
+  }));
+});
+
 const MOCK_TASKS = [
   { id: 'task-1', name: '**校对今天的方案终稿**', importance: '低', urgency: '高', source: '今天', due: '今天 18:00', est: '约1h', status: 'pending', classificationSource: 'ai-extraction' },
   { id: 'task-2', name: '跟进两个客户投诉', importance: '高', urgency: '高', source: '临时', due: '今天', est: '约1.5h', status: 'pending', classificationSource: 'ai-extraction' },
