@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Implement the approved hybrid fixes for long-term effort display, deterministic urgency correction, matrix regression coverage, and report schedule conflicts.
+**Goal:** Implement the approved hybrid fixes for long-term time metadata display, deterministic urgency correction, matrix regression coverage, and report schedule conflicts.
 
-**Architecture:** Keep `est` and all public contracts unchanged, but filter long-term effort at the two UI rendering boundaries. Extend the existing deadline policy with relative-date and urgency-signal handling, then add a focused report-schedule policy that derives non-persistent constraints and rejects conflicting explicit time ranges through the workflow's existing one-retry path.
+**Architecture:** Keep `due`, `est`, and all public contracts unchanged, but filter long-term deadline and effort metadata at the two UI rendering boundaries. Extend the existing deadline policy with relative-date and urgency-signal handling, then add a focused report-schedule policy that derives non-persistent constraints and rejects conflicting explicit time ranges through the workflow's existing one-retry path.
 
 **Tech Stack:** Node.js CommonJS, Express, AJV, Node test runner, Playwright, vanilla JavaScript, Markdown prompts.
 
@@ -17,14 +17,14 @@
 - Modify `prompts/system.md`: tell extraction and report models the deterministic rules and schedule constraints.
 - Create `server/policies/report-schedule.js`: build ephemeral schedule context and detect conflicting explicit ranges.
 - Modify `server/workflows/generate-report.js`: send schedule context and reject conflicts before returning.
-- Modify `frontend/app.js`: omit `est` from current long-term task cards.
-- Modify `frontend/history-ui.js`: omit `est` from long-term history details.
+- Modify `frontend/app.js`: omit `due` and `est` from current long-term task cards.
+- Modify `frontend/history-ui.js`: omit `due` and `est` from long-term history details.
 - Modify `tests/server/deadline-policy.test.js`: cover relative dates, future downgrade, signals, and immutability.
 - Modify `tests/server/extract-tasks.test.js`: prove the API/workflow passes source goal text to the policy.
 - Create `tests/server/report-schedule.test.js`: cover context construction, duration parsing, conflict, and false-positive boundaries.
 - Modify `tests/server/generate-report.test.js`: cover retry, repeated conflict, request context, and API safety.
-- Modify `tests/frontend.spec.js`: cover current-card effort visibility.
-- Modify `tests/auth-history.spec.js`: cover history-detail effort visibility.
+- Modify `tests/frontend.spec.js`: cover current-card deadline and effort visibility.
+- Modify `tests/auth-history.spec.js`: cover history-detail deadline and effort visibility.
 - Re-run `tests/server/classify-matrix.test.js`: preserve task conservation, empty quadrants, and 55/25/15/5.
 
 ### Task 1: Deterministic urgency policy
@@ -371,7 +371,7 @@ git diff --cached --check
 git commit -m "fix: reject conflicting report schedules"
 ```
 
-### Task 4: Hide long-term effort in current and history UI
+### Task 4: Hide long-term time metadata in current and history UI
 
 **Files:**
 - Modify: `tests/frontend.spec.js`
@@ -381,27 +381,31 @@ git commit -m "fix: reject conflicting report schedules"
 
 - [x] **Step 1: Write failing Playwright assertions**
 
-In the existing long-term current-card test, assert the long-term card does not contain `16h`, and add a normal task with `1h` that still displays it.
+In the existing long-term current-card test, assert the long-term card contains neither its unique deadline nor `16h`, and add a normal task whose deadline and `1h` still display.
 
-In the history fixture, change one task to `source: '中长期'`, retain a unique `est: '长期工时16h'`, add `nextAction`, then assert the history detail omits that unique effort while still showing its due date, acceptance criterion, and next action. Assert a normal task's unique effort remains visible.
+In the history fixture, change one task to `source: '中长期'`, retain unique `due` and `est` values, and add `nextAction`. Assert the history detail omits both time values while still showing its acceptance criterion and next action; assert a normal task's deadline and effort remain visible.
 
 - [x] **Step 2: Run the focused browser tests and confirm RED**
 
 ```powershell
-& .\.conda\npx.cmd playwright test tests/frontend.spec.js tests/auth-history.spec.js --grep "长期任务卡|历史详情"
+& .\.conda\npx.cmd playwright test tests/frontend.spec.js --grep 长期任务卡
+& .\.conda\npx.cmd playwright test tests/auth-history.spec.js --grep 历史详情
 ```
 
-Expected: FAIL because both renderers currently include long-term `est`.
+Expected: FAIL because both renderers currently include long-term `due` and `est`.
 
 - [x] **Step 3: Apply the minimal render filters**
 
 In `frontend/app.js`:
 
 ```js
-if (task.source !== '中长期' && task.est) tags.push([task.est, '']);
+if (task.source !== '中长期') {
+  tags.push([`截止:${task.due || '待确认'}`, '']);
+  if (task.est) tags.push([task.est, '']);
+}
 ```
 
-In `frontend/history-ui.js`, construct metadata from an array and include `task.est` only when `task.source !== '中长期'`; retain due, criteria, and next action rendering unchanged.
+In `frontend/history-ui.js`, construct metadata from an array and include both `task.due` and `task.est` only when `task.source !== '中长期'`; retain criteria and next action rendering unchanged.
 
 - [x] **Step 4: Run focused browser tests and confirm GREEN**
 

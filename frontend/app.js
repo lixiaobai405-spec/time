@@ -362,8 +362,10 @@ function taskTags(task) {
   if (task.classificationSource === 'unclassified') tags.push(['待 AI 判定', '']);
   if (task.classificationSource === 'ai-matrix') tags.push(['AI 判定', '']);
   tags.push([`来源:${task.source}`, '']);
-  tags.push([`截止:${task.due || '待确认'}`, '']);
-  if (task.source !== '中长期' && task.est) tags.push([task.est, '']);
+  if (task.source !== '中长期') {
+    tags.push([`截止:${task.due || '待确认'}`, '']);
+    if (task.est) tags.push([task.est, '']);
+  }
   return tags;
 }
 

@@ -353,6 +353,7 @@ test('长期任务卡展示下一步且普通任务不显示空区域', async ({
         ...MOCK_TASKS[0],
         name: '推进长期课程里程碑',
         source: '中长期',
+        due: '90天',
         est: '16h',
         acceptanceCriteria: ['完成第一阶段里程碑'],
         nextAction: '今天先列出 4 个课程模块',
@@ -368,9 +369,11 @@ test('长期任务卡展示下一步且普通任务不显示空区域', async ({
   const longTermTask = page.locator('.task').filter({ hasText: '推进长期课程里程碑' });
   await expect(longTermTask).toContainText('下一步');
   await expect(longTermTask.locator('.next-action')).toContainText('今天先列出 4 个课程模块');
+  await expect(longTermTask).not.toContainText('截止:90天');
   await expect(longTermTask).not.toContainText('16h');
   const ordinaryTask = page.locator('.task').filter({ hasText: '发送今天的会议纪要' });
   await expect(ordinaryTask.locator('.next-action')).toHaveCount(0);
+  await expect(ordinaryTask).toContainText('截止:今天');
   await expect(ordinaryTask).toContainText('约1.5h');
 });
 
