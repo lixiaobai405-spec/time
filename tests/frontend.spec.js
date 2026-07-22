@@ -30,6 +30,28 @@ test.beforeEach(async ({ page }) => {
   });
 });
 
+test('缺少 crypto.randomUUID 时仍可启动并添加手动任务', async ({ page }) => {
+  const pageErrors = [];
+  page.on('pageerror', error => pageErrors.push(error.message));
+  await page.addInitScript(() => {
+    Object.defineProperty(globalThis.crypto, 'randomUUID', {
+      configurable: true,
+      value: undefined,
+    });
+  });
+
+  await advanceToTasks(page);
+  await page.getByRole('button', { name: /手动添加任务/ }).click();
+  await page.locator('#f-name').fill('HTTP 环境兼容任务');
+  await page.locator('#f-src').selectOption({ label: '临时' });
+  await page.locator('#f-due').fill('2026-08-01');
+  await page.locator('#f-cost').fill('1h');
+  await page.getByRole('button', { name: /添加到列表/ }).click();
+
+  await expect(page.locator('.task').filter({ hasText: 'HTTP 环境兼容任务' })).toBeVisible();
+  expect(pageErrors).toEqual([]);
+});
+
 const MOCK_TASKS = [
   { id: 'task-1', name: '**校对今天的方案终稿**', importance: '低', urgency: '高', source: '今天', due: '今天 18:00', est: '约1h', status: 'pending', classificationSource: 'ai-extraction' },
   { id: 'task-2', name: '跟进两个客户投诉', importance: '高', urgency: '高', source: '临时', due: '今天', est: '约1.5h', status: 'pending', classificationSource: 'ai-extraction' },

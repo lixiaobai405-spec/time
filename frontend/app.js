@@ -14,6 +14,7 @@ import {
 } from './auth-ui.js';
 import { renderHistoryDetail, renderHistoryList } from './history-ui.js';
 import {
+  createUuid,
   goalSnapshot,
   invalidateAfterGoals,
   invalidateAfterTasks,
@@ -780,7 +781,7 @@ function addTask() {
     unclassified: { importance: null, urgency: null, classificationSource: 'unclassified' },
   };
   state.tasks.push({
-    id: crypto.randomUUID(),
+    id: createUuid(),
     name,
     source,
     due,
