@@ -1,6 +1,8 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
+const { createTestAuthBoundary } = require('../helpers/test-auth-boundary');
+
 async function listen(app) {
   return new Promise((resolve, reject) => {
     const server = app.listen(0, '127.0.0.1', () => resolve(server));
@@ -16,7 +18,10 @@ async function close(server) {
 
 test('GET /api/health 返回 ok 且隐藏 Express 标识', async () => {
   const { createApp } = require('../../server/app');
-  const app = createApp({ modelClient: { completeJson: async () => ({}) } });
+  const app = createApp({
+    authBoundary: createTestAuthBoundary(),
+    modelClient: { completeJson: async () => ({}) },
+  });
   const server = await listen(app);
 
   try {
@@ -31,7 +36,10 @@ test('GET /api/health 返回 ok 且隐藏 Express 标识', async () => {
 
 test('GET / 从同一服务返回前端页面', async () => {
   const { createApp } = require('../../server/app');
-  const app = createApp({ modelClient: { completeJson: async () => ({}) } });
+  const app = createApp({
+    authBoundary: createTestAuthBoundary(),
+    modelClient: { completeJson: async () => ({}) },
+  });
   const server = await listen(app);
 
   try {
@@ -45,7 +53,10 @@ test('GET / 从同一服务返回前端页面', async () => {
 
 test('未知 API 返回安全统一错误结构', async () => {
   const { createApp } = require('../../server/app');
-  const app = createApp({ modelClient: { completeJson: async () => ({}) } });
+  const app = createApp({
+    authBoundary: createTestAuthBoundary(),
+    modelClient: { completeJson: async () => ({}) },
+  });
   const server = await listen(app);
 
   try {
@@ -69,6 +80,10 @@ test('loadConfig 只接受完整且有效的服务端配置', () => {
     MODEL_API_KEY: 'fake-key',
     MODEL_NAME: 'fake-model',
     MODEL_TIMEOUT_MS: '30000',
+    DATABASE_PATH: './data/test.sqlite',
+    SESSION_SECRET: 'fake-session-secret-with-at-least-forty-eight-bytes-000000',
+    SESSION_COOKIE_SECURE: 'false',
+    SESSION_MAX_AGE_MS: '604800000',
   });
 
   assert.deepEqual(config, {
@@ -77,9 +92,49 @@ test('loadConfig 只接受完整且有效的服务端配置', () => {
     modelApiKey: 'fake-key',
     modelName: 'fake-model',
     modelTimeoutMs: 30000,
+    databasePath: './data/test.sqlite',
+    sessionSecret: 'fake-session-secret-with-at-least-forty-eight-bytes-000000',
+    sessionCookieSecure: false,
+    sessionMaxAgeMs: 604800000,
   });
   assert.throws(
     () => loadConfig({}),
     error => error.code === 'CONFIG_INVALID' && !String(error.message).includes('undefined'),
+  );
+  assert.throws(
+    () => loadConfig({
+      MODEL_API_BASE_URL: 'https://model.example/v1',
+      MODEL_API_KEY: 'fake-key',
+      MODEL_NAME: 'fake-model',
+      DATABASE_PATH: './data/test.sqlite',
+      SESSION_SECRET: 'too-short',
+      SESSION_COOKIE_SECURE: 'false',
+      SESSION_MAX_AGE_MS: '604800000',
+    }),
+    error => error.code === 'CONFIG_INVALID' && /SESSION_SECRET/.test(error.message),
+  );
+  assert.throws(
+    () => loadConfig({
+      MODEL_API_BASE_URL: 'https://model.example/v1',
+      MODEL_API_KEY: 'fake-key',
+      MODEL_NAME: 'fake-model',
+      DATABASE_PATH: './data/test.sqlite',
+      SESSION_SECRET: 'fake-session-secret-with-at-least-forty-eight-bytes-000000',
+      SESSION_COOKIE_SECURE: 'sometimes',
+      SESSION_MAX_AGE_MS: '604800000',
+    }),
+    error => error.code === 'CONFIG_INVALID' && /SESSION_COOKIE_SECURE/.test(error.message),
+  );
+  assert.throws(
+    () => loadConfig({
+      MODEL_API_BASE_URL: 'https://model.example/v1',
+      MODEL_API_KEY: 'fake-key',
+      MODEL_NAME: 'fake-model',
+      DATABASE_PATH: './data/test.sqlite',
+      SESSION_SECRET: 'fake-session-secret-with-at-least-forty-eight-bytes-000000',
+      SESSION_COOKIE_SECURE: 'false',
+      SESSION_MAX_AGE_MS: '86400000',
+    }),
+    error => error.code === 'CONFIG_INVALID' && /SESSION_MAX_AGE_MS/.test(error.message),
   );
 });

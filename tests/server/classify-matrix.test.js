@@ -2,6 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 
 const { classifyMatrix } = require('../../server/workflows/classify-matrix');
+const { createTestAuthBoundary } = require('../helpers/test-auth-boundary');
 
 function task(overrides = {}) {
   return {
@@ -242,7 +243,7 @@ test('输入中的标签来源与空值组合不一致时在模型前拒绝', as
 test('POST /api/time-management/matrix/classify 返回确定性矩阵', async () => {
   const { createApp } = require('../../server/app');
   const tasks = [task()];
-  const app = createApp({ modelClient: queuedModel([{
+  const app = createApp({ authBoundary: createTestAuthBoundary(), modelClient: queuedModel([{
     classifications: tasks.map(item => classification(item)),
     note: '',
   }]) });

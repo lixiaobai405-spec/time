@@ -24,8 +24,46 @@ button{font-family:inherit;cursor:pointer;border:none;background:none}
 .brand-mark svg{width:19px;height:19px}
 .brand-name{font-weight:700;font-size:16px}
 .brand-sub{font-size:12px;color:var(--muted);margin-top:-3px}
-.badge-top{margin-left:auto;font-size:12px;font-weight:700;color:var(--purple);background:var(--purple-tint);padding:6px 13px;border-radius:8px}
+.top-actions{margin-left:auto;display:flex;align-items:center;gap:10px}
+.badge-top{font-size:12px;font-weight:700;color:var(--purple);background:var(--purple-tint);padding:6px 13px;border-radius:8px}
+.auth-user{font-size:12.5px;color:var(--muted);max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.auth-logout{padding:6px 11px}
 .wrap{max-width:1120px;margin:0 auto;padding:34px 28px 80px}
+
+/* authentication */
+.auth-card{width:min(100%,480px);margin:36px auto 0;padding:30px;background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);box-shadow:var(--shadow)}
+.auth-title{font-size:25px;line-height:1.3;margin:9px 0 6px}
+.auth-lead{font-size:13.5px;color:var(--muted);margin:0 0 22px}
+.auth-form{display:flex;flex-direction:column;gap:14px}
+.auth-field{display:flex;flex-direction:column;gap:6px;font-size:13px;font-weight:700;color:var(--purple-700)}
+.auth-field input{font-weight:400;color:var(--ink)}
+.auth-submit{justify-content:center;margin-top:3px}
+.auth-links{display:flex;justify-content:space-between;gap:12px;margin-top:16px}
+.auth-error{min-height:20px;font-size:12.5px;color:var(--warn)}
+.recovery-warning{padding:11px 13px;border:1px solid var(--warn-line);border-radius:10px;background:var(--warn-bg);color:var(--warn);font-size:13px}
+.recovery-code{display:block;margin:18px 0;padding:16px;border:1px solid var(--line2);border-radius:10px;background:var(--bg);color:var(--purple-700);font-family:"Cascadia Code",Consolas,monospace;font-size:15px;font-weight:700;line-height:1.8;letter-spacing:.5px;overflow-wrap:anywhere;user-select:all}
+.auth-spinner{width:38px;height:38px;margin:24px auto 4px;border:4px solid var(--purple-tint2);border-top-color:var(--purple);border-radius:50%;animation:spin .8s linear infinite}
+
+/* history */
+.history-page{max-width:900px;margin:0 auto}
+.history-header{display:flex;align-items:center;gap:14px;margin-bottom:8px}
+.history-header h1{font-size:24px;margin:0}
+.history-intro{margin:0 0 20px;color:var(--muted);font-size:13.5px}
+.history-list{display:flex;flex-direction:column;gap:12px}
+.history-item{display:flex;align-items:center;gap:18px;padding:18px;background:var(--surface);border:1px solid var(--line);border-radius:12px;box-shadow:var(--shadow)}
+.history-item-content{min-width:0;flex:1}.history-item h2{margin:0 0 4px;font-size:16px;overflow-wrap:anywhere}.history-item p{margin:0;color:var(--muted);font-size:12.5px}
+.history-item-actions,.history-detail-actions{display:flex;gap:8px;flex-wrap:wrap}
+.history-empty,.history-loading,.history-error{padding:22px;text-align:center;border:1px dashed var(--line2);border-radius:12px;color:var(--muted);background:var(--surface)}
+.history-error{color:var(--warn);border-color:var(--warn-line);background:var(--warn-bg);margin-bottom:12px}
+.history-more{display:flex;margin:18px auto 0}
+.history-detail-content{display:flex;flex-direction:column;gap:14px}
+.history-section{padding:18px;background:var(--surface);border:1px solid var(--line);border-radius:12px;box-shadow:var(--shadow)}
+.history-section h2{margin:0 0 12px;font-size:16px}.history-section h3{margin:0 0 4px;font-size:14px}.history-section p{margin:3px 0;color:#4A4152;font-size:13px;overflow-wrap:anywhere}
+.history-goals,.history-quadrants{display:grid;grid-template-columns:1fr 1fr;gap:10px}.history-goals>div,.history-quadrants>div{padding:11px;background:var(--bg);border-radius:9px}.history-goals p,.history-quadrants p{margin-bottom:0}
+.history-tasks{display:flex;flex-direction:column;gap:9px}.history-tasks article{padding:12px;background:var(--bg);border-radius:9px}.history-tasks ul{margin:6px 0 0;padding-left:20px;font-size:13px}
+.history-detail-actions{justify-content:flex-end;margin-top:14px}
+.history-save-status{display:flex;align-items:center;gap:10px;margin-top:12px;padding:10px 12px;border-radius:9px;background:var(--purple-tint);color:var(--purple-700);font-size:12.5px}
+.history-save-status.failed{background:var(--warn-bg);color:var(--warn)}
 
 /* home hero */
 .home-eyebrow{font-size:12.5px;font-weight:600;letter-spacing:2px;color:var(--orange-600);text-transform:uppercase}
@@ -180,7 +218,7 @@ textarea{min-height:66px}
 
 .toast{position:fixed;bottom:26px;left:50%;transform:translateX(-50%) translateY(20px);opacity:0;background:var(--ink);color:#fff;padding:11px 20px;border-radius:11px;font-size:13.5px;font-weight:600;box-shadow:var(--shadow-lg);transition:.25s;z-index:60;pointer-events:none}
 .toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
-@media(max-width:820px){.ws-grid{grid-template-columns:1fr}.stepper{position:static;display:flex;overflow-x:auto;gap:4px}.step:not(:last-child)::after{display:none}.step{flex:none;min-width:150px}.grid4day,.addgrid{grid-template-columns:1fr}.addgrid .full{grid-column:1}.panel-foot{flex-wrap:wrap}.panel-foot .io-hint{flex:1 0 100%;margin-right:0}}
+@media(max-width:820px){.topbar{padding:12px 16px;gap:8px}.brand{min-width:0}.brand-name{font-size:14px;white-space:nowrap}.brand-sub,.badge-top,.auth-user{display:none!important}.top-actions{gap:6px}.auth-history-link,.auth-logout{padding:6px 8px;white-space:nowrap}.wrap{padding:24px 16px 64px}.auth-card{margin-top:16px;padding:22px}.history-item{align-items:flex-start;flex-direction:column}.history-item-actions{width:100%}.history-goals,.history-quadrants{grid-template-columns:1fr}.ws-grid{grid-template-columns:1fr}.stepper{position:static;display:flex;overflow-x:auto;gap:4px}.step:not(:last-child)::after{display:none}.step{flex:none;min-width:150px}.grid4day,.addgrid{grid-template-columns:1fr}.addgrid .full{grid-column:1}.panel-foot{flex-wrap:wrap}.panel-foot .io-hint{flex:1 0 100%;margin-right:0}}
 </style>
 
 <div class="topbar">
@@ -188,7 +226,12 @@ textarea{min-height:66px}
     <div class="brand-mark"><svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg></div>
     <div><div class="brand-name">时间管理助手</div><div class="brand-sub">昨天-今天-明天-后天 · 重要-紧急矩阵</div></div>
   </div>
-  <div class="badge-top">管理自我</div>
+  <div class="top-actions">
+    <div class="badge-top">管理自我</div>
+    <button class="btn btn-ghost btn-sm auth-history-link hidden" id="auth-history" data-action="history-open">历史记录</button>
+    <span class="auth-user hidden" id="auth-user"></span>
+    <button class="btn btn-ghost btn-sm auth-logout hidden" id="auth-logout" data-action="logout">退出登录</button>
+  </div>
 </div>
 <div class="wrap" id="app"></div>
 <div class="toast" id="toast"></div>

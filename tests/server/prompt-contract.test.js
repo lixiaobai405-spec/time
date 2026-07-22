@@ -210,3 +210,30 @@ test('报告提示词声明确定性顺序和到期任务保护规则', () => {
   assert.match(source, /taskId.*只.*结构化.*taskId.*字段/s);
   assert.match(source, /用户可见.*完整.*ID.*前缀/s);
 });
+
+test('任务提取提示词定义重要性证据和紧急度分层且不强制填满象限', () => {
+  const source = readFileSync(
+    path.join(__dirname, '..', '..', 'prompts', 'system.md'),
+    'utf8',
+  );
+
+  assert.match(source, /高重要性.*核心目标.*重大风险.*关键决策/s);
+  assert.match(source, /中重要性.*支撑.*准备.*协调/s);
+  assert.match(source, /低重要性.*常规行政.*通知.*归档/s);
+  assert.match(source, /不得因为.*管理.*团队.*项目.*自动判为高重要性/s);
+  assert.match(source, /是否可以授权.*不能单独决定重要性/s);
+  assert.match(source, /今天或已逾期.*高.*未来\s*7\s*天内.*中.*超过\s*7\s*天.*低/s);
+  assert.match(source, /待确认.*没有明确紧急信号.*低/s);
+  assert.match(source, /允许任意象限为空.*不得.*填满.*平均分配/s);
+});
+
+test('人工提示词用例覆盖重要性证据、紧急度分层和空象限', () => {
+  const source = readFileSync(path.join(__dirname, '..', 'prompt-cases.md'), 'utf8');
+  assert.match(source, /核心目标.*高重要性/s);
+  assert.match(source, /准备或协调.*中重要性/s);
+  assert.match(source, /通知或归档.*低重要性/s);
+  assert.match(source, /待确认.*无紧急信号.*低紧急度/s);
+  assert.match(source, /未来\s*7\s*天内.*中紧急度/s);
+  assert.match(source, /允许.*象限为空.*不强制.*平均/s);
+  assert.match(source, /不得调用真实付费 API/);
+});

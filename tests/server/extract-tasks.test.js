@@ -3,6 +3,7 @@ const assert = require('node:assert/strict');
 
 const { MANUAL_FLAGS } = require('../../server/contracts/time-management');
 const { extractTasks } = require('../../server/workflows/extract-tasks');
+const { createTestAuthBoundary } = require('../helpers/test-auth-boundary');
 
 function goals(overrides = {}) {
   return { 昨天: '', 今天: '', 明天: '', 后天: '', ...overrides };
@@ -109,18 +110,60 @@ test('模型缺少截止时间时标准化为待确认', async () => {
   assert.match(result.tasks[0].id, /^[0-9a-f-]{36}$/i);
 });
 
-test('任务提取后按服务端日期纠偏当天紧急度且不猜测其他期限', async () => {
+test('任务提取后按期限、来源和压力统一纠偏紧急度', async () => {
   const result = await extractTasks({
-    goals: goals({ 今天: '处理当天、未来和待确认事项' }),
+    goals: goals({
+      昨天: '复盘改进截止待确认；另有本周五完成的协调事项',
+      今天: '今天处理当前行动',
+      明天: '明天提交短期方案',
+      后天: '未来推进长期机制建设',
+    }),
     now: () => new Date('2026-07-20T04:00:00.000Z'),
     modelClient: queuedModel([{ tasks: [
-      modelTask({ name: '当天事项', due: '2026-07-20 17:00', urgency: '中' }),
-      modelTask({ name: '未来事项', due: '2026-07-21 09:00', urgency: '低' }),
-      modelTask({ name: '待确认事项', due: '待确认', urgency: '中' }),
+      modelTask({ name: '处理当前行动', source: '今天', due: '待确认', urgency: '低' }),
+      modelTask({ name: '落实复盘改进', source: '复盘', due: '待确认', urgency: '高' }),
+      modelTask({ name: '完成协调事项', source: '复盘', due: '本周五', urgency: '高' }),
+      modelTask({ name: '提交短期方案', source: '短期目标', due: '明天', urgency: '低', acceptanceCriteria: ['方案已提交'] }),
+      modelTask({ name: '建设长期机制', source: '中长期', due: '2026-09-30', urgency: '高', acceptanceCriteria: ['机制已试运行'] }),
     ] }]),
   });
 
-  assert.deepEqual(result.tasks.map(item => item.urgency), ['高', '低', '中']);
+  assert.deepEqual(result.tasks.map(item => item.urgency), [
+    '高',
+    '低',
+    '中',
+    '中',
+    '低',
+  ]);
+});
+
+test('任务提取用对应原始目标纠正未来高紧急度', async () => {
+  const now = () => new Date('2026-07-20T04:00:00.000Z');
+  const ordinary = await extractTasks({
+    goals: goals({ 明天: '明天 09:00 提交发布准备清单' }),
+    now,
+    modelClient: queuedModel([{ tasks: [modelTask({
+      name: '提交发布准备清单',
+      source: '短期目标',
+      due: '明天 09:00',
+      urgency: '高',
+      acceptanceCriteria: ['清单已提交'],
+    })] }]),
+  });
+  assert.equal(ordinary.tasks[0].urgency, '中');
+
+  const blocked = await extractTasks({
+    goals: goals({ 明天: '发布准备已阻塞，明天 09:00 前必须尽快提交清单' }),
+    now,
+    modelClient: queuedModel([{ tasks: [modelTask({
+      name: '提交发布准备清单',
+      source: '短期目标',
+      due: '明天 09:00',
+      urgency: '高',
+      acceptanceCriteria: ['清单已提交'],
+    })] }]),
+  });
+  assert.equal(blocked.tasks[0].urgency, '高');
 });
 
 test('SMART 任务保留模块、模拟次数和评分验收标准', async () => {
@@ -239,7 +282,10 @@ test('手动任务四种标注映射保留未标注 null/null', () => {
 
 test('POST /api/time-management/tasks/extract 返回标准任务', async () => {
   const { createApp } = require('../../server/app');
-  const app = createApp({ modelClient: queuedModel([{ tasks: [modelTask()] }]) });
+  const app = createApp({
+    authBoundary: createTestAuthBoundary(),
+    modelClient: queuedModel([{ tasks: [modelTask()] }]),
+  });
   const server = await listen(app);
 
   try {
@@ -267,6 +313,7 @@ test('提取 API 使用注入的服务端时钟且拒绝客户端 referenceDate'
     urgency: '中',
   })] }]);
   const app = createApp({
+    authBoundary: createTestAuthBoundary(),
     modelClient,
     now: () => new Date('2026-07-20T04:00:00.000Z'),
   });

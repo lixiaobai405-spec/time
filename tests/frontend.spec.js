@@ -4,6 +4,54 @@ const {
   expectedTasks: MANUAL_EXPECTED_TASKS,
 } = require('./fixtures/manual-test-2026-07-20');
 
+test.beforeEach(async ({ page }) => {
+  await page.route('**/api/auth/me', route => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: JSON.stringify({
+      user: { id: '00000000-0000-4000-8000-000000000000', username: 'Playwright_User' },
+      csrfToken: 'fake-session-csrf-token',
+    }),
+  }));
+  await page.route('**/api/time-management/history', async route => {
+    if (route.request().method() !== 'POST') return route.fallback();
+    const body = route.request().postDataJSON();
+    return route.fulfill({
+      status: 201,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        id: '99999999-9999-4999-8999-999999999999',
+        ...body,
+        schemaVersion: 1,
+        createdAt: '2026-07-21T08:00:00.000Z',
+        updatedAt: '2026-07-21T08:00:00.000Z',
+      }),
+    });
+  });
+});
+
+test('缺少 crypto.randomUUID 时仍可启动并添加手动任务', async ({ page }) => {
+  const pageErrors = [];
+  page.on('pageerror', error => pageErrors.push(error.message));
+  await page.addInitScript(() => {
+    Object.defineProperty(globalThis.crypto, 'randomUUID', {
+      configurable: true,
+      value: undefined,
+    });
+  });
+
+  await advanceToTasks(page);
+  await page.getByRole('button', { name: /手动添加任务/ }).click();
+  await page.locator('#f-name').fill('HTTP 环境兼容任务');
+  await page.locator('#f-src').selectOption({ label: '临时' });
+  await page.locator('#f-due').fill('2026-08-01');
+  await page.locator('#f-cost').fill('1h');
+  await page.getByRole('button', { name: /添加到列表/ }).click();
+
+  await expect(page.locator('.task').filter({ hasText: 'HTTP 环境兼容任务' })).toBeVisible();
+  expect(pageErrors).toEqual([]);
+});
+
 const MOCK_TASKS = [
   { id: 'task-1', name: '**校对今天的方案终稿**', importance: '低', urgency: '高', source: '今天', due: '今天 18:00', est: '约1h', status: 'pending', classificationSource: 'ai-extraction' },
   { id: 'task-2', name: '跟进两个客户投诉', importance: '高', urgency: '高', source: '临时', due: '今天', est: '约1.5h', status: 'pending', classificationSource: 'ai-extraction' },
@@ -289,6 +337,28 @@ test('模型任务名使用行内 Markdown 且不露出标记', async ({ page })
   await expect(firstTask.locator('.task-name')).not.toContainText('**校对今天的方案终稿**');
 });
 
+test('已分类任务卡显式展示重要性和紧急度二值标签', async ({ page }) => {
+  await advanceToTasks(page);
+
+  const firstQuadrant = page.locator('.task').filter({ hasText: '跟进两个客户投诉' });
+  await expect(firstQuadrant.locator('.t.imp')).toHaveText('重要');
+  await expect(firstQuadrant.locator('.t.urg')).toHaveText('紧急');
+  await expect(firstQuadrant).not.toContainText('不重要');
+  await expect(firstQuadrant).not.toContainText('不紧急');
+
+  const secondQuadrant = page.locator('.task').filter({ hasText: '复盘上季度转化缺口原因' });
+  await expect(secondQuadrant.locator('.t.imp')).toHaveText('重要');
+  await expect(secondQuadrant).toContainText('不紧急');
+
+  const thirdQuadrant = page.locator('.task').filter({ hasText: '校对今天的方案终稿' });
+  await expect(thirdQuadrant).toContainText('不重要');
+  await expect(thirdQuadrant.locator('.t.urg')).toHaveText('紧急');
+
+  const fourthQuadrant = page.locator('.task').filter({ hasText: '回复非紧急群消息' });
+  await expect(fourthQuadrant).toContainText('不重要');
+  await expect(fourthQuadrant).toContainText('不紧急');
+});
+
 test('任务卡安全展示完成标准且手动任务流程保持可用', async ({ page }) => {
   await page.addInitScript(() => { window.__criteriaXss = false; });
   const criteria = [
@@ -327,6 +397,7 @@ test('长期任务卡展示下一步且普通任务不显示空区域', async ({
         ...MOCK_TASKS[0],
         name: '推进长期课程里程碑',
         source: '中长期',
+        due: '90天',
         est: '16h',
         acceptanceCriteria: ['完成第一阶段里程碑'],
         nextAction: '今天先列出 4 个课程模块',
@@ -342,8 +413,12 @@ test('长期任务卡展示下一步且普通任务不显示空区域', async ({
   const longTermTask = page.locator('.task').filter({ hasText: '推进长期课程里程碑' });
   await expect(longTermTask).toContainText('下一步');
   await expect(longTermTask.locator('.next-action')).toContainText('今天先列出 4 个课程模块');
+  await expect(longTermTask).not.toContainText('截止:90天');
+  await expect(longTermTask).not.toContainText('16h');
   const ordinaryTask = page.locator('.task').filter({ hasText: '发送今天的会议纪要' });
   await expect(ordinaryTask.locator('.next-action')).toHaveCount(0);
+  await expect(ordinaryTask).toContainText('截止:今天');
+  await expect(ordinaryTask).toContainText('约1.5h');
 });
 
 test('未完成目标检查时不能进入任务提取', async ({ page }) => {
@@ -717,12 +792,17 @@ test('未标注手动任务在矩阵前后分别显示待 AI 判定和 AI 判定
   await page.locator('#f-due').fill('2026-08-01');
   await page.locator('#f-cost').fill('1h');
   await page.getByRole('button', { name: /添加到列表/ }).click();
-  await expect(page.locator('.task').filter({ hasText: '待判定任务' })).toContainText('待 AI 判定');
+  const unclassifiedTask = page.locator('.task').filter({ hasText: '待判定任务' });
+  await expect(unclassifiedTask).toContainText('待 AI 判定');
+  await expect(unclassifiedTask).not.toContainText('不重要');
+  await expect(unclassifiedTask).not.toContainText('不紧急');
   await page.getByRole('button', { name: /矩阵判定/ }).click();
   await page.getByRole('button', { name: '上一步' }).click();
   const taskRow = page.locator('.task').filter({ hasText: '待判定任务' });
   await expect(taskRow).toContainText('AI 判定');
   await expect(taskRow).not.toContainText('待 AI 判定');
+  await expect(taskRow).toContainText('不重要');
+  await expect(taskRow).toContainText('不紧急');
 });
 
 test('矩阵响应修改已有标签时不渲染部分结果', async ({ page }) => {
@@ -812,7 +892,7 @@ test('输入错误、模型超时和格式错误保留当前步骤供重试', as
 test('目标输入页明确展示会话隐私和敏感信息提示', async ({ page }) => {
   await page.goto('/');
   await page.getByRole('button', { name: /开始梳理/ }).click();
-  await expect(page.getByText('你填写的目标和任务仅用于完成本次会话，不会保存为历史记录。')).toBeVisible();
+  await expect(page.getByText('草稿不会保存；报告生成成功后会保存到你的账号历史。')).toBeVisible();
   await expect(page.getByText('请勿填写客户隐私、密码或其他敏感信息。')).toBeVisible();
 });
 
@@ -820,7 +900,8 @@ test('用户输入会真实贯穿任务、矩阵和报告', async ({ page }) => 
   const bodies = [];
   await page.route('**/api/time-management/**', async route => {
     const requestPath = new URL(route.request().url()).pathname;
-    bodies.push({ path: requestPath, body: route.request().postDataJSON() });
+    const requestBody = route.request().postDataJSON();
+    bodies.push({ path: requestPath, body: requestBody });
     const responses = {
       '/api/time-management/goals/check': {
         fields: ['昨天', '今天', '明天', '后天'].map(key => ({ key, status: 'ok', issue: '', suggestion: '' })),
@@ -844,6 +925,13 @@ test('用户输入会真实贯穿任务、矩阵和报告', async ({ page }) => 
         energyRules: ['优先完成第一象限'],
         adjustments: ['完成后进行复盘'],
       },
+      '/api/time-management/history': {
+        id: '99999999-9999-4999-8999-999999999999',
+        ...requestBody,
+        schemaVersion: 1,
+        createdAt: '2026-07-21T08:00:00.000Z',
+        updatedAt: '2026-07-21T08:00:00.000Z',
+      },
     };
     await route.fulfill({
       status: 200,
@@ -863,9 +951,13 @@ test('用户输入会真实贯穿任务、矩阵和报告', async ({ page }) => 
   await page.getByRole('button', { name: /矩阵判定/ }).click();
   await page.getByRole('button', { name: /生成报告/ }).click();
   await expect(page.locator('#report-markdown')).toContainText('重要且紧急');
-  expect(bodies).toHaveLength(4);
+  expect(bodies).toHaveLength(5);
   expect(bodies[2].body.tasks[0].id).toBe('task-1');
   expect(bodies[3].body.matrix.quadrants[0].taskIds[0]).toBe('task-1');
+  expect(bodies[4].path).toBe('/api/time-management/history');
+  expect(bodies[4].body.clientRunId).toMatch(/^[0-9a-f-]{36}$/i);
+  expect(bodies[4].body.goals).toEqual(bodies[0].body.goals);
+  expect(bodies[4].body.report.order).toEqual([{ taskId: 'task-1', reason: '重要且紧急' }]);
 });
 
 test('2026-07-20 人工业务回归完整贯穿任务、矩阵和报告', async ({ page }) => {

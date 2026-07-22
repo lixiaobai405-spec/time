@@ -2,6 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 
 const { checkGoals } = require('../../server/workflows/check-goals');
+const { createTestAuthBoundary } = require('../helpers/test-auth-boundary');
 
 const KEYS = ['昨天', '今天', '明天', '后天'];
 
@@ -172,7 +173,10 @@ test('Schema 或 overall 语义非法时在总计两次内恢复', async () => {
 
 test('POST /api/time-management/goals/check 返回工作流结果', async () => {
   const { createApp } = require('../../server/app');
-  const app = createApp({ modelClient: queuedModel([passingOutput()]) });
+  const app = createApp({
+    authBoundary: createTestAuthBoundary(),
+    modelClient: queuedModel([passingOutput()]),
+  });
   const server = await listen(app);
 
   try {

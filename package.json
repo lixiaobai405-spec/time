@@ -4,6 +4,8 @@
   "private": true,
   "scripts": {
     "dev": "node server/index.js",
+    "migrate": "node scripts/migrate.js",
+    "backup:database": "node scripts/backup-database.js",
     "test": "npm run test:server && npm run test:e2e",
     "test:server": "node --test",
     "test:e2e": "playwright test"
@@ -14,6 +16,9 @@
   "dependencies": {
     "ajv": "8.20.0",
     "express": "5.2.1",
-    "markdown-it": "14.3.0"
+    "express-rate-limit": "8.6.0",
+    "express-session": "1.19.0",
+    "markdown-it": "14.3.0",
+    "sqlite3": "6.0.1"
   }
 }

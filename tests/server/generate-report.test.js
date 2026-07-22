@@ -2,6 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 
 const { generateReport } = require('../../server/workflows/generate-report');
+const { createTestAuthBoundary } = require('../helpers/test-auth-boundary');
 
 function task(id, overrides = {}) {
   return { id, name: `任务 ${id}`, source: '今天', ...overrides };
@@ -68,6 +69,10 @@ test('报告只引用当前任务并保留三段结构', async () => {
       protectedTaskIds: [],
       remainingProtectedTaskIds: [],
       actionByTaskId: { 'task-a': '立即处理' },
+    },
+    scheduleContext: {
+      fixedPoints: [],
+      protectedWindows: [],
     },
   });
 });
@@ -369,6 +374,111 @@ test('超过五条当天任务时调整建议必须覆盖剩余任务', async ()
   assert.equal(modelClient.calls.length, 2);
 });
 
+test('报告时间建议首次冲突时携带调度上下文并重试成功', async () => {
+  const tasks = [
+    task('review', { name: '审核方案', due: '2026-07-20 17:00', est: '1h' }),
+    task('meeting', { name: '召开风险会议', due: '2026-07-20 18:00', est: '30分钟' }),
+  ];
+  const invalid = reportFor(tasks, {
+    energyRules: ['17:00-18:30 集中推进实施方案'],
+  });
+  const valid = reportFor(tasks, {
+    energyRules: ['19:00-20:00 集中推进实施方案'],
+  });
+  const modelClient = queuedModel([invalid, valid]);
+
+  const result = await generateReport({
+    tasks,
+    matrix: matrixFor(tasks),
+    goals: { 昨天: '', 后天: '' },
+    modelClient,
+    now: () => new Date('2026-07-20T04:00:00.000Z'),
+  });
+
+  assert.equal(result.energyRules[0], '19:00-20:00 集中推进实施方案');
+  assert.equal(modelClient.calls.length, 2);
+  assert.deepEqual(JSON.parse(modelClient.calls[0].user).scheduleContext, {
+    fixedPoints: [
+      { taskId: 'review', taskName: '审核方案', time: '17:00', minute: 1020 },
+      { taskId: 'meeting', taskName: '召开风险会议', time: '18:00', minute: 1080 },
+    ],
+    protectedWindows: [
+      {
+        taskId: 'review', taskName: '审核方案', startMinute: 960, endMinute: 1020,
+        due: '17:00',
+      },
+      {
+        taskId: 'meeting', taskName: '召开风险会议', startMinute: 1050, endMinute: 1080,
+        due: '18:00',
+      },
+    ],
+  });
+});
+
+test('报告连续两次建议冲突时间时返回稳定模型输出错误', async () => {
+  const tasks = [task('meeting', {
+    name: '召开风险会议',
+    due: '今天18:00',
+    est: '30分钟',
+  })];
+  const invalid = reportFor(tasks, {
+    adjustments: ['17:45-18:30 集中推进另一项方案'],
+  });
+  const modelClient = queuedModel([invalid, invalid]);
+
+  await assert.rejects(
+    generateReport({
+      tasks,
+      matrix: matrixFor(tasks),
+      goals: { 昨天: '', 后天: '' },
+      modelClient,
+      now: () => new Date('2026-07-20T04:00:00.000Z'),
+    }),
+    error => error.code === 'MODEL_OUTPUT_INVALID' && error.status === 502,
+  );
+  assert.equal(modelClient.calls.length, 2);
+});
+
+test('报告 API 连续时间冲突只返回安全错误而不泄漏模型原文', async () => {
+  const { createApp } = require('../../server/app');
+  const tasks = [task('meeting', {
+    name: '召开风险会议',
+    due: '今天18:00',
+    est: '30分钟',
+  })];
+  const marker = '17:45-18:30-PRIVATE-CONFLICT';
+  const invalid = reportFor(tasks, { adjustments: [marker] });
+  const modelClient = queuedModel([invalid, invalid]);
+  const app = createApp({
+    authBoundary: createTestAuthBoundary(),
+    modelClient,
+    now: () => new Date('2026-07-20T04:00:00.000Z'),
+  });
+  const server = await listen(app);
+
+  try {
+    const response = await fetch(
+      `http://127.0.0.1:${server.address().port}/api/time-management/report/generate`,
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          tasks,
+          matrix: matrixFor(tasks),
+          goals: { 昨天: '', 后天: '' },
+        }),
+      },
+    );
+    const serialized = JSON.stringify(await response.json());
+    assert.equal(response.status, 502);
+    assert.match(serialized, /MODEL_OUTPUT_INVALID/);
+    assert.doesNotMatch(serialized, /PRIVATE-CONFLICT/);
+    assert.equal(modelClient.calls.length, 2);
+  } finally {
+    await close(server);
+  }
+});
+
 test('含原始 HTML 的字符串不在服务端转换', async () => {
   const tasks = [task('task-a')];
   const expected = reportFor(tasks, {
@@ -388,7 +498,10 @@ test('POST /api/time-management/report/generate 返回结构化报告', async ()
   const tasks = [task('task-a')];
   const matrix = matrixFor(tasks);
   const expected = reportFor(tasks);
-  const app = createApp({ modelClient: queuedModel([expected]) });
+  const app = createApp({
+    authBoundary: createTestAuthBoundary(),
+    modelClient: queuedModel([expected]),
+  });
   const server = await listen(app);
 
   try {

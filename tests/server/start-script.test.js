@@ -1,5 +1,6 @@
 const assert = require('node:assert/strict');
 const { spawn, spawnSync } = require('node:child_process');
+const { once } = require('node:events');
 const fs = require('node:fs');
 const net = require('node:net');
 const os = require('node:os');
@@ -85,6 +86,10 @@ test('start.bat is parsed by cmd.exe and reaches the server command', (t) => {
       'MODEL_API_BASE_URL=http://127.0.0.1:9',
       'MODEL_API_KEY=fake-batch-test-key',
       'MODEL_NAME=fake-batch-test-model',
+      'DATABASE_PATH=fake-batch-test.sqlite',
+      'SESSION_SECRET=fake-batch-session-secret-with-at-least-forty-eight-bytes',
+      'SESSION_COOKIE_SECURE=false',
+      'SESSION_MAX_AGE_MS=604800000',
       '',
     ].join('\n'),
     'utf8',
@@ -111,6 +116,10 @@ test('start.bat is parsed by cmd.exe and reaches the server command', (t) => {
     'MODEL_API_KEY',
     'MODEL_NAME',
     'MODEL_TIMEOUT_MS',
+    'DATABASE_PATH',
+    'SESSION_SECRET',
+    'SESSION_COOKIE_SECURE',
+    'SESSION_MAX_AGE_MS',
   ]) {
     delete environment[key];
   }
@@ -123,7 +132,7 @@ test('start.bat is parsed by cmd.exe and reaches the server command', (t) => {
       cwd: tempDirectory,
       encoding: 'utf8',
       env: environment,
-      timeout: 3_000,
+      timeout: 15_000,
       windowsHide: true,
     },
   );
@@ -141,15 +150,19 @@ test('start.bat is parsed by cmd.exe and reaches the server command', (t) => {
   );
 });
 
-test('.env is ignored while .env.example remains trackable', () => {
+test('.env variants are ignored while example templates remain trackable', () => {
   const isIgnored = (name) => spawnSync(
     'git',
     ['check-ignore', '--no-index', '--quiet', name],
     { cwd: root },
   ).status === 0;
 
-  assert.equal(isIgnored('.env'), true, '.env must be ignored');
-  assert.equal(isIgnored('.env.example'), false, '.env.example must stay trackable');
+  for (const name of ['.env', '.env.local', '.env.development', '.env.production', '.env.test']) {
+    assert.equal(isIgnored(name), true, `${name} must be ignored`);
+  }
+  for (const name of ['.env.example', '.env.test.example']) {
+    assert.equal(isIgnored(name), false, `${name} must stay trackable`);
+  }
 });
 
 test('README documents one-click startup without committing .env', () => {
@@ -171,6 +184,10 @@ test('the Node env-file startup command works with fake model settings', async (
       'MODEL_API_KEY=fake-start-script-key',
       'MODEL_NAME=fake-start-script-model',
       'MODEL_TIMEOUT_MS=1000',
+      `DATABASE_PATH=${path.join(tempDirectory, 'test.sqlite')}`,
+      'SESSION_SECRET=fake-start-session-secret-with-at-least-forty-eight-bytes',
+      'SESSION_COOKIE_SECURE=false',
+      'SESSION_MAX_AGE_MS=604800000',
       '',
     ].join('\n'),
     'utf8',
@@ -186,9 +203,18 @@ test('the Node env-file startup command works with fake model settings', async (
     stderr += chunk.toString();
   });
 
-  t.after(() => {
-    if (child.exitCode === null) child.kill();
-    fs.rmSync(tempDirectory, { recursive: true, force: true });
+  t.after(async () => {
+    if (child.exitCode === null) {
+      const exited = once(child, 'exit');
+      child.kill();
+      await exited;
+    }
+    fs.rmSync(tempDirectory, {
+      recursive: true,
+      force: true,
+      maxRetries: 20,
+      retryDelay: 100,
+    });
   });
 
   const response = await waitForHealth(

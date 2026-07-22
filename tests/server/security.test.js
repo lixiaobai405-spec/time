@@ -1,9 +1,17 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
 const { readdir, readFile } = require('node:fs/promises');
+const os = require('node:os');
 const path = require('node:path');
 
 const { createApp } = require('../../server/app');
+const { createRuntime } = require('../../server/runtime');
+const { hashToken } = require('../../server/security/token-hash');
+const { AuthClient } = require('../helpers/auth-client');
+const { historySnapshot } = require('../helpers/history-fixture');
+const { SESSION_SECRET, createAuthTestApp } = require('../helpers/test-app');
+const { createTestAuthBoundary } = require('../helpers/test-auth-boundary');
 
 const COMPLETE_GOALS = Object.freeze({
   昨天: '已记录目标、结果、原因和改进',
@@ -37,6 +45,34 @@ async function close(server) {
   });
 }
 
+async function createLoggedAuthTestApp(t, logger, modelClient) {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'time-security-audit-'));
+  const runtime = await createRuntime({
+    databasePath: path.join(directory, 'audit.sqlite'),
+    sessionSecret: SESSION_SECRET,
+    sessionCookieSecure: false,
+    sessionMaxAgeMs: 604_800_000,
+  });
+  const app = createApp({ authBoundary: runtime.authBoundary, logger, modelClient });
+  const server = await listen(app);
+  t.after(async () => {
+    if (server.listening) await close(server);
+    await runtime.close();
+    fs.rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
+  });
+  return {
+    baseUrl: `http://127.0.0.1:${server.address().port}`,
+    database: runtime.database,
+  };
+}
+
+function rawSessionId(cookie) {
+  const encoded = cookie.split('=', 2)[1];
+  const signed = decodeURIComponent(encoded);
+  assert.match(signed, /^s:[^.]+\./);
+  return signed.slice(2).split('.', 1)[0];
+}
+
 test('用户提示注入只进入 user JSON，不改变 system prompt', async () => {
   const calls = [];
   const modelClient = {
@@ -45,7 +81,7 @@ test('用户提示注入只进入 user JSON，不改变 system prompt', async ()
       return passingReview();
     },
   };
-  const app = createApp({ modelClient });
+  const app = createApp({ authBoundary: createTestAuthBoundary(), modelClient });
   const server = await listen(app);
 
   try {
@@ -68,7 +104,10 @@ test('用户提示注入只进入 user JSON，不改变 system prompt', async ()
 });
 
 test('65KB 请求体返回安全 413 JSON', async () => {
-  const app = createApp({ modelClient: { completeJson: async () => passingReview() } });
+  const app = createApp({
+    authBoundary: createTestAuthBoundary(),
+    modelClient: { completeJson: async () => passingReview() },
+  });
   const server = await listen(app);
   try {
     const response = await fetch(
@@ -90,7 +129,10 @@ test('65KB 请求体返回安全 413 JSON', async () => {
 
 test('额外字段在模型调用前返回 INPUT_INVALID', async () => {
   let calls = 0;
-  const app = createApp({ modelClient: { completeJson: async () => { calls += 1; } } });
+  const app = createApp({
+    authBoundary: createTestAuthBoundary(),
+    modelClient: { completeJson: async () => { calls += 1; } },
+  });
   const server = await listen(app);
   try {
     const response = await fetch(
@@ -119,7 +161,7 @@ test('错误响应不含用户目标、模型原文或 stack', async () => {
       });
     },
   };
-  const app = createApp({ modelClient });
+  const app = createApp({ authBoundary: createTestAuthBoundary(), modelClient });
   const server = await listen(app);
   try {
     const response = await fetch(
@@ -139,9 +181,226 @@ test('错误响应不含用户目标、模型原文或 stack', async () => {
   }
 });
 
+test('历史数据库错误返回稳定错误且不泄漏 SQL、路径、正文或参数', async (t) => {
+  const { baseUrl, database } = await createAuthTestApp(t);
+  const client = new AuthClient(baseUrl);
+  const username = 'History_Db_Error';
+  const password = 'History-Database-2026';
+  assert.equal((await client.register(username, password)).status, 201);
+  assert.equal((await client.login(username, password)).status, 200);
+  assert.equal((await client.me()).status, 200);
+  await database.exec('DROP TABLE time_management_runs');
+
+  const marker = 'PRIVATE_HISTORY_BODY_MARKER';
+  const saveResponse = await client.request('/api/time-management/history', {
+    method: 'POST',
+    csrfToken: client.sessionCsrfToken,
+    body: historySnapshot({ title: marker }),
+  });
+  const saveBody = JSON.stringify(await saveResponse.json());
+  assert.equal(saveResponse.status, 500);
+  assert.match(saveBody, /HISTORY_SAVE_FAILED/);
+  assert.doesNotMatch(saveBody, /SQLITE|time_management_runs|DROP TABLE|auth\.sqlite/i);
+  assert.doesNotMatch(saveBody, new RegExp(marker));
+
+  const listResponse = await client.request('/api/time-management/history');
+  const listBody = JSON.stringify(await listResponse.json());
+  assert.equal(listResponse.status, 503);
+  assert.match(listBody, /DATABASE_UNAVAILABLE/);
+  assert.doesNotMatch(listBody, /SQLITE|time_management_runs|SELECT|auth\.sqlite/i);
+});
+
+test('认证和历史失败响应及结构化日志不泄漏凭据、Cookie 或正文标记', async (t) => {
+  const markers = Object.freeze({
+    username: 'Security_Audit_User',
+    password: 'Security-Password-Marker-2026',
+    recovery: 'RECOVERY-CODE-PRIVATE-MARKER',
+    cookie: 'COOKIE_PRIVATE_MARKER',
+    session: 'SESSION_PRIVATE_MARKER',
+    goal: 'PRIVATE_GOAL_FINAL_AUDIT_MARKER',
+    history: 'PRIVATE_HISTORY_FINAL_AUDIT_MARKER',
+    sql: 'PRIVATE_SQL_ERROR_FINAL_AUDIT_MARKER',
+  });
+  const entries = [];
+  const modelClient = {
+    completeJson: async () => {
+      throw Object.assign(new Error(`SQLITE_ERROR ${markers.sql}`), {
+        code: 'MODEL_OUTPUT_INVALID',
+        raw: markers.goal,
+      });
+    },
+  };
+  const { baseUrl, database } = await createLoggedAuthTestApp(
+    t,
+    entry => entries.push(entry),
+    modelClient,
+  );
+  const client = new AuthClient(baseUrl);
+  const errorBodies = [];
+
+  const registration = await client.register(markers.username, markers.password);
+  assert.equal(registration.status, 201);
+  const { recoveryCode } = await registration.json();
+  const login = await client.login(markers.username, markers.password);
+  assert.equal(login.status, 200);
+  const me = await client.me();
+  assert.equal(me.status, 200);
+  const cookie = client.cookie;
+  const sessionId = rawSessionId(cookie);
+
+  const invalidLoginClient = new AuthClient(baseUrl);
+  const invalidLogin = await invalidLoginClient.login(
+    'Unknown_Security_Marker',
+    markers.password,
+  );
+  assert.equal(invalidLogin.status, 401);
+  errorBodies.push(JSON.stringify(await invalidLogin.json()));
+
+  const invalidReset = await client.request('/api/auth/password/reset-with-recovery', {
+    method: 'POST',
+    csrfToken: client.preAuthCsrfToken,
+    body: {
+      username: markers.username,
+      recoveryCode: markers.recovery,
+      newPassword: markers.password,
+    },
+  });
+  assert.equal(invalidReset.status, 401);
+  errorBodies.push(JSON.stringify(await invalidReset.json()));
+
+  const forgedCookie = await client.request('/api/auth/me', {
+    cookie: `time.sid=${markers.cookie}.${markers.session}`,
+  });
+  assert.equal(forgedCookie.status, 401);
+  errorBodies.push(JSON.stringify(await forgedCookie.json()));
+
+  const goalFailure = await client.request('/api/time-management/goals/check', {
+    method: 'POST',
+    csrfToken: client.sessionCsrfToken,
+    body: {
+      goals: { ...COMPLETE_GOALS, 今天: markers.goal },
+    },
+  });
+  assert.equal(goalFailure.status, 502);
+  errorBodies.push(JSON.stringify(await goalFailure.json()));
+
+  await database.exec('DROP TABLE time_management_runs');
+  const historyFailure = await client.request('/api/time-management/history', {
+    method: 'POST',
+    csrfToken: client.sessionCsrfToken,
+    body: historySnapshot({ title: markers.history }),
+  });
+  assert.equal(historyFailure.status, 500);
+  errorBodies.push(JSON.stringify(await historyFailure.json()));
+
+  await new Promise(resolve => setImmediate(resolve));
+  const serializedErrors = errorBodies.join('\n');
+  const serializedLogs = JSON.stringify(entries);
+  for (const marker of [
+    markers.username,
+    markers.password,
+    markers.recovery,
+    markers.cookie,
+    markers.session,
+    markers.goal,
+    markers.history,
+    markers.sql,
+    recoveryCode,
+    cookie,
+    sessionId,
+  ]) {
+    assert.doesNotMatch(serializedErrors, new RegExp(marker));
+    assert.doesNotMatch(serializedLogs, new RegExp(marker));
+  }
+  assert.ok(entries.length >= 8);
+  for (const entry of entries) {
+    assert.deepEqual(Object.keys(entry).sort(), ['durationMs', 'path', 'requestId', 'status']);
+  }
+});
+
+test('临时 SQLite 仅保存凭据和 Session 哈希并以 user_id 绑定历史所有权', async (t) => {
+  const { baseUrl, database } = await createAuthTestApp(t);
+  const first = new AuthClient(baseUrl);
+  const second = new AuthClient(baseUrl);
+  const firstPassword = 'Database-Secret-A-2026';
+  const secondPassword = 'Database-Secret-B-2026';
+
+  const firstRegistration = await first.register('Database_Audit_A', firstPassword);
+  const firstRecoveryCode = (await firstRegistration.json()).recoveryCode;
+  const secondRegistration = await second.register('Database_Audit_B', secondPassword);
+  const secondRecoveryCode = (await secondRegistration.json()).recoveryCode;
+  assert.equal((await first.login('Database_Audit_A', firstPassword)).status, 200);
+  assert.equal((await second.login('Database_Audit_B', secondPassword)).status, 200);
+  const firstMe = await (await first.me()).json();
+  const secondMe = await (await second.me()).json();
+  const firstSessionId = rawSessionId(first.cookie);
+  const secondSessionId = rawSessionId(second.cookie);
+
+  const firstTitle = 'PRIVATE_HISTORY_OWNER_A_MARKER';
+  const secondTitle = 'PRIVATE_HISTORY_OWNER_B_MARKER';
+  assert.equal((await first.request('/api/time-management/history', {
+    method: 'POST',
+    csrfToken: first.sessionCsrfToken,
+    body: historySnapshot({
+      clientRunId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+      title: firstTitle,
+    }),
+  })).status, 201);
+  assert.equal((await second.request('/api/time-management/history', {
+    method: 'POST',
+    csrfToken: second.sessionCsrfToken,
+    body: historySnapshot({
+      clientRunId: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+      title: secondTitle,
+    }),
+  })).status, 201);
+
+  const users = await database.all(
+    'SELECT id, password_hash, recovery_code_hash FROM users ORDER BY normalized_username',
+  );
+  const sessions = await database.all(
+    'SELECT user_id, token_hash, csrf_token_hash FROM sessions ORDER BY user_id',
+  );
+  const persistedSecrets = JSON.stringify({ users, sessions });
+  for (const secret of [
+    firstPassword,
+    secondPassword,
+    firstRecoveryCode,
+    secondRecoveryCode,
+    first.cookie,
+    second.cookie,
+    firstSessionId,
+    secondSessionId,
+    first.sessionCsrfToken,
+    second.sessionCsrfToken,
+  ]) {
+    assert.doesNotMatch(persistedSecrets, new RegExp(secret.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+  }
+  assert.equal(
+    sessions.find(row => row.user_id === firstMe.user.id).token_hash,
+    hashToken(firstSessionId),
+  );
+  assert.equal(
+    sessions.find(row => row.user_id === secondMe.user.id).token_hash,
+    hashToken(secondSessionId),
+  );
+
+  const firstRows = await database.all(
+    'SELECT user_id, title FROM time_management_runs WHERE user_id = ?',
+    [firstMe.user.id],
+  );
+  const secondRows = await database.all(
+    'SELECT user_id, title FROM time_management_runs WHERE user_id = ?',
+    [secondMe.user.id],
+  );
+  assert.deepEqual(firstRows, [{ user_id: firstMe.user.id, title: firstTitle }]);
+  assert.deepEqual(secondRows, [{ user_id: secondMe.user.id, title: secondTitle }]);
+});
+
 test('内存日志只记录 requestId、路径、状态和耗时', async () => {
   const entries = [];
   const app = createApp({
+    authBoundary: createTestAuthBoundary(),
     modelClient: { completeJson: async () => passingReview() },
     logger: entry => entries.push(entry),
   });
@@ -169,7 +428,10 @@ test('内存日志只记录 requestId、路径、状态和耗时', async () => {
 });
 
 test('API 响应包含安全头和 UUID 请求标识', async () => {
-  const app = createApp({ modelClient: { completeJson: async () => passingReview() } });
+  const app = createApp({
+    authBoundary: createTestAuthBoundary(),
+    modelClient: { completeJson: async () => passingReview() },
+  });
   const server = await listen(app);
   try {
     const response = await fetch(`http://127.0.0.1:${server.address().port}/api/health`);
@@ -195,9 +457,10 @@ async function sourceFiles(directory) {
   return nested.flat();
 }
 
-test('frontend 中不包含模型密钥变量或测试密钥', async () => {
+test('frontend 中不包含模型密钥、测试密钥或持久存储凭据的入口', async () => {
   const frontend = path.join(__dirname, '..', '..', 'frontend');
   const contents = await Promise.all((await sourceFiles(frontend)).map(file => readFile(file, 'utf8')));
   const source = contents.join('\n');
   assert.doesNotMatch(source, /MODEL_API_KEY|sk-test-sensitive-123/);
+  assert.doesNotMatch(source, /localStorage|sessionStorage|indexedDB|document\.cookie|cookieStore/i);
 });
