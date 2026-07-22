@@ -172,6 +172,35 @@ test('未登录显示登录页且不能进入工作区', async ({ page }) => {
   await expect(page).toHaveURL(/\/$/);
 });
 
+test('登录请求处理中不显示失败提示', async ({ page }) => {
+  const username = 'Ui_Login_Pending_Error_01';
+  await page.goto('/');
+  await registerThroughApi(page, username);
+  await page.reload();
+
+  let releaseLogin;
+  const loginRequested = new Promise(resolve => {
+    page.route('**/api/auth/login', async route => {
+      resolve();
+      await new Promise(release => { releaseLogin = release; });
+      await route.continue();
+    });
+  });
+
+  await page.getByLabel('用户名').fill(username);
+  await page.getByLabel('密码', { exact: true }).fill(PASSWORD);
+  await page.getByRole('button', { name: '登录' }).click();
+  await loginRequested;
+
+  try {
+    await expect(page.locator('.auth-error')).toHaveText('');
+  } finally {
+    releaseLogin();
+  }
+
+  await expect(page.getByRole('button', { name: /开始梳理/ })).toBeVisible();
+});
+
 test('注册提示用户名和六位密码规则且恢复码只显示到确认保存', async ({ page }) => {
   const username = '界面注册A';
   const password = '六位密码通过';

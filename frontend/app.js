@@ -956,7 +956,7 @@ function showAuthScreen(screen) {
 
 function authError(form, message) {
   const element = form.querySelector('.auth-error');
-  element.textContent = message || '请求失败，请重试。';
+  element.textContent = message ?? '请求失败，请重试。';
 }
 
 async function submitLogin(form) {
