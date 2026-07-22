@@ -374,7 +374,7 @@ git commit -m "test: document classification evaluation cases"
 **Files:**
 - Verify only; do not add unrelated files.
 
-- [ ] **Step 1: Run the complete server test suite**
+- [x] **Step 1: Run the complete server test suite**
 
 ```powershell
 $env:PATH = "$PWD\.conda;$env:PATH"
@@ -383,7 +383,7 @@ $env:PATH = "$PWD\.conda;$env:PATH"
 
 Expected: exit 0 with no failed tests.
 
-- [ ] **Step 2: Run the complete project suite**
+- [x] **Step 2: Run the complete project suite**
 
 ```powershell
 $env:PATH = "$PWD\.conda;$env:PATH"
@@ -392,7 +392,7 @@ $env:PATH = "$PWD\.conda;$env:PATH"
 
 Expected: server and Playwright suites both exit 0. The Playwright environment continues to use the configured fake model values; no paid API call is made.
 
-- [ ] **Step 3: Run whitespace and hook checks**
+- [x] **Step 3: Run whitespace and hook checks**
 
 ```powershell
 git diff --check
@@ -401,7 +401,7 @@ git hook run pre-commit
 
 Expected: both commands exit 0. Do not bypass or modify hooks.
 
-- [ ] **Step 4: Review the final change scope**
+- [x] **Step 4: Review the final change scope**
 
 ```powershell
 git status --short --branch
@@ -411,7 +411,7 @@ git diff -- prompts/system.md server/policies/deadline.js tests/server/deadline-
 
 Expected: only the six planned implementation files are modified, plus any pre-existing unrelated untracked files that remain untouched.
 
-- [ ] **Step 5: Commit any final verified adjustment**
+- [x] **Step 5: Commit any final verified adjustment**
 
 Only when Task 5 required an additional in-scope correction:
 
