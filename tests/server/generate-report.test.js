@@ -77,6 +77,42 @@ test('报告只引用当前任务并保留三段结构', async () => {
   });
 });
 
+test('五步报告接收时间分布诊断并原样传入模型上下文', async () => {
+  const tasks = [task('task-a', { name: '提交复盘', source: '复盘' })];
+  const matrix = matrixFor(tasks);
+  const expected = reportFor(tasks);
+  const modelClient = queuedModel([expected]);
+  const goals = { 昨天: '存在遗留事项', 后天: '' };
+  const distribution = {
+    totalMinutes: 60,
+    totalHours: 1,
+    validTaskCount: 1,
+    invalidTasks: [],
+    percentages: { 昨天: 100, 今天: 0, 明天: 0, 后天: 0 },
+    categories: [
+      { key: '昨天', percent: 100, status: 'over' },
+      { key: '今天', percent: 0, status: 'under' },
+      { key: '明天', percent: 0, status: 'under' },
+      { key: '后天', percent: 0, status: 'under' },
+    ],
+    diagnosis: ['“昨天”投入偏高。'],
+    recommendations: ['先清理遗留事项。'],
+  };
+
+  const result = await generateReport({
+    tasks,
+    matrix,
+    goals,
+    distribution,
+    modelClient,
+  });
+
+  assert.deepEqual(result, expected);
+  const modelInput = JSON.parse(modelClient.calls[0].user);
+  assert.deepEqual(modelInput.distribution, distribution);
+  assert.match(modelClient.calls[0].system, /时间分布诊断/);
+});
+
 test('任务不少于 3 条时 order 长度必须为 3–5', async () => {
   const tasks = Array.from({ length: 6 }, (_, index) => task(`task-${index}`));
   const invalid = reportFor(tasks, { order: reportFor(tasks).order.slice(0, 2) });

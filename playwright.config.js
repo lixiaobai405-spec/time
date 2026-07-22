@@ -21,7 +21,7 @@ if (process.env.TEST_WORKER_INDEX === undefined) {
 
 module.exports = defineConfig({
   testDir: './tests',
-  testMatch: ['frontend.spec.js', 'auth-history.spec.js'],
+  testMatch: ['reference-five-step.spec.js', 'reference-auth-history.spec.js'],
   timeout: 25_000,
   workers: 1,
   reporter: 'list',

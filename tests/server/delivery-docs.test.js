@@ -33,8 +33,10 @@ test('README documents authenticated SQLite history and operator commands', () =
     '/api/auth/me',
     '/api/auth/password/reset-with-recovery',
     '/api/auth/recovery-code/rotate',
-    '/api/time-management/goals/check',
-    '/api/time-management/tasks/extract',
+    '/api/time-management/intake/check',
+    '/api/time-management/tasks/decompose',
+    '/api/time-management/tasks/smart-check',
+    '/api/time-management/distribution/diagnose',
     '/api/time-management/matrix/classify',
     '/api/time-management/report/generate',
     '/api/time-management/history',
@@ -44,7 +46,7 @@ test('README documents authenticated SQLite history and operator commands', () =
   assert.match(source, /恢复码.*只展示一次/s);
   assert.match(source, /丢失密码和恢复码.*无法.*找回/s);
   assert.match(source, /报告.*自动保存.*历史/s);
-  assert.match(source, /草稿.*不会保存/s);
+  assert.match(source, /草稿.*只存在浏览器内存/s);
   assert.match(source, /不包含.*外部平台集成/s);
   assert.doesNotMatch(source, /不包含账号/);
   assert.doesNotMatch(source, /项目不建立数据库/);
@@ -136,7 +138,7 @@ test('security documentation fixes the log and browser-memory privacy boundary',
   const review = read('docs/adversarial-review.md');
   assert.match(readme, /请求日志只记录 requestId、路径、状态和耗时/);
   assert.match(readme, /不记录用户名、凭据、Cookie、目标或历史正文/);
-  assert.match(readme, /四步草稿仍只存在浏览器内存/);
+  assert.match(readme, /五步草稿、任务编辑、完成勾选和本次会话每日记录仍只存在浏览器内存/);
   assert.match(review, /不记录用户名、密码、恢复码、Cookie、Session token、目标正文或历史正文/);
 });
 
@@ -164,8 +166,8 @@ test('甲方验收清单包含 11 项正式交付口径和测试证据', () => {
 
 test('对抗审查只用测试证据关闭阻断项并保留未验证风险', () => {
   const source = read('docs/adversarial-review.md');
-  assert.match(source, /已解决（有测试证据）/);
-  assert.match(source, /tests\/frontend\.spec\.js/);
+  assert.match(source, /已解决（历史与现行测试证据）/);
+  assert.match(source, /tests\/reference-five-step\.spec\.js/);
   assert.match(source, /tests\/server\/security\.test\.js/);
   assert.match(source, /tests\/server\/prompt-contract\.test\.js/);
   assert.match(source, /仍未解决/);
@@ -174,7 +176,7 @@ test('对抗审查只用测试证据关闭阻断项并保留未验证风险', ()
   assert.match(source, /账号.*历史.*已解决/s);
   assert.match(source, /tests\/server\/auth-api\.test\.js/);
   assert.match(source, /tests\/server\/history-api\.test\.js/);
-  assert.match(source, /tests\/auth-history\.spec\.js/);
+  assert.match(source, /tests\/reference-auth-history\.spec\.js/);
   assert.match(source, /HTTP[^\n]*(未加密|明文|传输加密)/);
   assert.match(source, /root/);
   assert.match(source, /同盘.*备份/);

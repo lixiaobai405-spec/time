@@ -19,7 +19,8 @@ async function main() {
   });
 }
 
-main().catch(() => {
-  process.stderr.write('Time assistant failed to start.\n');
+main().catch((error) => {
+  const detail = error?.message ? `: ${error.message}` : '';
+  process.stderr.write(`Time assistant failed to start${detail}.\n`);
   process.exitCode = 1;
 });

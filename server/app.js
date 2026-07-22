@@ -4,7 +4,11 @@ const path = require('node:path');
 
 const { notFound, problemHandler } = require('./http/problem');
 const { checkGoals } = require('./workflows/check-goals');
+const { checkIntake } = require('./workflows/check-intake');
+const { checkTaskSmart } = require('./workflows/check-task-smart');
 const { classifyMatrix } = require('./workflows/classify-matrix');
+const { decomposeTasks } = require('./workflows/decompose-tasks');
+const { diagnoseDistribution } = require('./workflows/diagnose-distribution');
 const { extractTasks } = require('./workflows/extract-tasks');
 const { generateReport } = require('./workflows/generate-report');
 
@@ -85,6 +89,48 @@ function createApp({ modelClient, authBoundary, logger, now = Date.now } = {}) {
   app.use('/api/time-management', authBoundary.requireAuth);
   app.use('/api/time-management', requireMutationSecurity(authBoundary));
   app.use('/api/time-management/history', authBoundary.historyRouter);
+  app.post('/api/time-management/intake/check', (request, response, next) => {
+    try {
+      response.json(checkIntake({
+        entries: request.body?.entries,
+        requestBody: request.body,
+      }));
+    } catch (error) {
+      next(error);
+    }
+  });
+  app.post('/api/time-management/tasks/decompose', async (request, response, next) => {
+    try {
+      response.json(await decomposeTasks({
+        entries: request.body?.entries,
+        modelClient,
+        requestBody: request.body,
+        now,
+      }));
+    } catch (error) {
+      next(error);
+    }
+  });
+  app.post('/api/time-management/tasks/smart-check', (request, response, next) => {
+    try {
+      response.json(checkTaskSmart({
+        tasks: request.body?.tasks,
+        requestBody: request.body,
+      }));
+    } catch (error) {
+      next(error);
+    }
+  });
+  app.post('/api/time-management/distribution/diagnose', (request, response, next) => {
+    try {
+      response.json(diagnoseDistribution({
+        tasks: request.body?.tasks,
+        requestBody: request.body,
+      }));
+    } catch (error) {
+      next(error);
+    }
+  });
   app.post('/api/time-management/goals/check', async (request, response, next) => {
     try {
       response.json(await checkGoals({
@@ -125,6 +171,7 @@ function createApp({ modelClient, authBoundary, logger, now = Date.now } = {}) {
         tasks: request.body?.tasks,
         matrix: request.body?.matrix,
         goals: request.body?.goals,
+        distribution: request.body?.distribution,
         modelClient,
         requestBody: request.body,
         now,

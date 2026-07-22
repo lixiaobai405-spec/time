@@ -4,12 +4,20 @@ setlocal
 cd /d "%~dp0"
 
 set "NODE_EXE=%CD%\.conda\node.exe"
-if not exist "%NODE_EXE%" (
-  echo [错误] 未找到项目专用环境 .conda。
-  echo 请先按照 README.md 的环境要求创建项目专用 Anaconda 环境。
+if exist "%NODE_EXE%" goto node_ready
+
+where node.exe >nul 2>nul
+if errorlevel 1 (
+  echo [错误] 未找到项目专用环境 .conda，也未找到系统 Node.js。
+  echo 请先按照 README.md 的环境要求安装 Node.js 20 或创建项目专用 Anaconda 环境。
   pause
   exit /b 1
 )
+
+set "NODE_EXE=node"
+echo [警告] 未找到 .conda，临时使用系统 Node.js。正式验收仍建议使用 Node.js 20.20.2。
+
+:node_ready
 
 if not exist ".env" (
   echo [错误] 未找到 .env。

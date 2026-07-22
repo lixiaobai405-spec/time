@@ -6,62 +6,919 @@ import {
   setCsrfToken,
 } from './api.js';
 import {
-  renderBoot,
-  renderLogin,
-  renderRecovery,
-  renderRecoveryCode,
-  renderRegister,
-} from './auth-ui.js';
-import { renderHistoryDetail, renderHistoryList } from './history-ui.js';
-import {
+  CATEGORY_KEYS,
   createUuid,
-  goalSnapshot,
-  invalidateAfterGoals,
+  invalidateAfterEntries,
   invalidateAfterTasks,
   resetState,
+  resetWorkflow,
   state,
 } from './state.js';
 
-const GOAL_FIELDS = Object.freeze([
-  { id: '昨', key: '昨天', label: '昨天 · 目标复盘', color: 'var(--purple-700)', description: '过往目标达成、绩效差距及原因', placeholder: '例:上季度获客目标完成 80%…' },
-  { id: '今', key: '今天', label: '今天 · 关键工作', color: 'var(--purple)', description: '当前正在推进的重点事项', placeholder: '例:校对方案、跟进客户投诉…' },
-  { id: '明', key: '明天', label: '明天 · 短期目标', color: 'var(--orange-600)', description: '近一阶段要达成的目标', placeholder: '例:本月完成选题策划、上线活动…' },
-  { id: '后', key: '后天', label: '后天 · 中长期目标', color: 'var(--orange)', description: '部门中长期规划与愿景', placeholder: '例:年内搭建团队分层培养体系…' },
-]);
+const CATS = Object.freeze({
+  昨天: {
+    badge: '昨', color: '#571857', title: '昨天 · 遗留问题', short: '遗留问题',
+    description: '应完未完成、拖下来的事；遗留问题、疲于救火', target: '→0%', source: '复盘',
+  },
+  今天: {
+    badge: '今', color: '#6C216D', title: '今天 · 日事日毕', short: '日事日毕',
+    description: '今天要完成的事务工作，也是无序、冲突和内耗的所在', target: '70–80%', source: '今天',
+  },
+  明天: {
+    badge: '明', color: '#C9752B', title: '明天 · 能力提升', short: '能力提升',
+    description: '机制规范、流程体系、信息化、培养下属与授权管理', target: '10–20%', source: '短期目标',
+  },
+  后天: {
+    badge: '后', color: '#E18C3F', title: '后天 · 未来规划', short: '未来规划',
+    description: '思考未来规划、提前布局，并拆分可检查的里程碑', target: '5%', source: '中长期',
+  },
+});
+
+const SOURCE_TO_CATEGORY = Object.freeze({
+  复盘: '昨天', 今天: '今天', 临时: '今天', 短期目标: '明天', 中长期: '后天',
+});
+const PRIORITIES = Object.freeze({
+  IU: { label: '重要且紧急', importance: '高', urgency: '高' },
+  I: { label: '重要不紧急', importance: '高', urgency: '低' },
+  U: { label: '紧急不重要', importance: '低', urgency: '高' },
+  N: { label: '不重要不紧急', importance: '低', urgency: '低' },
+});
 const STEPS = Object.freeze([
-  { title: '目标梳理', subtitle: '四天框架输入' },
-  { title: '任务提取', subtitle: 'AI拆解 + 手动补充' },
-  { title: '矩阵判定', subtitle: '四象限归类' },
-  { title: '优先级报告', subtitle: '输出行动建议' },
+  { title: '事务填写', subtitle: '四栏整段录入' },
+  { title: 'AI 拆解确认', subtitle: '结构化 + SMART' },
+  { title: '时间分布诊断', subtitle: '实际 vs 目标' },
+  { title: '优先级排序', subtitle: '轻重缓急矩阵' },
+  { title: '优化报告', subtitle: '改变与举措' },
 ]);
-const ICONS = {
-  arrow: '<svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg>',
-  back: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5M11 6l-6 6 6 6"/></svg>',
-  spark: '<svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v4M12 17v4M3 12h4M17 12h4M6 6l2 2M16 16l2 2M18 6l-2 2M8 16l-2 2"/></svg>',
-  trash: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14"/></svg>',
-  copy: '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg>',
-  refresh: '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-3-6.7L21 8"/><path d="M21 3v5h-5"/></svg>',
-  plus: '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>',
-  io: '<svg viewBox="0 0 20 20" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 10h9M9 6l4 4-4 4"/></svg>',
-};
+const QUADRANT_CLASSES = Object.freeze({
+  第一象限: 'q1', 第二象限: 'q2', 第三象限: 'q3', 第四象限: 'q4',
+});
+const QUADRANT_META = Object.freeze({
+  第一象限: ['第一象限 · 立即做', '重要且紧急'],
+  第二象限: ['第二象限 · 计划做', '重要不紧急'],
+  第三象限: ['第三象限 · 授权做', '紧急不重要'],
+  第四象限: ['第四象限 · 减少做', '不重要不紧急'],
+});
+const ICONS = Object.freeze({
+  clock: '<svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>',
+  arrow: '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg>',
+});
 
 let operationId = 0;
 const app = () => document.getElementById('app');
+const topbar = () => document.getElementById('topbar');
+const modalHost = () => document.getElementById('modalHost');
 
-function updateAuthBar() {
-  const user = document.getElementById('auth-user');
-  const logout = document.getElementById('auth-logout');
-  const history = document.getElementById('auth-history');
-  const authenticated = Boolean(state.authReady && state.user);
-  user.classList.toggle('hidden', !authenticated);
-  logout.classList.toggle('hidden', !authenticated);
-  history.classList.toggle('hidden', !authenticated);
-  user.textContent = authenticated ? `已登录：${state.user.username}` : '';
+function escapeHtml(value) {
+  return String(value ?? '').replace(/[&<>"']/g, character => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+  })[character]);
+}
+
+function localDateIso(date = new Date()) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+function localDateTimeValue(date = new Date()) {
+  return `${localDateIso(date)}T${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
+}
+
+const TODAY = localDateIso();
+
+function categoryForTask(task) {
+  return SOURCE_TO_CATEGORY[task?.source] || '今天';
+}
+
+function priorityForTask(task) {
+  if (task.importance === '高' && task.urgency === '高') return 'IU';
+  if (task.importance === '高') return 'I';
+  if (task.urgency === '高') return 'U';
+  if (task.importance && task.urgency) return 'N';
+  return '';
+}
+
+function parseEstimatedHours(value) {
+  const text = String(value || '').trim().replace(/^约\s*/, '').replace(/\s+/g, '');
+  const hours = text.match(/^(\d+(?:\.\d+)?)(?:h|小时)$/i);
+  if (hours) return Number(hours[1]);
+  const minutes = text.match(/^(\d+)分钟$/);
+  return minutes ? Number(minutes[1]) / 60 : null;
+}
+
+function normalizeEstimate(value) {
+  const hours = Number(value);
+  if (!Number.isFinite(hours) || hours <= 0) return '';
+  const minutes = Math.round(hours * 60);
+  if (minutes % 30 === 0) return `${minutes / 60}h`;
+  return `${minutes}分钟`;
+}
+
+function tracked(taskId) {
+  return state.tracking[taskId] || { done: false, doneAt: '' };
+}
+
+function toast(message) {
+  const element = document.getElementById('toast');
+  element.textContent = message;
+  element.classList.add('on');
+  clearTimeout(element._timer);
+  element._timer = setTimeout(() => element.classList.remove('on'), 1900);
 }
 
 function rememberCsrfToken(value) {
   state.csrfToken = typeof value === 'string' && value ? value : null;
   setCsrfToken(state.csrfToken);
+}
+
+function cancelPending() {
+  operationId += 1;
+  cancelActiveRequest();
+  state.pending = null;
+}
+
+function isCurrent(id, screen = 'workspace') {
+  return id === operationId && state.screen === screen;
+}
+
+function renderTopbar() {
+  const brand = `<div class="brand" data-action="home" role="button" tabindex="0">
+    <div class="brand-mark">${ICONS.clock}</div>
+    <div><div class="brand-name">时间管理助手</div><div class="brand-sub">昨天-今天-明天-后天 · 轻重缓急矩阵</div></div>
+  </div>`;
+  if (!state.authReady || !state.user) {
+    topbar().innerHTML = brand;
+    return;
+  }
+  const active = state.screen === 'history-detail' ? 'history' : state.screen;
+  const nav = [
+    ['home', '工作台'], ['workspace', '梳理流程'], ['daily', '每日跟踪'], ['history', '历史记录'],
+  ];
+  const username = state.user.username || '';
+  topbar().innerHTML = `${brand}<nav class="topnav" aria-label="主导航">
+    ${nav.map(([key, label]) => `<button class="tnav ${active === key ? 'on' : ''}" data-nav="${key}">${label}</button>`).join('')}
+    <span class="auth-mini">${escapeHtml(username)}</span>
+    <button class="avatar" data-action="logout" title="${escapeHtml(username)} · 点击退出" aria-label="退出登录">${escapeHtml(username.slice(0, 2))}</button>
+  </nav>`;
+}
+
+function renderBoot() {
+  app().innerHTML = `<div class="login-wrap"><section class="login-card">
+    <div class="brand-mark" style="width:44px;height:44px;border-radius:12px">${ICONS.clock}</div>
+    <div class="login-h">正在检查登录状态</div><div class="login-sub">正在安全恢复当前会话。</div>
+    <div class="auth-spinner" aria-label="加载中"></div>
+  </section></div>`;
+}
+
+function authField(label, name, type, autocomplete, placeholder = '') {
+  return `<div class="field"><label class="fl" for="auth-${name}">${label}</label>
+    <input id="auth-${name}" name="${name}" type="${type}" autocomplete="${autocomplete}" ${type === 'password' ? 'minlength="6"' : ''} placeholder="${escapeHtml(placeholder)}" required>
+  </div>`;
+}
+
+function renderLogin() {
+  const register = state.authMode === 'register';
+  app().innerHTML = `<div class="login-wrap"><section class="login-card">
+    <div class="brand-mark" style="width:44px;height:44px;border-radius:12px">${ICONS.clock}</div>
+    <div class="login-h">${register ? '注册账号' : '登录'}</div>
+    <div class="login-sub">登录后可保存报告历史；事务草稿和每日跟踪只保留在当前页面会话。</div>
+    <div class="tabs"><button class="tab ${register ? '' : 'on'}" data-action="auth-login-tab">登录</button><button class="tab ${register ? 'on' : ''}" data-action="auth-register-tab">注册</button></div>
+    <form data-auth-form="${register ? 'register' : 'login'}">
+      ${authField('用户名', 'username', 'text', 'username', '请输入用户名')}
+      ${authField('密码', 'password', 'password', register ? 'new-password' : 'current-password', '至少 6 位')}
+      ${register ? authField('确认密码', 'passwordConfirm', 'password', 'new-password', '再次输入密码') : ''}
+      <div class="auth-error" role="alert" aria-live="polite">${escapeHtml(state.authError?.message || '')}</div>
+      <button class="btn btn-primary btn-block" type="submit" ${state.pending === 'auth' ? 'disabled' : ''}>${state.pending === 'auth' ? '<span class="mini-spin"></span>处理中…' : register ? '注册' : '登录'}</button>
+    </form>
+    <div class="auth-links"><span></span><button class="btn btn-ghost btn-sm" data-action="show-recovery">忘记密码</button></div>
+    <div class="demo-note">账号、密码和模型密钥不会写入浏览器持久存储。</div>
+  </section></div>`;
+}
+
+function renderRecovery() {
+  app().innerHTML = `<div class="login-wrap"><section class="login-card">
+    <div class="brand-mark" style="width:44px;height:44px;border-radius:12px">${ICONS.clock}</div>
+    <div class="login-h">使用恢复码重置密码</div><div class="login-sub">成功后会撤销该账号的旧登录会话，并生成新的恢复码。</div>
+    <form data-auth-form="recovery">
+      ${authField('用户名', 'username', 'text', 'username')}
+      ${authField('恢复码', 'recoveryCode', 'text', 'off')}
+      ${authField('新密码', 'newPassword', 'password', 'new-password')}
+      ${authField('确认新密码', 'newPasswordConfirm', 'password', 'new-password')}
+      <div class="auth-error" role="alert" aria-live="polite">${escapeHtml(state.authError?.message || '')}</div>
+      <button class="btn btn-primary btn-block" type="submit" ${state.pending === 'auth' ? 'disabled' : ''}>重置密码</button>
+    </form>
+    <div class="auth-links"><button class="btn btn-ghost btn-sm" data-action="show-login">返回登录</button></div>
+  </section></div>`;
+}
+
+function renderRecoveryCode() {
+  app().innerHTML = `<div class="login-wrap"><section class="login-card">
+    <div class="brand-mark" style="width:44px;height:44px;border-radius:12px">${ICONS.clock}</div>
+    <div class="login-h">请立即保存恢复码</div><div class="login-sub">这是忘记密码后唯一的自助找回方式。</div>
+    <p class="recovery-warning">恢复码只显示这一次。请复制到安全位置，不要分享。</p>
+    <code class="recovery-code" id="recovery-code">${escapeHtml(state.recoveryCode)}</code>
+    <button class="btn btn-primary btn-block" data-action="confirm-recovery-code">我已保存恢复码</button>
+  </section></div>`;
+}
+
+function previewDistribution(tasks = state.tasks) {
+  const minutes = Object.fromEntries(CATEGORY_KEYS.map(key => [key, 0]));
+  let total = 0;
+  for (const task of tasks) {
+    const hours = parseEstimatedHours(task.est);
+    if (!Number.isFinite(hours) || hours <= 0) continue;
+    const value = Math.round(hours * 60);
+    minutes[categoryForTask(task)] += value;
+    total += value;
+  }
+  const percentages = Object.fromEntries(CATEGORY_KEYS.map(key => [
+    key,
+    total ? Math.round((minutes[key] / total) * 1000) / 10 : 0,
+  ]));
+  return { percentages, totalHours: Math.round((total / 60) * 10) / 10 };
+}
+
+function distributionStatus(category, percent) {
+  if (category === '昨天') return percent <= 2 ? 'ok' : 'over';
+  if (category === '今天') return percent < 70 ? 'under' : percent > 80 ? 'over' : 'ok';
+  if (category === '明天') return percent < 10 ? 'under' : percent > 20 ? 'over' : 'ok';
+  return percent >= 3 ? 'ok' : 'under';
+}
+
+function renderHome() {
+  const distribution = state.distribution || previewDistribution();
+  const percentages = distribution.percentages || {};
+  const due = state.tasks.filter(task => {
+    const track = tracked(task.id);
+    return !track.done && /^\d{4}-\d{2}-\d{2}$/.test(task.due) && task.due <= TODAY;
+  });
+  const totalHours = distribution.totalHours ?? previewDistribution().totalHours;
+  app().innerHTML = `<div class="phead"><div class="ptitle">工作台</div></div>
+    <div class="pdesc">${escapeHtml(state.user.username)}，今天是 ${TODAY}。当前 ${state.tasks.length} 条任务，预估投入 ${totalHours || 0} 小时。</div>
+    ${due.length ? `<div class="remind"><div class="ic">!</div><div><b>到期提醒 · ${due.length} 项已到期或逾期未完成</b><div class="list">${due.map(task => `${escapeHtml(task.name)}（截止 ${escapeHtml(task.due)}）`).join(' · ')}</div></div></div>` : ''}
+    <div class="hgrid">${CATEGORY_KEYS.map(key => {
+      const percent = Number(percentages[key] || 0);
+      const status = distributionStatus(key, percent);
+      return `<div class="hcard"><div class="cap">${CATS[key].title}</div><div class="big" style="color:${CATS[key].color}">${percent}%</div><div class="tgt ${status === 'ok' ? 'pill-ok' : 'pill-bad'}">目标 ${CATS[key].target} · ${status === 'ok' ? '达标' : status === 'over' ? '偏高' : '不足'}</div></div>`;
+    }).join('')}</div>
+    <div class="panelbox"><div class="pb-h"><span class="n">→</span>接下来做什么</div><div class="pb-d">${state.tasks.length ? '可继续梳理，或进入每日跟踪登记完成情况。' : '还没有任务，先去梳理流程整段填写四类事务。'}</div>
+      <div style="display:flex;gap:10px;flex-wrap:wrap"><button class="btn btn-primary" data-action="open-workspace">${state.tasks.length ? '继续梳理' : '开始梳理'} ${ICONS.arrow}</button><button class="btn btn-ghost" data-nav="daily">每日跟踪</button><button class="btn btn-ghost" data-nav="history">历史记录</button></div>
+    </div>`;
+}
+
+function panelHead(kicker, title, description) {
+  return `<div class="panel-head"><div class="panel-kick">${kicker}</div><div class="panel-h">${title}</div><div class="panel-desc">${description}</div></div>`;
+}
+
+function panelFoot(content) {
+  return `<div class="panel-foot">${content}</div>`;
+}
+
+function stepOneBody() {
+  return `${panelHead('节点 ① · 输入', '事务填写', '按四类事务分栏整段填写，每行一件事；后端先校验输入，再由 AI 统一拆解成任务。')}
+    <div class="panel-body"><div class="aibar"><span class="sp">!</span><div>草稿不会保存。请勿填写客户隐私、密码、密钥或其他敏感信息。</div></div>
+      <div class="cols4">${CATEGORY_KEYS.map(key => {
+        const category = CATS[key];
+        const warning = state.intake?.warnings?.find(item => item.key === key);
+        return `<div class="col"><div class="col-h"><span class="col-badge" style="background:${category.color}">${category.badge}</span><span class="col-t">${category.short}</span><span class="col-target" style="color:${category.color}">${category.target}</span></div>
+          <div class="col-d">${category.description}</div>
+          <textarea id="entry-${key}" data-entry="${key}" placeholder="每行写一件事，可顺带写明日期、耗时和轻重缓急">${escapeHtml(state.entries[key])}</textarea>
+          ${key === '昨天' ? '<div class="col-note">首次使用手填遗留事项；每日跟踪结束后，未完成任务会滚入该类。</div>' : ''}
+          ${warning ? `<div class="field-fb warn">${escapeHtml(warning.message)}</div>` : ''}
+        </div>`;
+      }).join('')}</div>
+    </div>
+    ${panelFoot(`<span class="foot-hint">节点 1：服务端校验四栏；节点 2：模型拆解并由你确认</span><button class="btn btn-primary" data-action="decompose" ${state.pending ? 'disabled' : ''}>${state.pending === 'decompose' ? '<span class="mini-spin"></span>拆解中…' : `AI 拆解为任务 ${ICONS.arrow}`}</button>`)}`;
+}
+
+function smartFields(taskId) {
+  if (!state.smartChecked) return new Set();
+  const item = state.smart?.results?.find(result => result.taskId === taskId);
+  return new Set((item?.issues || []).map(issue => issue.field));
+}
+
+function taskEditRow(task) {
+  const fields = smartFields(task.id);
+  const category = categoryForTask(task);
+  const hours = parseEstimatedHours(task.est);
+  const priority = priorityForTask(task);
+  return `<div class="trow g-edit ${fields.size ? 'miss' : ''}" data-task-row="${escapeHtml(task.id)}">
+    <div><span class="mobile-label">任务</span><input data-task-id="${escapeHtml(task.id)}" data-task-field="name" value="${escapeHtml(task.name)}" class="${fields.has('name') ? 'miss' : ''}" aria-label="任务描述"></div>
+    <div><span class="mobile-label">类别</span><select data-task-id="${escapeHtml(task.id)}" data-task-field="category" aria-label="所属类别">${CATEGORY_KEYS.map(key => `<option value="${key}" ${category === key ? 'selected' : ''}>${key}</option>`).join('')}</select></div>
+    <div><span class="mobile-label">截止时间</span><input data-task-id="${escapeHtml(task.id)}" data-task-field="due" value="${escapeHtml(task.due === '待确认' ? '' : task.due)}" placeholder="YYYY-MM-DD" class="${fields.has('due') ? 'miss' : ''}" aria-label="截止时间"></div>
+    <div><span class="mobile-label">预估时长</span><input type="number" step="0.25" min="0" data-task-id="${escapeHtml(task.id)}" data-task-field="est" value="${Number.isFinite(hours) ? hours : ''}" placeholder="小时" class="${fields.has('est') ? 'miss' : ''}" aria-label="预估时长"></div>
+    <div><span class="mobile-label">轻重缓急</span><select data-task-id="${escapeHtml(task.id)}" data-task-field="priority" class="${fields.has('priority') ? 'miss' : ''}" aria-label="轻重缓急"><option value="">未选</option>${Object.entries(PRIORITIES).map(([key, value]) => `<option value="${key}" ${priority === key ? 'selected' : ''}>${value.label}</option>`).join('')}</select></div>
+    <button class="del" data-action="delete-task" data-task-id="${escapeHtml(task.id)}" aria-label="删除任务">×</button>
+  </div>`;
+}
+
+function stepTwoBody() {
+  const needFix = state.smart?.summary?.needFix || 0;
+  return `${panelHead('节点 ② · AI动作 + 你确认', 'AI 拆解确认', 'AI 已把四栏文字拆成结构化任务。补齐标红字段，并由后端执行正式 SMART 校验。')}
+    <div class="panel-body"><div class="aibar"><span class="sp">AI</span><div style="flex:1">任务需具体、有截止时间、可解析工时和明确轻重缓急；后端不替你虚构缺失条件。</div>
+      <button class="btn btn-ghost btn-sm" data-action="smart-check" ${state.pending ? 'disabled' : ''}>${state.pending === 'smart' ? '<span class="mini-spin"></span>校验中…' : 'SMART 校验'}</button>
+      <button class="btn btn-ghost btn-sm" data-action="open-add-task">+ 手动添加任务</button></div>
+      <div class="tgrid"><div class="trow hd g-edit"><div>任务</div><div>类别</div><div>截止时间</div><div>预估时长</div><div>轻重缓急</div><div></div></div>
+        ${state.tasks.length ? state.tasks.map(taskEditRow).join('') : '<div class="trow"><div style="color:var(--muted);font-size:12px">暂无任务，请返回上一步重新填写。</div></div>'}
+      </div>
+      ${state.smartChecked ? `<div style="margin-top:12px;font-size:12.5px;color:${needFix ? 'var(--warn)' : 'var(--ok)'};font-weight:700">${needFix ? `还有 ${needFix} 条任务需要补全` : '全部任务通过 SMART 校验'}</div>` : ''}
+    </div>
+    ${panelFoot(`<span class="foot-hint">共 ${state.tasks.length} 条任务${state.smartChecked ? '' : ' · 请先执行 SMART 校验'}</span><button class="btn btn-ghost" data-action="back-step">上一步</button><button class="btn btn-primary" data-action="diagnose" ${state.pending ? 'disabled' : ''}>时间分布诊断 ${ICONS.arrow}</button>`)}`;
+}
+
+function stepThreeBody() {
+  const distribution = state.distribution;
+  if (!distribution) return `${panelHead('节点 ③ · 服务端动作', '时间分布诊断', '诊断结果尚未生成。')}<div class="panel-body"></div>`;
+  return `${panelHead('节点 ③ · 服务端动作', '时间分布诊断', '后端按可解析预估工时汇总四类事务占比，并与目标结构比较。')}
+    <div class="panel-body">${distribution.categories.map(item => {
+      const category = CATS[item.key];
+      const target = item.key === '昨天'
+        ? '<div class="tgt-mark" style="left:2%"></div>'
+        : item.key === '后天'
+          ? '<div class="tgt-mark" style="left:5%"></div>'
+          : `<div class="tgt-band" style="left:${item.target.min}%;width:${item.target.max - item.target.min}%"></div>`;
+      const label = item.status === 'ok' ? '达标' : item.status === 'over' ? '偏高' : '投入不足';
+      return `<div class="distrow"><div class="dist-label">${category.title}<span>目标 ${category.target}</span></div><div class="bar-wrap">${target}<div class="bar" style="width:${Math.max(item.percent, 3)}%;background:${category.color}">${item.percent}%</div></div><div class="dist-num" style="color:${item.status === 'ok' ? 'var(--ok)' : 'var(--warn)'}">${label}<small style="color:var(--muted)">${item.hours}h / 共 ${distribution.totalHours}h</small></div></div>`;
+    }).join('')}
+      <div class="legend">虚线或绿色区间为模型目标；占比由服务端按分钟计算，显示总和稳定为 100.0%。</div>
+      ${distribution.invalidTasks.length ? `<div class="diagnosis" style="background:var(--warn-bg);border-color:var(--warn-line);color:var(--warn)"><b>未参与计算：</b>${distribution.invalidTasks.map(item => escapeHtml(item.name)).join('、')}</div>` : ''}
+      <div class="diagnosis"><div><b>诊断结论：</b>${distribution.diagnosis.map(escapeHtml).join(' ')}</div><div style="margin-top:7px"><b>改进方向：</b>${distribution.recommendations.map(escapeHtml).join(' ')}</div></div>
+    </div>
+    ${panelFoot('<span class="foot-hint">诊断基线：昨天→0% · 今天70–80% · 明天10–20% · 后天5%</span><button class="btn btn-ghost" data-action="back-step">上一步</button><button class="btn btn-primary" data-action="classify">优先级排序 ' + ICONS.arrow + '</button>')}`;
+}
+
+function quadrantBox(name) {
+  const quadrant = state.matrix?.quadrants?.find(item => (item.name || item.q) === name);
+  const [title, meta] = QUADRANT_META[name];
+  const taskById = new Map(state.tasks.map(task => [task.id, task]));
+  const ids = quadrant?.taskIds || [];
+  return `<div class="quad ${QUADRANT_CLASSES[name]}">${quadrant ? `<div class="energy">${quadrant.energyPercent}%</div>` : ''}<div class="quad-h">${title}</div><div class="quad-m">${meta}</div>${ids.length ? ids.map(id => {
+    const task = taskById.get(id);
+    return `<div class="qt">${escapeHtml(task?.name || '')}<small> · ${escapeHtml(categoryForTask(task))}${task?.due ? ` · 截止${escapeHtml(task.due)}` : ''}</small></div>`;
+  }).join('') : '<div class="qt" style="opacity:.6">暂无</div>'}</div>`;
+}
+
+function stepFourBody() {
+  return `${panelHead('节点 ④ · AI排序', '优先级排序', '后端核验每条任务的轻重缓急和任务守恒，再按四象限输出执行顺序。')}
+    <div class="panel-body"><div class="mx-wrap"><div class="axis-y"><span>重要</span><span>不重要</span></div><div><div class="mx">${quadrantBox('第一象限')}${quadrantBox('第二象限')}${quadrantBox('第三象限')}${quadrantBox('第四象限')}</div><div class="axis-x"><span>不紧急</span><span>紧急</span></div></div></div>
+      <div class="diagnosis" style="background:var(--purple-tint);border-color:var(--purple-tint2);color:var(--purple-700)"><b>排序建议：</b>第一象限立即闭环；第二象限固定时段保护；第三象限优先授权；第四象限合并或减少。${state.matrix?.note ? ` ${escapeHtml(state.matrix.note)}` : ''}</div>
+    </div>
+    ${panelFoot('<span class="foot-hint">轻重缓急由你确认或由矩阵模型补齐，不为填满象限而篡改任务</span><button class="btn btn-ghost" data-action="back-step">上一步</button><button class="btn btn-primary" data-action="generate-report">生成优化报告 ' + ICONS.arrow + '</button>')}`;
+}
+
+function reportStatus() {
+  const messages = {
+    idle: '报告生成后将自动保存到账号历史。', saving: '正在保存历史…', saved: '历史已保存。', failed: '报告已生成，但历史保存失败。',
+  };
+  return `<div class="history-save-status ${state.historySave.status === 'failed' ? 'failed' : ''}"><span>${messages[state.historySave.status] || escapeHtml(state.historySave.message)}</span>${state.historySave.status === 'failed' ? '<button class="btn btn-ghost btn-sm" data-action="history-retry">重试保存</button>' : ''}</div>`;
+}
+
+function stepFiveBody() {
+  const taskById = new Map(state.tasks.map(task => [task.id, task]));
+  const order = state.report?.order || [];
+  return `${panelHead('节点 ⑤ · 输出', '时间投入优化报告', '报告综合任务、时间分布和四象限结果，给出执行顺序、结构目标与改变举措。')}
+    <div class="panel-body"><div class="rcard"><div class="rcard-h"><span class="n">1</span>今日执行顺序</div><ul class="rlist">${order.map(item => `<li><b>${escapeHtml(taskById.get(item.taskId)?.name || '')}</b>：${escapeHtml(item.reason)}</li>`).join('') || '<li>当前没有可排序任务。</li>'}</ul></div>
+      <div class="rcard"><div class="rcard-h"><span class="n">2</span>时间投入优化目标</div><ul class="rlist">${state.distribution.categories.map(item => `<li>${item.key}：${item.percent}% → <b>${CATS[item.key].target}</b></li>`).join('')}</ul></div>
+      <div class="rcard"><div class="rcard-h"><span class="n">3</span>要做的改变与举措</div><div id="report-markdown" class="markdown-body"></div></div>
+      ${reportStatus()}
+    </div>
+    ${panelFoot('<span class="foot-hint">报告已结合节点 3 的时间结构诊断</span><button class="btn btn-ghost" data-action="back-step">上一步</button><button class="btn btn-ghost" data-action="copy-report">复制报告</button><button class="btn btn-accent" data-nav="daily">进入每日跟踪 ' + ICONS.arrow + '</button>')}`;
+}
+
+function workspaceBody() {
+  if (state.step === 1) return stepOneBody();
+  if (state.step === 2) return stepTwoBody();
+  if (state.step === 3) return stepThreeBody();
+  if (state.step === 4) return stepFourBody();
+  return stepFiveBody();
+}
+
+function renderWorkspace() {
+  app().innerHTML = `<div class="ws-grid"><div class="stepper">${STEPS.map((step, index) => {
+    const number = index + 1;
+    const locked = number > state.maxStep;
+    return `<div class="step ${state.step === number ? 'active' : ''} ${number < state.step ? 'done' : ''} ${locked ? 'locked' : ''}" data-step="${number}"><div class="step-num">${number < state.step ? '✓' : number}</div><div><div class="step-tt">${step.title}</div><div class="step-sub">${step.subtitle}</div></div></div>`;
+  }).join('')}</div><section class="panel" id="panel">${workspaceBody()}</section></div>`;
+  if (state.step === 5 && state.report) hydrateReport();
+}
+
+function dailyTaskRow(task) {
+  const track = tracked(task.id);
+  const category = categoryForTask(task);
+  const hours = parseEstimatedHours(task.est);
+  const priority = priorityForTask(task);
+  return `<div class="trow g-daily ${track.done ? 'doneRow' : ''}">
+    <button class="chk ${track.done ? 'on' : ''}" data-action="toggle-done" data-task-id="${escapeHtml(task.id)}" aria-label="${track.done ? '取消完成' : '标记完成'}">${track.done ? '✓' : ''}</button>
+    <div><span class="mobile-label">任务</span><input class="tname ${track.done ? 'done' : ''}" data-task-id="${escapeHtml(task.id)}" data-task-field="name" value="${escapeHtml(task.name)}"></div>
+    <div><span class="mobile-label">类别</span><select data-task-id="${escapeHtml(task.id)}" data-task-field="category">${CATEGORY_KEYS.map(key => `<option value="${key}" ${category === key ? 'selected' : ''}>${key}</option>`).join('')}</select></div>
+    <div><span class="mobile-label">截止时间</span><input data-task-id="${escapeHtml(task.id)}" data-task-field="due" value="${escapeHtml(task.due === '待确认' ? '' : task.due)}" placeholder="YYYY-MM-DD"></div>
+    <div><span class="mobile-label">时长</span><input type="number" step="0.25" min="0" data-task-id="${escapeHtml(task.id)}" data-task-field="est" value="${Number.isFinite(hours) ? hours : ''}"></div>
+    <div><span class="mobile-label">轻重缓急</span><select data-task-id="${escapeHtml(task.id)}" data-task-field="priority"><option value="">未选</option>${Object.entries(PRIORITIES).map(([key, item]) => `<option value="${key}" ${priority === key ? 'selected' : ''}>${item.label}</option>`).join('')}</select></div>
+    <div><span class="mobile-label">完成时间</span><input type="datetime-local" data-track-time="${escapeHtml(task.id)}" value="${escapeHtml(track.doneAt)}" ${track.done ? '' : 'disabled'}></div>
+    <button class="del" data-action="delete-task" data-task-id="${escapeHtml(task.id)}" aria-label="删除任务">×</button>
+  </div>`;
+}
+
+function renderDaily() {
+  const list = state.tasks.filter(task => ['昨天', '今天'].includes(categoryForTask(task)));
+  const doneCount = list.filter(task => tracked(task.id).done).length;
+  const undoneToday = list.filter(task => categoryForTask(task) === '今天' && !tracked(task.id).done).length;
+  app().innerHTML = `<div class="phead"><div class="ptitle">每日跟踪</div></div><div class="pdesc">登记完成情况并记录实际完成时间；这些记录只保留在当前页面会话。</div>
+    <div class="panelbox"><div class="pb-h"><span class="n">✓</span>今日登记 · ${TODAY}</div><div class="pb-d">已完成 ${doneCount} / ${list.length} 项。勾选后自动填入本地完成时间，可手动修正。</div>
+      <div style="margin-bottom:12px"><button class="btn btn-ghost btn-sm" data-action="open-add-task" data-default-category="今天">+ 手动添加任务</button></div>
+      <div class="tgrid"><div class="trow hd g-daily"><div></div><div>任务</div><div>类别</div><div>截止时间</div><div>时长</div><div>轻重缓急</div><div>完成时间</div><div></div></div>${list.length ? list.map(dailyTaskRow).join('') : '<div class="trow"><div style="color:var(--muted);font-size:12px">暂无“今天/昨天”类任务。</div></div>'}</div>
+      <div class="roll-box"><b>滚动规则：</b>今日未完成 ${undoneToday} 项。结束当日后，已完成项进入本次会话历史；未完成的“今天”任务滚入“昨天”。<div style="margin-top:11px"><button class="btn btn-primary btn-sm" data-action="rollover">结束当日并滚动</button></div></div>
+    </div>`;
+}
+
+function formatTimestamp(value) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '时间待确认';
+  return new Intl.DateTimeFormat('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }).format(date);
+}
+
+function sessionHistoryRows() {
+  if (!state.sessionHistory.length) return '<div class="history-empty">本次会话还没有每日完成记录。</div>';
+  return state.sessionHistory.slice().reverse().map(item => `<div class="hrow"><div class="hdate">${escapeHtml(item.date)}<br><span style="font-size:10px;color:var(--muted)">刷新后清空</span></div><div class="hbar">${CATEGORY_KEYS.map(key => `<div class="hseg" style="width:${item.distribution[key] || 0}%;background:${CATS[key].color}"></div>`).join('')}</div><div class="hpct">${CATEGORY_KEYS.map(key => `${CATS[key].badge} ${item.distribution[key] || 0}%`).join(' · ')}</div><div class="hdone">${item.done.length ? `<b>完成 ${item.done.length} 项：</b>${item.done.map(done => `${escapeHtml(done.name)}（${escapeHtml(done.at.replace('T', ' '))}）`).join(' · ')}` : '当日无完成记录'}</div></div>`).join('');
+}
+
+function accountHistoryRows() {
+  if (state.error) return `<div class="history-error">${escapeHtml(state.error.message || '历史加载失败')}</div>`;
+  if (state.pending === 'history-list' && !state.historyItems.length) return '<div class="history-loading">正在加载账号报告…</div>';
+  if (!state.historyItems.length) return '<div class="history-empty">账号下还没有已完成的报告。</div>';
+  return `${state.historyItems.map(item => `<article class="history-item"><div class="history-item-main"><div class="history-item-title">${escapeHtml(item.title)}</div><div class="history-item-meta">生成时间：${escapeHtml(formatTimestamp(item.createdAt))} · 按账号保存</div></div><div class="history-actions"><button class="btn btn-primary btn-sm" data-action="history-detail" data-history-id="${escapeHtml(item.id)}">查看详情</button><button class="btn btn-ghost btn-sm" data-action="history-delete" data-history-id="${escapeHtml(item.id)}">删除</button></div></article>`).join('')}${state.historyCursor ? '<button class="btn btn-ghost btn-sm" data-action="history-more">加载更多</button>' : ''}`;
+}
+
+function renderHistory() {
+  app().innerHTML = `<div class="phead"><div class="ptitle">历史记录</div></div><div class="pdesc">“本次会话”来自每日跟踪，刷新后清空；“账号报告”保存在 SQLite 并按账号隔离。</div>
+    <div class="history-split"><section class="panelbox"><div class="pb-h"><span class="n">◷</span>本次会话 · 每日完成记录</div><div class="pb-d">用于观察四类事务占比和实际完成时间，不写入账号数据库。</div>${sessionHistoryRows()}</section>
+      <section class="panelbox"><div class="pb-h"><span class="n">云</span>账号报告</div><div class="pb-d">只保存成功生成的五步优化报告，支持查看、复制和删除。</div>${accountHistoryRows()}</section>
+    </div>`;
+}
+
+function renderHistoryDetail() {
+  const item = state.historyDetail;
+  if (!item) return renderHistory();
+  const taskById = new Map(item.tasks.map(task => [task.id, task]));
+  app().innerHTML = `<div class="phead"><button class="btn btn-ghost btn-sm" data-action="history-back">返回</button><div class="ptitle">${escapeHtml(item.title)}</div></div><div class="pdesc">生成时间：${escapeHtml(formatTimestamp(item.createdAt))} · 只读账号历史</div>
+    <div class="history-detail-content"><section class="history-section"><h2>事务填写</h2><div class="history-goals">${Object.entries(item.goals).map(([key, value]) => `<div><strong>${escapeHtml(key)}</strong><p>${escapeHtml(value || '未填写')}</p></div>`).join('')}</div></section>
+      <section class="history-section"><h2>任务清单</h2><div class="history-tasks">${item.tasks.map(task => `<article><h3>${escapeHtml(task.name)}</h3><p>${escapeHtml(categoryForTask(task))} · ${escapeHtml(task.importance || '待确认')}/${escapeHtml(task.urgency || '待确认')} · 截止 ${escapeHtml(task.due || '待确认')} · ${escapeHtml(task.est || '')}</p></article>`).join('')}</div></section>
+      <section class="history-section"><h2>轻重缓急矩阵</h2><div class="history-quadrants">${item.matrix.quadrants.map(quadrant => `<div><strong>${escapeHtml(quadrant.name)} · ${quadrant.energyPercent}%</strong><p>${quadrant.taskIds.map(id => escapeHtml(taskById.get(id)?.name || '')).filter(Boolean).join('、') || '暂无任务'}</p></div>`).join('')}</div></section>
+      <section class="history-section"><h2>优化报告</h2><div id="history-report-markdown" class="markdown-body"></div></section>
+    </div><div class="history-actions" style="justify-content:flex-end;margin-top:14px"><button class="btn btn-ghost btn-sm" data-action="history-copy">复制历史报告</button><button class="btn btn-danger btn-sm" data-action="history-delete" data-history-id="${escapeHtml(item.id)}">删除历史</button></div>`;
+  hydrateHistoryReport();
+}
+
+function renderModal() {
+  if (!state.modal) {
+    modalHost().innerHTML = '';
+    return;
+  }
+  if (state.modal.type === 'add-task') {
+    modalHost().innerHTML = `<div class="mask" data-modal-mask><section class="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title"><h3 id="modal-title">手动添加任务</h3><div class="sub">补充 AI 未拆解到的事项，保存后需要重新执行后续节点。</div>
+      <div class="field"><label class="fl" for="m-name">任务描述 <span class="req">*</span></label><input id="m-name" placeholder="动词 + 对象 + 结果"></div>
+      <div class="grid2"><div class="field"><label class="fl" for="m-due">截止时间 <span class="req">*</span></label><input id="m-due" type="date"></div><div class="field"><label class="fl" for="m-est">预估时长（小时） <span class="req">*</span></label><input id="m-est" type="number" step="0.25" min="0.25"></div></div>
+      <div class="grid2"><div class="field"><label class="fl" for="m-priority">轻重缓急 <span class="req">*</span></label><select id="m-priority"><option value="">请选择</option>${Object.entries(PRIORITIES).map(([key, item]) => `<option value="${key}">${item.label}</option>`).join('')}</select></div><div class="field"><label class="fl" for="m-category">所属类别</label><select id="m-category">${CATEGORY_KEYS.map(key => `<option value="${key}" ${key === state.modal.category ? 'selected' : ''}>${key}</option>`).join('')}</select></div></div>
+      <div class="err hidden" id="m-error">请填写全部必填项。</div><div class="mact"><button class="btn btn-primary btn-sm" data-action="save-task">添加</button><button class="btn btn-ghost btn-sm" data-action="close-modal">取消</button></div>
+    </section></div>`;
+  }
+}
+
+function render() {
+  renderTopbar();
+  if (!state.authReady || state.screen === 'boot') renderBoot();
+  else if (state.screen === 'recovery-code') renderRecoveryCode();
+  else if (!state.user && state.screen === 'recovery') renderRecovery();
+  else if (!state.user) renderLogin();
+  else if (state.screen === 'workspace') renderWorkspace();
+  else if (state.screen === 'daily') renderDaily();
+  else if (state.screen === 'history') renderHistory();
+  else if (state.screen === 'history-detail') renderHistoryDetail();
+  else renderHome();
+  renderModal();
+}
+
+function renderAtTop() {
+  render();
+  window.scrollTo({ top: 0, left: 0, behavior: 'auto' });
+}
+
+function hydrateReport() {
+  const target = document.getElementById('report-markdown');
+  if (!target || !state.report) return;
+  const markdown = [
+    '### 精力分配原则', '',
+    ...state.report.energyRules.map(item => `- ${item}`), '',
+    '### 改变与举措', '',
+    ...state.report.adjustments.map(item => `- ${item}`),
+  ].join('\n');
+  window.renderMarkdown(target, markdown);
+}
+
+function historyReportMarkdown(item) {
+  const taskById = new Map(item.tasks.map(task => [task.id, task]));
+  return [
+    '## 今日优先处理顺序', '',
+    ...item.report.order.map(entry => `- ${taskById.get(entry.taskId)?.name || ''} — ${entry.reason}`), '',
+    '## 精力分配原则', '', ...item.report.energyRules.map(item => `- ${item}`), '',
+    '## 改变与举措', '', ...item.report.adjustments.map(item => `- ${item}`),
+  ].join('\n');
+}
+
+function hydrateHistoryReport() {
+  const target = document.getElementById('history-report-markdown');
+  if (target && state.historyDetail) window.renderMarkdown(target, historyReportMarkdown(state.historyDetail));
+}
+
+function renderProcessing(title, subtitle, steps) {
+  const panel = document.getElementById('panel');
+  if (!panel) return;
+  panel.innerHTML = `<div class="aiproc"><div class="ai-orb"></div><div style="font-size:16px;font-weight:750">${escapeHtml(title)}</div><div style="color:var(--muted);font-size:13px">${escapeHtml(subtitle)}</div><div class="ai-steps">${steps.map(text => `<div class="ai-step"><span class="dot"></span>${escapeHtml(text)}</div>`).join('')}</div></div>`;
+}
+
+function handleWorkflowError(error, id) {
+  if (!isCurrent(id) || error.code === 'REQUEST_CANCELLED') return;
+  state.pending = null;
+  state.error = error;
+  render();
+  toast(error.message || '请求失败，请重试。');
+}
+
+async function decomposeTasks() {
+  if (state.pending) return;
+  const id = ++operationId;
+  state.pending = 'decompose';
+  renderProcessing('正在拆解为结构化任务', '四栏输入先经服务端校验，再交给模型拆解', ['校验四栏输入', '拆分独立可执行任务', '识别截止时间与工时', '生成初始轻重缓急']);
+  try {
+    const intake = await postJson('/api/time-management/intake/check', { entries: state.entries });
+    if (!isCurrent(id)) return;
+    const result = await postJson('/api/time-management/tasks/decompose', { entries: state.entries });
+    if (!isCurrent(id)) return;
+    state.pending = null;
+    state.intake = intake;
+    state.tasks = result.tasks;
+    state.smart = result.smart;
+    state.smartChecked = false;
+    state.distribution = null;
+    state.matrix = null;
+    state.report = null;
+    state.step = 2;
+    state.maxStep = 2;
+    state.clientRunId = createUuid();
+    renderAtTop();
+    toast(`已拆解出 ${result.tasks.length} 条任务`);
+  } catch (error) {
+    handleWorkflowError(error, id);
+  }
+}
+
+async function checkSmart() {
+  if (state.pending || !state.tasks.length) return;
+  const id = ++operationId;
+  state.pending = 'smart';
+  render();
+  try {
+    const result = await postJson('/api/time-management/tasks/smart-check', { tasks: state.tasks });
+    if (!isCurrent(id)) return;
+    state.pending = null;
+    state.smart = result;
+    state.smartChecked = true;
+    render();
+    toast(result.overall === 'pass' ? '全部任务通过 SMART 校验' : `还有 ${result.summary.needFix} 条任务需要补全`);
+  } catch (error) {
+    handleWorkflowError(error, id);
+  }
+}
+
+async function diagnoseDistribution() {
+  if (!state.smartChecked) return toast('请先执行 SMART 校验');
+  if (state.smart?.overall !== 'pass') return toast('请先补全所有标红字段');
+  if (state.pending) return;
+  const id = ++operationId;
+  state.pending = 'distribution';
+  renderProcessing('正在计算时间分布', '服务端按分钟汇总四类任务，不猜测缺失工时', ['解析任务工时', '汇总四类投入', '与目标区间比较', '生成诊断与改进方向']);
+  try {
+    const result = await postJson('/api/time-management/distribution/diagnose', { tasks: state.tasks });
+    if (!isCurrent(id)) return;
+    state.pending = null;
+    state.distribution = result;
+    state.matrix = null;
+    state.report = null;
+    state.step = 3;
+    state.maxStep = 3;
+    renderAtTop();
+  } catch (error) {
+    handleWorkflowError(error, id);
+  }
+}
+
+function expectedQuadrant(task) {
+  const important = task.importance === '高';
+  const urgent = task.urgency === '高';
+  if (important && urgent) return '第一象限';
+  if (important) return '第二象限';
+  if (urgent) return '第三象限';
+  return '第四象限';
+}
+
+function validateAndMergeMatrix(tasks, matrix) {
+  if (!matrix || !Array.isArray(matrix.classifications) || !Array.isArray(matrix.quadrants)) throw new Error('矩阵返回结构异常，请重试。');
+  const taskById = new Map(tasks.map(task => [task.id, task]));
+  const classificationById = new Map();
+  for (const item of matrix.classifications) {
+    if (!item || classificationById.has(item.taskId) || !taskById.has(item.taskId)) throw new Error('矩阵任务集合不一致，请重试。');
+    classificationById.set(item.taskId, item);
+  }
+  if (classificationById.size !== tasks.length) throw new Error('矩阵遗漏任务，请重试。');
+  const merged = tasks.map(task => {
+    const item = classificationById.get(task.id);
+    if (!['高', '中', '低'].includes(item.importance) || !['高', '中', '低'].includes(item.urgency)) throw new Error('矩阵分类不完整，请重试。');
+    if (task.classificationSource !== 'unclassified' && (item.importance !== task.importance || item.urgency !== task.urgency)) throw new Error('矩阵修改了已确认的轻重缓急，请重试。');
+    return task.classificationSource === 'unclassified'
+      ? { ...task, importance: item.importance, urgency: item.urgency, classificationSource: 'ai-matrix' }
+      : task;
+  });
+  const placed = matrix.quadrants.flatMap(item => item.taskIds || []);
+  if (placed.length !== tasks.length || new Set(placed).size !== tasks.length || placed.some(id => !taskById.has(id))) throw new Error('矩阵任务守恒失败，请重试。');
+  for (const task of merged) {
+    const quadrant = matrix.quadrants.find(item => (item.name || item.q) === expectedQuadrant(task));
+    if (!quadrant?.taskIds.includes(task.id)) throw new Error('矩阵象限与轻重缓急不一致，请重试。');
+  }
+  return merged;
+}
+
+async function classifyTasks() {
+  if (state.pending || !state.distribution) return;
+  const id = ++operationId;
+  state.pending = 'matrix';
+  renderProcessing('正在进行优先级排序', '后端核验任务守恒并落入轻重缓急四象限', ['核对重要性与紧急度', '补齐未分类任务', '落位四象限', '验证任务不重不漏']);
+  try {
+    const matrix = await postJson('/api/time-management/matrix/classify', { tasks: state.tasks });
+    if (!isCurrent(id)) return;
+    state.tasks = validateAndMergeMatrix(state.tasks, matrix);
+    state.pending = null;
+    state.matrix = matrix;
+    state.report = null;
+    state.step = 4;
+    state.maxStep = 4;
+    renderAtTop();
+  } catch (error) {
+    handleWorkflowError(error, id);
+  }
+}
+
+function validateReport(report) {
+  if (!report || !Array.isArray(report.order) || !Array.isArray(report.energyRules) || !Array.isArray(report.adjustments)) throw new Error('报告返回结构异常，请重试。');
+  const ids = new Set(state.tasks.map(task => task.id));
+  const orderIds = report.order.map(item => item.taskId);
+  if (new Set(orderIds).size !== orderIds.length || orderIds.some(id => !ids.has(id))) throw new Error('报告引用了无效任务，请重试。');
+}
+
+async function generateReport() {
+  if (state.pending || !state.matrix || !state.distribution) return;
+  const id = ++operationId;
+  state.pending = 'report';
+  renderProcessing('正在生成优化报告', '综合任务、时间结构和四象限生成行动建议', ['汇总优先处理顺序', '读取时间分布诊断', '校准精力分配', '输出改变与举措']);
+  try {
+    const report = await postJson('/api/time-management/report/generate', {
+      tasks: state.tasks,
+      matrix: state.matrix,
+      goals: state.entries,
+      distribution: state.distribution,
+    });
+    if (!isCurrent(id)) return;
+    validateReport(report);
+    state.pending = null;
+    state.report = report;
+    state.step = 5;
+    state.maxStep = 5;
+    renderAtTop();
+    saveCurrentHistory();
+  } catch (error) {
+    handleWorkflowError(error, id);
+  }
+}
+
+function updateTask(taskId, field, value) {
+  const task = state.tasks.find(item => item.id === taskId);
+  if (!task) return;
+  if (field === 'name') task.name = value.trim();
+  else if (field === 'category') task.source = CATS[value]?.source || '今天';
+  else if (field === 'due') task.due = value.trim() || '待确认';
+  else if (field === 'est') task.est = normalizeEstimate(value);
+  else if (field === 'priority') {
+    const priority = PRIORITIES[value];
+    task.importance = priority?.importance ?? null;
+    task.urgency = priority?.urgency ?? null;
+    task.classificationSource = priority ? 'manual' : 'unclassified';
+  }
+  invalidateAfterTasks();
+  if (state.screen === 'workspace') state.step = 2;
+  render();
+}
+
+function deleteTask(taskId) {
+  state.tasks = state.tasks.filter(task => task.id !== taskId);
+  delete state.tracking[taskId];
+  invalidateAfterTasks();
+  if (state.screen === 'workspace') state.step = Math.min(state.step, 2);
+  render();
+  toast('任务已删除，后续节点需要重新执行');
+}
+
+function openAddTask(category = '今天') {
+  state.modal = { type: 'add-task', category };
+  renderModal();
+  document.getElementById('m-name')?.focus();
+}
+
+function closeModal() {
+  state.modal = null;
+  renderModal();
+}
+
+function saveTask() {
+  const name = document.getElementById('m-name')?.value.trim();
+  const due = document.getElementById('m-due')?.value;
+  const estValue = document.getElementById('m-est')?.value;
+  const priorityKey = document.getElementById('m-priority')?.value;
+  const category = document.getElementById('m-category')?.value;
+  const priority = PRIORITIES[priorityKey];
+  if (!name || !due || !normalizeEstimate(estValue) || !priority) {
+    document.getElementById('m-error')?.classList.remove('hidden');
+    return;
+  }
+  state.tasks.push({
+    id: createUuid(), name, source: CATS[category]?.source || '今天', due,
+    est: normalizeEstimate(estValue), importance: priority.importance, urgency: priority.urgency,
+    acceptanceCriteria: [], nextAction: '', status: 'pending', classificationSource: 'manual',
+  });
+  invalidateAfterTasks();
+  if (state.screen === 'workspace') {
+    state.step = 2;
+    state.maxStep = 2;
+  }
+  closeModal();
+  render();
+  toast('已添加任务');
+}
+
+function toggleDone(taskId) {
+  const current = tracked(taskId);
+  state.tracking[taskId] = current.done ? { done: false, doneAt: '' } : { done: true, doneAt: current.doneAt || localDateTimeValue() };
+  render();
+  toast(state.tracking[taskId].done ? '已记录完成时间' : '已取消完成');
+}
+
+function rolloverDay() {
+  if (state.rolledDates[TODAY]) return toast('今天已经执行过滚动');
+  const list = state.tasks.filter(task => ['昨天', '今天'].includes(categoryForTask(task)));
+  if (!list.length) return toast('没有可滚动任务');
+  if (!window.confirm('结束当日后，已完成项进入本次会话历史，未完成的“今天”任务滚入“昨天”。确定继续吗？')) return;
+  const done = list.filter(task => tracked(task.id).done).map(task => ({ name: task.name, at: tracked(task.id).doneAt || localDateTimeValue() }));
+  const doneIds = new Set(list.filter(task => tracked(task.id).done).map(task => task.id));
+  const distribution = state.distribution?.percentages || previewDistribution().percentages;
+  state.sessionHistory.push({ date: TODAY, distribution: { ...distribution }, done });
+  state.tasks = state.tasks.filter(task => !doneIds.has(task.id)).map(task => (
+    categoryForTask(task) === '今天' ? { ...task, source: '复盘' } : task
+  ));
+  for (const task of list) delete state.tracking[task.id];
+  state.rolledDates[TODAY] = true;
+  invalidateAfterTasks();
+  state.screen = 'daily';
+  render();
+  toast(`已归档 ${done.length} 项，其余今日任务已滚入“昨天”`);
+}
+
+async function copyText(text, success) {
+  if (!text) return toast('没有可复制内容');
+  try {
+    await navigator.clipboard.writeText(text);
+    toast(success);
+  } catch {
+    toast('复制失败，请手动选择内容');
+  }
+}
+
+function currentHistoryTitle() {
+  return `${TODAY} 时间管理优化报告`;
+}
+
+function currentHistorySnapshot() {
+  return {
+    clientRunId: state.clientRunId,
+    title: currentHistoryTitle(),
+    goals: state.entries,
+    tasks: state.tasks,
+    matrix: state.matrix,
+    report: state.report,
+  };
+}
+
+function renderCurrentHistoryStatus() {
+  if (state.screen === 'workspace' && state.step === 5) render();
+}
+
+async function saveCurrentHistory() {
+  if (!state.report || !state.matrix || state.historySave.status === 'saving') return;
+  const clientRunId = state.clientRunId;
+  state.historySave = { status: 'saving', id: state.historySave.id, message: '' };
+  renderCurrentHistoryStatus();
+  try {
+    const item = await postJson('/api/time-management/history', currentHistorySnapshot());
+    if (state.clientRunId !== clientRunId) return;
+    state.historySave = { status: 'saved', id: item.id, message: '' };
+    renderCurrentHistoryStatus();
+  } catch {
+    if (state.clientRunId !== clientRunId) return;
+    state.historySave = { status: 'failed', id: null, message: '报告已生成，但历史保存失败。' };
+    renderCurrentHistoryStatus();
+  }
+}
+
+async function loadHistory({ append = false } = {}) {
+  if (state.pending === 'history-list') return;
+  const cursor = append ? state.historyCursor : null;
+  if (!append) {
+    state.historyItems = [];
+    state.historyCursor = null;
+  }
+  state.pending = 'history-list';
+  state.error = null;
+  render();
+  try {
+    const query = new URLSearchParams({ limit: '20' });
+    if (cursor) query.set('cursor', cursor);
+    const result = await getJson(`/api/time-management/history?${query}`);
+    state.historyItems = append ? [...state.historyItems, ...result.items] : result.items;
+    state.historyCursor = result.nextCursor;
+    state.pending = null;
+    if (state.screen === 'history') render();
+  } catch (error) {
+    state.pending = null;
+    state.error = error;
+    if (state.screen === 'history') render();
+  }
+}
+
+async function openHistoryDetail(id) {
+  if (state.pending) return;
+  state.pending = 'history-detail';
+  try {
+    state.historyDetail = await getJson(`/api/time-management/history/${encodeURIComponent(id)}`);
+    state.pending = null;
+    state.screen = 'history-detail';
+    renderAtTop();
+  } catch (error) {
+    state.pending = null;
+    state.error = error;
+    state.screen = 'history';
+    render();
+  }
+}
+
+async function deleteHistory(id) {
+  if (!window.confirm('确定删除这条账号历史吗？')) return;
+  if (state.pending) return;
+  state.pending = 'history-delete';
+  try {
+    await deleteJson(`/api/time-management/history/${encodeURIComponent(id)}`);
+    state.historyItems = state.historyItems.filter(item => item.id !== id);
+    if (state.historyDetail?.id === id) {
+      state.historyDetail = null;
+      state.screen = 'history';
+    }
+    state.pending = null;
+    render();
+  } catch (error) {
+    state.pending = null;
+    state.error = error;
+    render();
+  }
+}
+
+function navigate(screen) {
+  cancelPending();
+  state.error = null;
+  if (screen === 'workspace') {
+    state.screen = 'workspace';
+    state.step = Math.min(Math.max(state.step, 1), state.maxStep);
+  } else if (screen === 'history') {
+    state.screen = 'history';
+    state.historyDetail = null;
+    render();
+    loadHistory();
+    return;
+  } else state.screen = screen;
+  renderAtTop();
+}
+
+function navigateStep(step) {
+  if (step > state.maxStep) return toast('请先完成前一个节点');
+  state.step = step;
+  renderAtTop();
 }
 
 async function loadPreAuthCsrf() {
@@ -92,898 +949,30 @@ async function restoreAuth() {
   render();
 }
 
-function toast(message) {
-  const element = document.getElementById('toast');
-  element.textContent = message;
-  element.classList.add('show');
-  clearTimeout(element._timer);
-  element._timer = setTimeout(() => element.classList.remove('show'), 1800);
-}
-
-function clearToast() {
-  const element = document.getElementById('toast');
-  clearTimeout(element._timer);
-  element.classList.remove('show');
-  element.textContent = '';
-}
-
-function isCurrent(id) {
-  return id === operationId && state.screen === 'workspace';
-}
-
-function cancelPending() {
-  operationId += 1;
-  cancelActiveRequest();
-  state.pending = null;
-}
-
-function startFlow() {
-  if (!state.user) return;
-  cancelPending();
-  clearToast();
-  resetState();
-  state.screen = 'workspace';
-  render();
-}
-
-function restartFlow() {
-  cancelPending();
-  clearToast();
-  resetState();
-  state.screen = 'workspace';
-  render();
-}
-
-function goHome() {
-  cancelPending();
-  clearToast();
-  resetState();
-  render();
-}
-
-function showStep(step) {
-  cancelPending();
-  state.step = step;
-  render();
-  window.scrollTo({ top: 0, behavior: 'smooth' });
-}
-
-function navigateStep(step) {
-  if (step > state.maxStep) {
-    const messages = {
-      2: '请先提取当前目标中的任务',
-      3: '任务数据已变化，请重新判定',
-      4: '请先生成当前报告',
-    };
-    toast(messages[step]);
-    return;
-  }
-  if (step === 2 && (!state.goalReview || state.checkedGoalSnapshot !== goalSnapshot())) {
-    toast('请先完成 AI 检查并修正提示项');
-    return;
-  }
-  if (step === 3 && !state.matrix) {
-    toast('任务数据已变化，请重新判定');
-    return;
-  }
-  if (step === 4 && !state.report) {
-    toast('请先生成当前报告');
-    return;
-  }
-  showStep(step);
-}
-
-function head(kicker, title, description) {
-  return `<div class="panel-head"><div class="panel-kick">${kicker}</div><div class="panel-h">${title}</div><div class="panel-desc">${description}</div></div>`;
-}
-
-function nav({ back, next, label, className, extra } = {}) {
-  let content = `<span class="io-hint">${ICONS.io} 输入 · AI动作 · 输出 均按功能清单落地</span>`;
-  if (back) content += `<button class="btn btn-ghost" data-action="back">上一步</button>`;
-  if (extra) content += extra;
-  if (next) content += `<button class="btn ${className || 'btn-primary'}" data-action="${next}">${label || '下一步'} ${ICONS.arrow}</button>`;
-  return `<div class="panel-foot">${content}</div>`;
-}
-
-function day(field) {
-  return `<div class="day-card"><div class="flabel"><span class="daybadge" style="background:${field.color}">${field.id}</span>${field.label}</div>
-    <div class="step-sub" style="margin:-4px 0 8px">${field.description}</div>
-    <textarea id="g-${field.id}" data-goal="${field.key}" placeholder="${field.placeholder}"></textarea>
-    <div class="field-fb" id="fb-${field.id}"></div></div>`;
-}
-
-function goalsBody() {
-  return `${head('节点 ① · 输入', '目标梳理', '按“昨天-今天-明天-后天”四维梳理你手头的事。填完点“AI 检查并补全”，内容不到位时会给出修正建议。')}
-    <div class="panel-body">
-      <div class="ai-check-bar"><span class="spark">${ICONS.spark}</span><span>草稿不会保存；报告生成成功后会保存到你的账号历史。<br>请勿填写客户隐私、密码或其他敏感信息。</span></div>
-      <div class="grid4day">${GOAL_FIELDS.map(day).join('')}</div>
-    </div>
-    ${nav({
-      extra: `<button class="btn btn-ghost" id="checkBtn" data-action="check-goals">${ICONS.refresh} AI 检查并补全</button>`,
-      next: 'extract-tasks',
-      label: '提取任务',
-    })}`;
-}
-
-function tasksBody() {
-  return `${head('节点 ② · AI动作 + 手动补充', '任务提取', 'AI 已把四维内容拆成逐条任务并打标签。你可删除，也可手动添加遗漏事项。')}
-    <div class="panel-body">
-      <div class="tasklist" id="tasklist"></div>
-      <button class="addbtn" id="addbtn" data-action="toggle-add">${ICONS.plus} 手动添加任务</button>
-      <div class="addform hidden" id="addform">
-        <h4>手动添加任务</h4>
-        <div class="addgrid">
-          <div class="fld full"><label>任务描述<span class="reqmark">*</span></label><input id="f-name" placeholder="要做的事，如:整理季度复盘材料"></div>
-          <div class="fld"><label>来源<span class="reqmark">*</span></label><select id="f-src"><option value="">请选择</option><option>复盘</option><option>今天</option><option>短期目标</option><option>中长期</option><option>临时</option></select></div>
-          <div class="fld"><label>截止时间<span class="reqmark">*</span></label><input id="f-due" type="date"></div>
-          <div class="fld"><label>预估耗时<span class="reqmark">*</span></label><input id="f-cost" placeholder="如:约 2h"></div>
-          <div class="fld"><label>重要性 / 紧急度</label><select id="f-flag"><option value="">未标注</option><option value="imp">重要</option><option value="urg">紧急</option><option value="both">重要且紧急</option></select></div>
-        </div>
-        <div class="err" id="addErr">请填写带 * 的必填项:任务描述、来源、截止时间、耗时。</div>
-        <div class="addactions"><button class="btn btn-accent btn-sm" data-action="add-task">${ICONS.plus} 添加到列表</button><button class="btn btn-ghost btn-sm" data-action="cancel-add">取消</button></div>
-      </div>
-    </div>
-    ${nav({ back: true, next: 'classify-matrix', label: '矩阵判定' })}`;
-}
-
-function matrixBody() {
-  const classes = ['q2', 'q1', 'q4', 'q3'];
-  return `${head('节点 ③ · AI动作', '矩阵判定', '每条任务已落入“重要-紧急”四象限，并按固定口径给出精力分配比例。')}
-    <div class="panel-body"><div class="matrix-wrap">
-      <div class="axis-y"><span>重要</span><span>不重要</span></div>
-      <div><div class="matrix">${classes.map(className => `<div class="quad ${className}" data-quadrant="${className}"></div>`).join('')}</div><div class="axis-x"><span>不紧急</span><span>紧急</span></div></div>
-    </div></div>
-    ${nav({ back: true, next: 'generate-report', label: '生成报告' })}`;
-}
-
-function reportBody() {
-  return `${head('节点 ④ · 输出', '优先级报告', '一页式可执行报告 —— 优先顺序、各梯队做什么、精力如何分配、需要哪些调整。')}
-    <div class="panel-body"><div class="report">
-      <div class="bank"><div class="bankb" style="background:var(--purple)"><div class="big">55%</div><div class="lbl">重要且紧急</div></div><div class="bankb" style="background:var(--purple-300)"><div class="big">25%</div><div class="lbl">重要不紧急</div></div><div class="bankb" style="background:var(--orange)"><div class="big">15%</div><div class="lbl">紧急不重要</div></div><div class="bankb" style="background:#B9AFBE"><div class="big">5%</div><div class="lbl">不重要不紧急</div></div></div>
-      <div id="report-markdown" class="markdown-report"></div>
-      <div class="history-save-status" id="history-save-status"><span id="history-save-message"></span><button class="btn btn-ghost btn-sm hidden" id="history-save-retry" data-action="history-retry">重试保存</button></div>
-    </div></div>
-    ${nav({ back: true, extra: `<button class="btn btn-ghost btn-sm" data-action="copy-report">${ICONS.copy} 复制报告</button><button class="btn btn-ghost btn-sm" data-action="restart">${ICONS.refresh} 重新梳理</button>`, next: 'finish', label: '完成', className: 'btn-accent' })}`;
-}
-
-function body() {
-  if (state.step === 1) return goalsBody();
-  if (state.step === 2) return tasksBody();
-  if (state.step === 3) return matrixBody();
-  return reportBody();
-}
-
-function renderHome() {
-  app().innerHTML = `<div class="home-eyebrow">Management Compass · 管理自我</div><div class="home-h1">把杂乱的事，理成一份优先级清单</div><p class="home-lead">先用“昨天-今天-明天-后天”梳理任务，AI 会检查填写是否到位并帮你补全；再用“重要-紧急矩阵”排序，输出可执行的优先级与精力分配报告。</p><div class="hero-card"><div class="home-eyebrow" style="color:var(--muted)">四步流程</div><div class="hero-flow"><span class="flowchip">目标梳理</span><span class="flowarr">→</span><span class="flowchip">任务提取</span><span class="flowarr">→</span><span class="flowchip">矩阵判定</span><span class="flowarr">→</span><span class="flowchip">优先级报告</span></div><button class="btn btn-primary" data-action="start">开始梳理 ${ICONS.arrow}</button></div>`;
-}
-
-function renderWorkspace() {
-  app().innerHTML = `<div class="ws-head"><button class="ws-back" data-action="home">${ICONS.back}</button><div class="ws-title">时间管理助手<span class="tag">管理自我</span></div></div><div class="ws-grid"><div class="stepper">${STEPS.map((item, index) => {
-    const number = index + 1;
-    const active = number === state.step;
-    const done = number < state.step;
-    const locked = number > state.maxStep;
-    return `<div class="step ${active ? 'active' : ''} ${done ? 'done' : ''} ${locked ? 'locked' : ''}" data-step="${number}"><div class="step-num">${done ? '✓' : number}</div><div><div class="step-tt">${item.title}</div><div class="step-sub">${item.subtitle}</div></div></div>`;
-  }).join('')}</div><div class="panel" id="panel">${body()}</div></div>`;
-  hydrateStep();
-}
-
-function renderAuthScreen() {
-  let view;
-  if (!state.authReady || state.screen === 'boot') view = renderBoot();
-  else if (state.screen === 'register') view = renderRegister();
-  else if (state.screen === 'recovery') view = renderRecovery();
-  else if (state.screen === 'recovery-code' && state.recoveryCode) {
-    view = renderRecoveryCode(state.recoveryCode);
-  } else view = renderLogin();
-  app().replaceChildren(view);
-  const error = app().querySelector('.auth-error');
-  if (error && state.authError) error.textContent = state.authError.message || '请求失败，请重试。';
-}
-
-function renderHistoryScreen() {
-  app().replaceChildren(renderHistoryList({
-    items: state.historyItems,
-    nextCursor: state.historyCursor,
-    loading: state.pending === 'history-list',
-    error: state.error?.message || '',
-  }));
-}
-
-function renderHistoryDetailScreen() {
-  if (!state.historyDetail) return renderHistoryScreen();
-  app().replaceChildren(renderHistoryDetail(state.historyDetail));
-  window.renderMarkdown(
-    document.getElementById('history-report-markdown'),
-    buildReportMarkdown(state.historyDetail.tasks, state.historyDetail.report),
-  );
-}
-
-function render() {
-  updateAuthBar();
-  if (!state.authReady || state.screen === 'boot' || state.screen === 'recovery-code') {
-    renderAuthScreen();
-  } else if (!state.user) {
-    renderAuthScreen();
-  } else if (state.screen === 'history') {
-    renderHistoryScreen();
-  } else if (state.screen === 'history-detail') {
-    renderHistoryDetailScreen();
-  } else if (state.screen === 'home') {
-    renderHome();
-  } else {
-    renderWorkspace();
-  }
-}
-
-function renderAtTop() {
-  render();
-  window.scrollTo({ top: 0, left: 0, behavior: 'auto' });
-}
-
-function hydrateGoals() {
-  for (const field of GOAL_FIELDS) {
-    const textarea = document.getElementById(`g-${field.id}`);
-    textarea.value = state.goals[field.key];
-    textarea.addEventListener('input', event => {
-      state.goals[field.key] = event.target.value;
-      invalidateAfterGoals();
-      document.querySelectorAll('.field-fb').forEach(item => {
-        item.className = 'field-fb';
-        item.replaceChildren();
-      });
-    });
-  }
-  if (!state.goalReview) return;
-  for (const feedback of state.goalReview.fields) {
-    const field = GOAL_FIELDS.find(item => item.key === feedback.key);
-    const element = document.getElementById(`fb-${field.id}`);
-    element.className = `field-fb ${feedback.status} show`;
-    if (feedback.status === 'ok') {
-      element.textContent = '✓ 信息完整，可进入下一步。';
-      continue;
-    }
-    const issue = document.createElement('div');
-    issue.textContent = feedback.issue;
-    const suggestion = document.createElement('div');
-    suggestion.textContent = feedback.suggestion;
-    const adopt = document.createElement('button');
-    adopt.type = 'button';
-    adopt.className = 'adopt';
-    adopt.textContent = '采纳建议';
-    adopt.addEventListener('click', () => adoptSuggestion(feedback.key, feedback.suggestion));
-    element.replaceChildren(issue, suggestion, adopt);
-  }
-}
-
-function taskTags(task) {
-  const tags = [];
-  if (task.importance) {
-    tags.push(task.importance === '高' ? ['重要', 'imp'] : ['不重要', '']);
-  }
-  if (task.urgency) {
-    tags.push(task.urgency === '高' ? ['紧急', 'urg'] : ['不紧急', '']);
-  }
-  if (task.classificationSource === 'unclassified') tags.push(['待 AI 判定', '']);
-  if (task.classificationSource === 'ai-matrix') tags.push(['AI 判定', '']);
-  tags.push([`来源:${task.source}`, '']);
-  if (task.source !== '中长期') {
-    tags.push([`截止:${task.due || '待确认'}`, '']);
-    if (task.est) tags.push([task.est, '']);
-  }
-  return tags;
-}
-
-function createTaskElement(task) {
-  const element = document.createElement('div');
-  element.className = `task${task.classificationSource === 'manual' || task.classificationSource === 'unclassified' ? ' manual' : ''}`;
-  element.dataset.taskId = task.id;
-  const main = document.createElement('div');
-  main.style.flex = '1';
-  const nameRow = document.createElement('div');
-  nameRow.className = 'task-name';
-  const name = document.createElement('span');
-  window.renderMarkdown(name, task.name, { inline: true });
-  nameRow.appendChild(name);
-  if (task.classificationSource === 'manual' || task.classificationSource === 'unclassified') {
-    const badge = document.createElement('span');
-    badge.className = 'mtag';
-    badge.textContent = '手动';
-    nameRow.appendChild(badge);
-  }
-  const tags = document.createElement('div');
-  tags.className = 'tags';
-  for (const [text, className] of taskTags(task)) {
-    const tag = document.createElement('span');
-    tag.className = `t${className ? ` ${className}` : ''}`;
-    tag.textContent = text;
-    tags.appendChild(tag);
-  }
-  const acceptanceCriteria = Array.isArray(task.acceptanceCriteria)
-    ? task.acceptanceCriteria.filter(item => typeof item === 'string' && item.trim())
-    : [];
-  let criteriaBlock;
-  if (acceptanceCriteria.length > 0) {
-    criteriaBlock = document.createElement('div');
-    criteriaBlock.className = 'task-detail acceptance-criteria';
-    const title = document.createElement('div');
-    title.className = 'task-detail-title';
-    title.textContent = '完成标准';
-    const list = document.createElement('ul');
-    for (const criterion of acceptanceCriteria) {
-      const item = document.createElement('li');
-      item.textContent = criterion;
-      list.appendChild(item);
-    }
-    criteriaBlock.append(title, list);
-  }
-  const nextAction = typeof task.nextAction === 'string' ? task.nextAction.trim() : '';
-  let nextActionBlock;
-  if (nextAction) {
-    nextActionBlock = document.createElement('div');
-    nextActionBlock.className = 'task-detail next-action';
-    const title = document.createElement('div');
-    title.className = 'task-detail-title';
-    title.textContent = '下一步';
-    const action = document.createElement('div');
-    action.textContent = nextAction;
-    nextActionBlock.append(title, action);
-  }
-  const remove = document.createElement('button');
-  remove.className = 'task-del';
-  remove.type = 'button';
-  remove.setAttribute('aria-label', '删除任务');
-  remove.innerHTML = ICONS.trash;
-  remove.addEventListener('click', () => deleteTask(task.id));
-  main.append(nameRow, tags);
-  if (criteriaBlock) main.appendChild(criteriaBlock);
-  if (nextActionBlock) main.appendChild(nextActionBlock);
-  element.append(main, remove);
-  return element;
-}
-
-function hydrateTasks() {
-  document.getElementById('tasklist').replaceChildren(...state.tasks.map(createTaskElement));
-}
-
-const QUADRANT_CLASSES = Object.freeze({
-  '第一象限': 'q1',
-  '第二象限': 'q2',
-  '第三象限': 'q3',
-  '第四象限': 'q4',
-});
-
-const QUADRANT_RULES = Object.freeze({
-  '第一象限': { priority: 1, action: '立即做', energyPercent: 55 },
-  '第二象限': { priority: 2, action: '计划做', energyPercent: 25 },
-  '第三象限': { priority: 3, action: '授权做', energyPercent: 15 },
-  '第四象限': { priority: 4, action: '减少做', energyPercent: 5 },
-});
-
-function workflowDataError(message = '任务数据已变化，请重新判定') {
-  return Object.assign(new Error(message), { code: 'WORKFLOW_DATA_CHANGED' });
-}
-
-function expectedQuadrant(task) {
-  const important = task.importance === '高';
-  const urgent = task.urgency === '高';
-  if (important && urgent) return '第一象限';
-  if (important) return '第二象限';
-  if (urgent) return '第三象限';
-  return '第四象限';
-}
-
-function validateAndMergeMatrix(tasks, matrix) {
-  if (!matrix || !Array.isArray(matrix.classifications) || !Array.isArray(matrix.quadrants)) {
-    throw workflowDataError();
-  }
-  const taskById = new Map(tasks.map(task => [task.id, task]));
-  const classificationById = new Map();
-  for (const item of matrix.classifications) {
-    if (!item || classificationById.has(item.taskId) || !taskById.has(item.taskId)
-        || !['高', '中', '低'].includes(item.importance)
-        || !['高', '中', '低'].includes(item.urgency)) {
-      throw workflowDataError();
-    }
-    classificationById.set(item.taskId, item);
-  }
-  if (classificationById.size !== tasks.length) throw workflowDataError();
-
-  const mergedTasks = tasks.map(task => {
-    const item = classificationById.get(task.id);
-    if (!item) throw workflowDataError();
-    if (task.classificationSource === 'unclassified') {
-      if (task.importance !== null || task.urgency !== null
-          || item.classificationSource !== 'ai-matrix') {
-        throw workflowDataError();
-      }
-      return {
-        ...task,
-        importance: item.importance,
-        urgency: item.urgency,
-        classificationSource: 'ai-matrix',
-      };
-    }
-    if (item.importance !== task.importance || item.urgency !== task.urgency
-        || item.classificationSource !== task.classificationSource) {
-      throw workflowDataError();
-    }
-    return task;
-  });
-
-  const quadrantByName = new Map();
-  const placedIds = [];
-  for (const quadrant of matrix.quadrants) {
-    const name = quadrant?.name || quadrant?.q;
-    const rule = QUADRANT_RULES[name];
-    if (!rule || quadrantByName.has(name) || !Array.isArray(quadrant.taskIds)
-        || quadrant.priority !== rule.priority || quadrant.action !== rule.action
-        || quadrant.energyPercent !== rule.energyPercent) {
-      throw workflowDataError();
-    }
-    quadrantByName.set(name, quadrant);
-    placedIds.push(...quadrant.taskIds);
-  }
-  if (quadrantByName.size !== 4 || placedIds.length !== tasks.length
-      || new Set(placedIds).size !== tasks.length
-      || placedIds.some(taskId => !taskById.has(taskId))) {
-    throw workflowDataError();
-  }
-  for (const task of mergedTasks) {
-    if (!quadrantByName.get(expectedQuadrant(task)).taskIds.includes(task.id)) {
-      throw workflowDataError();
-    }
-  }
-  return mergedTasks;
-}
-
-function hydrateMatrix() {
-  if (!state.matrix) return;
-  const taskById = new Map(state.tasks.map(task => [task.id, task]));
-  for (const quadrant of state.matrix.quadrants) {
-    const className = QUADRANT_CLASSES[quadrant.name || quadrant.q];
-    const element = document.querySelector(`[data-quadrant="${className}"]`);
-    const energy = document.createElement('div');
-    energy.className = 'energy';
-    energy.textContent = `${quadrant.energyPercent}%`;
-    const title = document.createElement('div');
-    title.className = 'quad-h';
-    title.textContent = `${quadrant.name || quadrant.q} · 优先第${quadrant.priority}位`;
-    const meta = document.createElement('div');
-    meta.className = 'quad-meta';
-    meta.textContent = quadrant.action;
-    element.append(energy, title, meta);
-    for (const taskId of quadrant.taskIds) {
-      const item = document.createElement('div');
-      item.className = 'qtask';
-      item.textContent = taskById.get(taskId)?.name || '';
-      element.appendChild(item);
-    }
-  }
-}
-
-function buildReportMarkdown(tasks, report) {
-  if (!report) return '';
-  const taskById = new Map(tasks.map(task => [task.id, task]));
-  const order = report.order.map(item => `- ${taskById.get(item.taskId).name} — ${item.reason}`);
-  const energy = report.energyRules.map(item => `- ${item}`);
-  const adjustments = report.adjustments.map(item => `- ${item}`);
-  return [`## 今日优先处理顺序`, '', ...order, '', '## 精力分配原则', '', ...energy, '', '## 需结合复盘与目标的调整', '', ...adjustments].join('\n');
-}
-
-function reportMarkdown() {
-  return buildReportMarkdown(state.tasks, state.report);
-}
-
-function validateReport(tasks, report) {
-  const error = () => workflowDataError('任务数据已变化，请重新生成报告');
-  if (!report || !Array.isArray(report.order) || !Array.isArray(report.energyRules)
-      || !Array.isArray(report.adjustments)) {
-    throw error();
-  }
-  const taskIds = new Set(tasks.map(task => task.id));
-  const orderedIds = new Set();
-  for (const item of report.order) {
-    if (!item || !taskIds.has(item.taskId) || orderedIds.has(item.taskId)
-        || typeof item.reason !== 'string' || !item.reason.trim()) {
-      throw error();
-    }
-    orderedIds.add(item.taskId);
-  }
-  if ((tasks.length >= 3 && (report.order.length < 3 || report.order.length > 5))
-      || report.order.length > tasks.length
-      || [...report.energyRules, ...report.adjustments].some(item =>
-        typeof item !== 'string' || !item.trim())) {
-    throw error();
-  }
-  return report;
-}
-
-function hydrateReport() {
-  window.renderMarkdown(document.getElementById('report-markdown'), reportMarkdown());
-  const status = document.getElementById('history-save-status');
-  const message = document.getElementById('history-save-message');
-  const retry = document.getElementById('history-save-retry');
-  const messages = {
-    idle: '报告生成后将自动保存历史。',
-    saving: '正在保存历史…',
-    saved: '历史已保存。',
-    failed: '报告已生成，但历史保存失败。',
-  };
-  status.classList.toggle('failed', state.historySave.status === 'failed');
-  message.textContent = messages[state.historySave.status] || state.historySave.message;
-  retry.classList.toggle('hidden', state.historySave.status !== 'failed');
-}
-
-function hydrateStep() {
-  if (state.step === 1) hydrateGoals();
-  if (state.step === 2) hydrateTasks();
-  if (state.step === 3) hydrateMatrix();
-  if (state.step === 4) hydrateReport();
-}
-
-function renderProcessing(title, subtitle, steps) {
-  const panel = document.getElementById('panel');
-  const process = document.createElement('div');
-  process.className = 'aiproc';
-  const orb = document.createElement('div');
-  orb.className = 'ai-orb';
-  const heading = document.createElement('div');
-  heading.className = 'ai-proc-t';
-  heading.textContent = title;
-  const detail = document.createElement('div');
-  detail.className = 'ai-proc-s';
-  detail.textContent = subtitle;
-  const list = document.createElement('div');
-  list.className = 'ai-steps';
-  for (const text of steps) {
-    const item = document.createElement('div');
-    item.className = 'ai-step on';
-    const dot = document.createElement('span');
-    dot.className = 'dot';
-    item.append(dot, document.createTextNode(text));
-    list.appendChild(item);
-  }
-  process.append(orb, heading, detail, list);
-  panel.replaceChildren(process);
-}
-
-function handleWorkflowError(error, id) {
-  if (!isCurrent(id) || error.code === 'REQUEST_CANCELLED') return;
-  state.pending = null;
-  state.error = error;
-  render();
-  toast(error.message || '请求失败，请重试。');
-}
-
-async function checkGoals() {
-  if (state.pending) return;
-  const id = ++operationId;
-  state.pending = 'goals';
-  const button = document.getElementById('checkBtn');
-  button.disabled = true;
-  button.innerHTML = '<span class="mini-spin"></span> 检查中…';
-  try {
-    const review = await postJson('/api/time-management/goals/check', { goals: state.goals });
-    if (!isCurrent(id)) return;
-    state.pending = null;
-    state.goalReview = review;
-    state.checkedGoalSnapshot = review.overall === 'pass' ? goalSnapshot() : null;
-    state.maxStep = 1;
-    render();
-    toast(review.overall === 'pass' ? '目标输入已通过检查' : '仍有待修正项，暂不能进入下一步');
-  } catch (error) {
-    handleWorkflowError(error, id);
-  }
-}
-
-function adoptSuggestion(key, suggestion) {
-  state.goals[key] = suggestion;
-  invalidateAfterGoals();
-  render();
-  toast('已采纳建议，请按实际情况修改后重新检查');
-}
-
-function goalsAreApproved() {
-  return state.goalReview?.overall === 'pass' && state.checkedGoalSnapshot === goalSnapshot();
-}
-
-async function extractTasks() {
-  if (!goalsAreApproved()) {
-    toast('请先完成 AI 检查并修正提示项');
-    return;
-  }
-  const id = ++operationId;
-  state.pending = 'tasks';
-  renderProcessing('正在拆解任务要素', '把四维内容整理成可执行任务并打标签', ['读取四维目标输入', '拆解为独立可执行任务', '标注重要性与紧急度']);
-  try {
-    const result = await postJson('/api/time-management/tasks/extract', { goals: state.goals });
-    if (!isCurrent(id)) return;
-    state.pending = null;
-    state.tasks = result.tasks;
-    state.matrix = null;
-    state.report = null;
-    state.step = 2;
-    state.maxStep = 2;
-    clearToast();
-    renderAtTop();
-  } catch (error) {
-    handleWorkflowError(error, id);
-  }
-}
-
-async function classifyTasks() {
-  if (state.pending) return;
-  const id = ++operationId;
-  state.pending = 'matrix';
-  renderProcessing('正在进行矩阵判定', '将任务落入四象限并分配精力', ['判定每条任务的重要/紧急', '落位重要-紧急四象限', '按象限计算精力分配']);
-  try {
-    const matrix = await postJson('/api/time-management/matrix/classify', { tasks: state.tasks });
-    if (!isCurrent(id)) return;
-    const mergedTasks = validateAndMergeMatrix(state.tasks, matrix);
-    state.tasks = mergedTasks;
-    state.pending = null;
-    state.matrix = matrix;
-    state.report = null;
-    state.step = 3;
-    state.maxStep = 3;
-    clearToast();
-    renderAtTop();
-  } catch (error) {
-    handleWorkflowError(error, id);
-  }
-}
-
-async function generateReport() {
-  if (state.pending || !state.matrix) return;
-  const id = ++operationId;
-  state.pending = 'report';
-  renderProcessing('正在生成时间管理报告', '汇总优先顺序、精力分配与调整建议', ['汇总四象限排序', '结合复盘与目标校准', '输出行动建议']);
-  try {
-    const report = await postJson('/api/time-management/report/generate', {
-      tasks: state.tasks,
-      matrix: state.matrix,
-      goals: state.goals,
-    });
-    if (!isCurrent(id)) return;
-    validateReport(state.tasks, report);
-    state.pending = null;
-    state.report = report;
-    state.step = 4;
-    state.maxStep = 4;
-    clearToast();
-    renderAtTop();
-    saveCurrentHistory();
-  } catch (error) {
-    handleWorkflowError(error, id);
-  }
-}
-
-function toggleAdd(show) {
-  document.getElementById('addform').classList.toggle('hidden', !show);
-  document.getElementById('addbtn').classList.toggle('hidden', show);
-}
-
-function addTask() {
-  const name = document.getElementById('f-name').value.trim();
-  const source = document.getElementById('f-src').value;
-  const due = document.getElementById('f-due').value;
-  const est = document.getElementById('f-cost').value.trim();
-  const flag = document.getElementById('f-flag').value;
-  if (!name || !source || !due || !est) {
-    document.getElementById('addErr').classList.add('show');
-    return;
-  }
-  const flags = {
-    imp: { importance: '高', urgency: '低', classificationSource: 'manual' },
-    urg: { importance: '低', urgency: '高', classificationSource: 'manual' },
-    both: { importance: '高', urgency: '高', classificationSource: 'manual' },
-    unclassified: { importance: null, urgency: null, classificationSource: 'unclassified' },
-  };
-  state.tasks.push({
-    id: createUuid(),
-    name,
-    source,
-    due,
-    est: est.startsWith('约') ? est : `约${est}`,
-    acceptanceCriteria: [],
-    nextAction: '',
-    status: 'pending',
-    ...(flags[flag] || flags.unclassified),
-  });
-  invalidateAfterTasks();
-  render();
-  toast('已添加任务');
-}
-
-function deleteTask(taskId) {
-  state.tasks = state.tasks.filter(task => task.id !== taskId);
-  invalidateAfterTasks();
-  render();
-  toast('任务已删除，请重新判定');
-}
-
-async function copyReport() {
-  const text = document.querySelector('.report')?.innerText.trim();
-  if (!text) return toast('没有可复制内容');
-  try {
-    await navigator.clipboard.writeText(text);
-    toast('已复制报告');
-  } catch {
-    toast('复制失败，请手动选择内容');
-  }
-}
-
-function currentHistoryTitle() {
-  const parts = Object.fromEntries(new Intl.DateTimeFormat('zh-CN', {
-    timeZone: 'Asia/Shanghai',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  }).formatToParts(new Date()).map(part => [part.type, part.value]));
-  return `${parts.year}-${parts.month}-${parts.day} 时间管理报告`;
-}
-
-function currentHistorySnapshot() {
-  return {
-    clientRunId: state.clientRunId,
-    title: currentHistoryTitle(),
-    goals: state.goals,
-    tasks: state.tasks,
-    matrix: state.matrix,
-    report: state.report,
-  };
-}
-
-function renderCurrentHistoryStatus() {
-  if (state.screen === 'workspace' && state.step === 4) render();
-}
-
-async function saveCurrentHistory() {
-  if (!state.report || !state.matrix || state.historySave.status === 'saving') return;
-  const clientRunId = state.clientRunId;
-  const snapshot = currentHistorySnapshot();
-  state.historySave = { status: 'saving', id: state.historySave.id, message: '' };
-  renderCurrentHistoryStatus();
-  try {
-    const item = await postJson('/api/time-management/history', snapshot);
-    if (state.clientRunId !== clientRunId) return;
-    state.historySave = { status: 'saved', id: item.id, message: '' };
-    renderCurrentHistoryStatus();
-  } catch {
-    if (state.clientRunId !== clientRunId) return;
-    state.historySave = {
-      status: 'failed',
-      id: state.historySave.id,
-      message: '报告已生成，但历史保存失败。',
-    };
-    renderCurrentHistoryStatus();
-  }
-}
-
-async function loadHistory({ append = false } = {}) {
-  if (state.pending === 'history-list') return;
-  const cursor = append ? state.historyCursor : null;
-  if (!append) {
-    state.historyItems = [];
-    state.historyCursor = null;
-  }
-  state.pending = 'history-list';
-  state.error = null;
-  render();
-  try {
-    const query = new URLSearchParams({ limit: '20' });
-    if (cursor) query.set('cursor', cursor);
-    const result = await getJson(`/api/time-management/history?${query}`);
-    state.historyItems = append ? [...state.historyItems, ...result.items] : result.items;
-    state.historyCursor = result.nextCursor;
-    state.pending = null;
-    if (state.screen === 'history') render();
-  } catch (error) {
-    state.pending = null;
-    state.error = error;
-    if (state.screen === 'history') render();
-  }
-}
-
-function openHistory() {
-  operationId += 1;
-  if (state.pending) cancelActiveRequest();
-  state.pending = null;
-  state.error = null;
-  state.historyDetail = null;
-  state.screen = 'history';
-  render();
-  loadHistory();
-}
-
-async function openHistoryDetail(id) {
-  if (state.pending) return;
-  state.pending = 'history-detail';
-  state.error = null;
-  try {
-    state.historyDetail = await getJson(`/api/time-management/history/${encodeURIComponent(id)}`);
-    state.pending = null;
-    state.screen = 'history-detail';
-    render();
-  } catch (error) {
-    state.pending = null;
-    state.error = error;
-    state.screen = 'history';
-    render();
-  }
-}
-
-async function deleteHistory(id) {
-  if (!window.confirm('确定删除这条历史记录吗？')) return;
-  if (state.pending) return;
-  state.pending = 'history-delete';
-  try {
-    await deleteJson(`/api/time-management/history/${encodeURIComponent(id)}`);
-    state.historyItems = state.historyItems.filter(item => item.id !== id);
-    if (state.historyDetail?.id === id) {
-      state.historyDetail = null;
-      state.screen = 'history';
-    }
-    state.pending = null;
-    state.error = null;
-    render();
-  } catch (error) {
-    state.pending = null;
-    state.error = error;
-    render();
-  }
-}
-
-async function copyHistory() {
-  const text = document.querySelector('.history-detail-content')?.innerText.trim();
-  if (!text) return toast('没有可复制内容');
-  try {
-    await navigator.clipboard.writeText(text);
-    toast('已复制历史报告');
-  } catch {
-    toast('复制失败，请手动选择内容');
-  }
-}
-
-function showAuthScreen(screen) {
-  cancelPending();
-  state.authError = null;
-  state.recoveryCode = null;
-  state.screen = screen;
-  render();
-}
-
-function authError(form, message) {
+function authFormError(form, message) {
   const element = form.querySelector('.auth-error');
-  element.textContent = message ?? '请求失败，请重试。';
+  if (element) element.textContent = message || '';
 }
 
 async function submitLogin(form) {
   if (state.pending) return;
   const data = new FormData(form);
   state.pending = 'auth';
-  authError(form, '');
-  form.querySelector('[type="submit"]').disabled = true;
+  authFormError(form, '');
+  render();
   try {
-    await postJson('/api/auth/login', {
-      username: data.get('username'),
-      password: data.get('password'),
-    });
+    await postJson('/api/auth/login', { username: data.get('username'), password: data.get('password') });
     const session = await getJson('/api/auth/me');
     state.user = session.user;
     rememberCsrfToken(session.csrfToken);
-    state.authReady = true;
-    state.authError = null;
-    state.recoveryCode = null;
     state.pending = null;
+    state.authError = null;
     resetState();
-    clearToast();
     render();
   } catch (error) {
     state.pending = null;
-    authError(form, error.message);
-    form.querySelector('[type="submit"]').disabled = false;
+    state.authError = error;
+    render();
   }
 }
 
@@ -991,26 +980,21 @@ async function submitRegister(form) {
   if (state.pending) return;
   const data = new FormData(form);
   if (data.get('password') !== data.get('passwordConfirm')) {
-    authError(form, '两次输入的密码不一致。');
+    authFormError(form, '两次输入的密码不一致。');
     return;
   }
   state.pending = 'auth';
-  authError(form, '');
-  form.querySelector('[type="submit"]').disabled = true;
+  render();
   try {
-    const result = await postJson('/api/auth/register', {
-      username: data.get('username'),
-      password: data.get('password'),
-    });
+    const result = await postJson('/api/auth/register', { username: data.get('username'), password: data.get('password') });
     state.pending = null;
-    state.authError = null;
     state.recoveryCode = result.recoveryCode;
     state.screen = 'recovery-code';
     render();
   } catch (error) {
     state.pending = null;
-    authError(form, error.message);
-    form.querySelector('[type="submit"]').disabled = false;
+    state.authError = error;
+    render();
   }
 }
 
@@ -1018,27 +1002,23 @@ async function submitRecovery(form) {
   if (state.pending) return;
   const data = new FormData(form);
   if (data.get('newPassword') !== data.get('newPasswordConfirm')) {
-    authError(form, '两次输入的新密码不一致。');
+    authFormError(form, '两次输入的新密码不一致。');
     return;
   }
   state.pending = 'auth';
-  authError(form, '');
-  form.querySelector('[type="submit"]').disabled = true;
+  render();
   try {
     const result = await postJson('/api/auth/password/reset-with-recovery', {
-      username: data.get('username'),
-      recoveryCode: data.get('recoveryCode'),
-      newPassword: data.get('newPassword'),
+      username: data.get('username'), recoveryCode: data.get('recoveryCode'), newPassword: data.get('newPassword'),
     });
     state.pending = null;
-    state.authError = null;
     state.recoveryCode = result.recoveryCode;
     state.screen = 'recovery-code';
     render();
   } catch (error) {
     state.pending = null;
-    authError(form, error.message);
-    form.querySelector('[type="submit"]').disabled = false;
+    state.authError = error;
+    render();
   }
 }
 
@@ -1050,9 +1030,9 @@ async function logout() {
     await postJson('/api/auth/logout');
     state.user = null;
     rememberCsrfToken(null);
+    state.pending = null;
     state.recoveryCode = null;
     state.authError = null;
-    state.pending = null;
     resetState();
     await loadPreAuthCsrf();
     render();
@@ -1071,42 +1051,74 @@ document.addEventListener('submit', event => {
   else if (form.dataset.authForm === 'recovery') submitRecovery(form);
 });
 
-document.addEventListener('click', event => {
-  const step = event.target.closest('[data-step]');
-  if (step) return navigateStep(Number(step.dataset.step));
-  const actionElement = event.target.closest('[data-action]');
-  const action = actionElement?.dataset.action;
-  if (!action) return;
-  if (action === 'start') startFlow();
-  else if (action === 'home' || action === 'finish') goHome();
-  else if (action === 'back') showStep(state.step - 1);
-  else if (action === 'check-goals') checkGoals();
-  else if (action === 'extract-tasks') extractTasks();
-  else if (action === 'classify-matrix') classifyTasks();
-  else if (action === 'generate-report') generateReport();
-  else if (action === 'toggle-add') toggleAdd(true);
-  else if (action === 'cancel-add') toggleAdd(false);
-  else if (action === 'add-task') addTask();
-  else if (action === 'copy-report') copyReport();
-  else if (action === 'restart') restartFlow();
-  else if (action === 'show-register') showAuthScreen('register');
-  else if (action === 'show-recovery') showAuthScreen('recovery');
-  else if (action === 'show-login') showAuthScreen('login');
-  else if (action === 'confirm-recovery-code') showAuthScreen(state.user ? 'home' : 'login');
-  else if (action === 'logout') logout();
-  else if (action === 'history-open') openHistory();
-  else if (action === 'history-home') goHome();
-  else if (action === 'history-back') {
-    state.historyDetail = null;
-    state.screen = 'history';
-    render();
-  } else if (action === 'history-more') loadHistory({ append: true });
-  else if (action === 'history-detail') openHistoryDetail(actionElement.dataset.historyId);
-  else if (action === 'history-delete') deleteHistory(actionElement.dataset.historyId);
-  else if (action === 'history-copy') copyHistory();
-  else if (action === 'history-retry') saveCurrentHistory();
+document.addEventListener('input', event => {
+  const key = event.target.dataset.entry;
+  if (!key) return;
+  state.entries[key] = event.target.value;
+  invalidateAfterEntries();
 });
 
-document.querySelector('.brand').addEventListener('click', goHome);
+document.addEventListener('change', event => {
+  const taskId = event.target.dataset.taskId;
+  const field = event.target.dataset.taskField;
+  if (taskId && field) {
+    updateTask(taskId, field, event.target.value);
+    return;
+  }
+  const trackingId = event.target.dataset.trackTime;
+  if (trackingId) {
+    state.tracking[trackingId] = { done: true, doneAt: event.target.value };
+  }
+});
+
+document.addEventListener('click', event => {
+  const nav = event.target.closest('[data-nav]');
+  if (nav) return navigate(nav.dataset.nav);
+  const step = event.target.closest('[data-step]');
+  if (step) return navigateStep(Number(step.dataset.step));
+  const element = event.target.closest('[data-action]');
+  const action = element?.dataset.action;
+  if (!action) {
+    if (event.target.matches('[data-modal-mask]')) closeModal();
+    return;
+  }
+  if (action === 'home') navigate(state.user ? 'home' : 'login');
+  else if (action === 'open-workspace') navigate('workspace');
+  else if (action === 'back-step') navigateStep(Math.max(1, state.step - 1));
+  else if (action === 'decompose') decomposeTasks();
+  else if (action === 'smart-check') checkSmart();
+  else if (action === 'diagnose') diagnoseDistribution();
+  else if (action === 'classify') classifyTasks();
+  else if (action === 'generate-report') generateReport();
+  else if (action === 'open-add-task') openAddTask(element.dataset.defaultCategory || '今天');
+  else if (action === 'close-modal') closeModal();
+  else if (action === 'save-task') saveTask();
+  else if (action === 'delete-task') deleteTask(element.dataset.taskId);
+  else if (action === 'toggle-done') toggleDone(element.dataset.taskId);
+  else if (action === 'rollover') rolloverDay();
+  else if (action === 'copy-report') copyText(document.querySelector('.panel-body')?.innerText.trim(), '已复制报告');
+  else if (action === 'history-retry') saveCurrentHistory();
+  else if (action === 'history-more') loadHistory({ append: true });
+  else if (action === 'history-detail') openHistoryDetail(element.dataset.historyId);
+  else if (action === 'history-delete') deleteHistory(element.dataset.historyId);
+  else if (action === 'history-back') { state.historyDetail = null; state.screen = 'history'; render(); }
+  else if (action === 'history-copy') copyText(document.querySelector('.history-detail-content')?.innerText.trim(), '已复制历史报告');
+  else if (action === 'auth-login-tab') { state.authMode = 'login'; state.authError = null; render(); }
+  else if (action === 'auth-register-tab') { state.authMode = 'register'; state.authError = null; render(); }
+  else if (action === 'show-recovery') { state.screen = 'recovery'; state.authError = null; render(); }
+  else if (action === 'show-login') { state.screen = 'login'; state.authMode = 'login'; state.authError = null; render(); }
+  else if (action === 'confirm-recovery-code') { state.recoveryCode = null; state.screen = 'login'; state.authMode = 'login'; render(); }
+  else if (action === 'logout') logout();
+});
+
+document.addEventListener('keydown', event => {
+  if (event.key === 'Escape' && state.modal) closeModal();
+  const brand = event.target.closest('.brand');
+  if (brand && (event.key === 'Enter' || event.key === ' ')) {
+    event.preventDefault();
+    navigate(state.user ? 'home' : 'login');
+  }
+});
+
 render();
 restoreAuth();

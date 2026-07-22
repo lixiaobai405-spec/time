@@ -1,20 +1,21 @@
 # 时间管理助手（time）
 
-面向管理者的时间管理助手。用户使用用户名和密码登录后，依次完成“目标梳理 → 任务提取 → 矩阵判定 → 优先级报告”；报告生成成功后会自动保存到当前账号的历史。
+面向管理者的时间管理助手。新版以参考前端为业务基准，用户登录后依次完成“事务填写 → AI 拆解确认 → 时间分布诊断 → 优先级排序 → 优化报告”；报告生成成功后会自动保存到当前账号的历史。
 
 ## 当前能力
 
-- “昨天—今天—明天—后天”四栏目标输入，按 PDCA 和 SMART 返回字段级 `issue`、`suggestion` 与“采纳建议”。
-- `overall=need_fix` 时阻止任务提取；修改目标后必须重新检查。
-- AI 提取任务并生成稳定 UUID；未提供截止时间统一显示“待确认”。
-- 支持手动新增和删除任务。手动任务可以不标注重要性/紧急度，保存为 `null/null`，矩阵判定后显示“AI 判定”。
-- 重要/紧急矩阵只有“高”映射为“是”，精力比例由服务端固定为 55/25/15/5。
-- 报告只按当前 `taskId` 引用任务，叙述字段通过安全 Markdown 渲染，可复制当前页面报告。
+- “昨天—今天—明天—后天”四栏整段输入；服务端先校验行数和输入边界，再调用模型拆成稳定 UUID 任务。
+- AI 拆解后由用户编辑任务名称、类别、截止时间、预估工时和轻重缓急；服务端执行逐字段 SMART 门禁，缺项未清零时不能进入诊断。
+- 时间分布诊断是正式后端节点：只解析明确的小时/分钟工时，按分钟汇总四类占比，以最大余数法保证显示合计为 100.0%，并返回未参与计算的任务。
+- 支持手动新增、编辑和删除任务；任务变化会使时间分布、矩阵和报告失效，必须按新数据重新计算。
+- 重要/紧急矩阵只有“高”映射为“是”，任务按稳定 `taskId` 守恒，精力比例由服务端固定为 55/25/15/5。
+- 优化报告同时读取当前任务、时间分布诊断和四象限结果；只按当前 `taskId` 引用任务，叙述字段通过安全 Markdown 渲染。
+- 工作台、每日跟踪和历史记录复刻参考稿的信息架构；每日完成状态与本次会话历史不持久化，账号报告历史仍按用户写入 SQLite。
 - 用户名密码注册、登录、退出和 7 天 SQLite Session；登录成功后会换发新 Session。
 - 恢复码是唯一自助找回方式，注册、重置或轮换成功后只展示一次。用户同时丢失密码和恢复码后无法自助找回账号。
 - 已完成的报告以稳定 `clientRunId` 幂等保存，支持游标分页、只读详情和二次确认删除；用户数据严格隔离。
 
-`prompts/system.md` 是四步运行提示词真源；`server/contracts/time-management.js`、各工作流的 Ajv Schema 和自动化测试共同约束运行数据。
+`prompts/system.md` 是五步运行提示词与确定性节点说明的真源；`server/contracts/time-management.js`、各工作流的 Ajv Schema 和自动化测试共同约束运行数据。
 
 ## 环境要求
 
@@ -37,7 +38,7 @@ npx.cmd playwright install chromium
 
 ## 服务端配置
 
-服务端直接读取进程环境变量；直接运行 `npm.cmd run dev` 时不会自动加载 `.env`，一键启动脚本则使用 Node.js 20 原生参数安全加载。变量名和假占位值见 `.env.example`：
+`npm.cmd run dev` 通过 `scripts/start-dev.js` 启动：项目根目录存在 `.env` 时使用 Node.js 原生 `process.loadEnvFile()` 安全加载，不存在时使用调用进程已注入的环境变量。一键启动脚本继续显式加载 `.env`。变量名和假占位值见 `.env.example`：
 
 | 变量 | 必填 | 说明 |
 |---|---:|---|
@@ -104,16 +105,20 @@ Copy-Item .env.example .env
 | `POST /api/auth/password/reset-with-recovery` | 使用恢复码重置密码，撤销该用户全部旧 Session |
 | `POST /api/auth/recovery-code/rotate` | 登录后用当前密码轮换恢复码 |
 
-### 四步业务接口
+### 五步业务接口
 
-四个接口均为 `POST`、`application/json`，模型格式或语义错误最多自动重试一次。
+新版主流程接口均为 `POST`、`application/json`。模型节点的格式或语义错误最多自动重试一次；输入校验、SMART 和时间分布为确定性服务端节点。
 
-| 接口 | 请求核心字段 | 响应核心字段 |
+| 节点与接口 | 请求核心字段 | 响应核心字段 |
 |---|---|---|
-| `/api/time-management/goals/check` | `goals` 四栏字符串 | `fields`、`overall` |
-| `/api/time-management/tasks/extract` | 已通过检查的 `goals` | 标准化 `tasks` |
-| `/api/time-management/matrix/classify` | 当前 `tasks` | `classifications`、`quadrants`、`note` |
-| `/api/time-management/report/generate` | 当前 `tasks`、`matrix`、`goals` | `order`、`energyRules`、`adjustments` |
+| 1. `/api/time-management/intake/check` | `entries` 四栏字符串 | `lineCounts`、`warnings`、`totalLines` |
+| 2. `/api/time-management/tasks/decompose` | 已校验的 `entries` | 标准化 `tasks`、初始 `smart` |
+| 2. `/api/time-management/tasks/smart-check` | 用户确认后的 `tasks` | 逐任务 `results`、`overall`、`summary` |
+| 3. `/api/time-management/distribution/diagnose` | SMART 通过的 `tasks` | `categories`、`percentages`、`diagnosis`、`recommendations` |
+| 4. `/api/time-management/matrix/classify` | 当前 `tasks` | `classifications`、`quadrants`、`note` |
+| 5. `/api/time-management/report/generate` | `tasks`、`distribution`、`matrix`、`goals` | `order`、`energyRules`、`adjustments` |
+
+旧 `/goals/check` 和 `/tasks/extract` 仍保留为兼容接口，但新版页面不再以旧四步流程作为主路径。
 
 ### 历史接口
 
@@ -148,23 +153,26 @@ npm.cmd run test:e2e
 
 用户、密码哈希、恢复码哈希、Session 哈希和已完成历史保存在 SQLite。密码、恢复码和原始 Session ID 不明文落库；`user_id` 只来自服务端验证后的 Session。
 
-当前四步草稿仍只存在浏览器内存：草稿不会保存，刷新页面不会恢复；只有成功生成的报告会进入账号历史。页面继续提醒不要填写客户隐私、密码或商业秘密。
+当前五步草稿、任务编辑、完成勾选和本次会话每日记录仍只存在浏览器内存：刷新页面不会恢复；只有成功生成的优化报告会进入账号历史。页面继续提醒不要填写客户隐私、密码或商业秘密。
 
 当前版本不包含邮箱、SMTP、短信、社交登录、管理员后台、团队权限、草稿恢复、教练助手依赖或外部平台集成。真实模型的供应商数据用途、保留期限与删除机制需在生产接入前另行确认。
 
 ## 目录
 
 ```text
-frontend/                    # 单一状态树、API 层、交互界面与安全 Markdown
-server/                      # Express、认证/历史路由、SQLite、模型网关与四步工作流
-scripts/                     # migration 与 SQLite 一致性备份 CLI
-prompts/system.md            # 四步运行提示词
-tests/server/                # Node 单元、API、安全与验收契约测试
-tests/auth-history.spec.js   # 认证、历史与用户隔离 Playwright 回归
-tests/frontend.spec.js       # 四步工作流与响应式 Playwright 回归
+frontend/                         # 参考稿视觉、五步状态树、每日跟踪、历史与安全 Markdown
+server/                           # Express、认证/历史、SQLite、模型网关与五步工作流
+scripts/start-dev.js              # 可选加载本地 .env 的开发启动器
+scripts/                          # migration 与 SQLite 一致性备份 CLI
+prompts/system.md                 # 五步提示词与确定性诊断说明
+tests/server/                     # Node 单元、API、安全与验收契约测试
+tests/reference-auth-history.spec.js # 新版认证、历史、退出与移动端回归
+tests/reference-five-step.spec.js    # 新版五步、导航与响应式回归
+tests/frontend.spec.js           # 旧四步界面历史回归资料，不在当前 Playwright testMatch 中
+tests/auth-history.spec.js       # 旧四步账号界面历史回归资料，不在当前 Playwright testMatch 中
 tests/prompt-cases.md        # 自动化边界与人工/模型质量评测
 docs/acceptance/             # 甲方验收清单
 docs/adversarial-review.md   # 对抗审查复核
 ```
 
-四步业务验收见 `docs/acceptance/time-management-v1.md`，账号与历史验收见 `docs/acceptance/account-auth-history-v1.md`，剩余风险见 `docs/adversarial-review.md`。
+新版五步与参考界面验收见 `docs/acceptance/reference-five-step-v2.md`；旧四步业务验收和账号历史验收仍分别保存在 `docs/acceptance/time-management-v1.md`、`docs/acceptance/account-auth-history-v1.md`，剩余风险见 `docs/adversarial-review.md`。

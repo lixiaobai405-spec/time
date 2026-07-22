@@ -6,8 +6,8 @@ const SOURCE = readFileSync(PROMPT_PATH, 'utf8');
 const STEP_HEADINGS = Object.freeze({
   'check-goals': '## 步骤 1 ·',
   'extract-tasks': '## 步骤 2 ·',
-  'classify-matrix': '## 步骤 3 ·',
-  'generate-report': '## 步骤 4 ·',
+  'classify-matrix': '## 步骤 4 ·',
+  'generate-report': '## 步骤 5 ·',
 });
 
 function promptError(message) {

@@ -46,6 +46,7 @@ test('start.bat uses the project environment and loads .env safely', () => {
   const script = fs.readFileSync(scriptPath, 'utf8');
   assert.match(script, /cd \/d "%~dp0"/i);
   assert.match(script, /\.conda\\node\.exe/i);
+  assert.match(script, /where node\.exe/i);
   assert.match(script, /if not exist "\.env"/i);
   assert.match(script, /--env-file=\.env/i);
   assert.match(script, /process\.env\.PORT/i);
@@ -127,7 +128,7 @@ test('start.bat is parsed by cmd.exe and reaches the server command', (t) => {
 
   const result = spawnSync(
     process.env.ComSpec || 'cmd.exe',
-    ['/d', '/c', 'start.bat'],
+    ['/d', '/c', '.\\start.bat'],
     {
       cwd: tempDirectory,
       encoding: 'utf8',

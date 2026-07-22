@@ -96,6 +96,49 @@ const validateRequest = ajv.compile({
       required: ['昨天', '后天'],
       properties: goalProperties,
     },
+    distribution: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['categories', 'diagnosis', 'recommendations'],
+      properties: {
+        totalMinutes: { type: 'number', minimum: 0 },
+        totalHours: { type: 'number', minimum: 0 },
+        validTaskCount: { type: 'integer', minimum: 0, maximum: TASK_LIMIT },
+        invalidTasks: {
+          type: 'array',
+          maxItems: TASK_LIMIT,
+          items: { type: 'object' },
+        },
+        categories: {
+          type: 'array',
+          minItems: 4,
+          maxItems: 4,
+          items: {
+            type: 'object',
+            additionalProperties: true,
+            required: ['key', 'percent', 'status'],
+            properties: {
+              key: { enum: GOAL_KEYS },
+              percent: { type: 'number', minimum: 0, maximum: 100 },
+              status: { enum: ['under', 'ok', 'over'] },
+            },
+          },
+        },
+        percentages: { type: 'object' },
+        diagnosis: {
+          type: 'array',
+          minItems: 1,
+          maxItems: 8,
+          items: { type: 'string', minLength: 1, maxLength: 1000 },
+        },
+        recommendations: {
+          type: 'array',
+          minItems: 1,
+          maxItems: 8,
+          items: { type: 'string', minLength: 1, maxLength: 1000 },
+        },
+      },
+    },
   },
 });
 
@@ -249,8 +292,8 @@ function normalizeModelError(error) {
   return error;
 }
 
-async function generateReport({ tasks, matrix, goals, modelClient, requestBody, now }) {
-  const input = requestBody || { tasks, matrix, goals };
+async function generateReport({ tasks, matrix, goals, distribution, modelClient, requestBody, now }) {
+  const input = requestBody || { tasks, matrix, goals, ...(distribution ? { distribution } : {}) };
   if (!validateRequest(input)) throw inputError();
   assertInputSemantics(input.tasks, input.matrix);
   const priorityContext = buildReportPriorityContext({
