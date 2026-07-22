@@ -240,7 +240,7 @@ git commit -m "fix: make task urgency evidence based"
 **Files:**
 - Modify: `tests/server/extract-tasks.test.js`
 
-- [ ] **Step 1: Update the extraction integration test with all relevant sources**
+- [x] **Step 1: Update the extraction integration test with all relevant sources**
 
 Replace `任务提取后按服务端日期纠偏当天紧急度且不猜测其他期限` with:
 
@@ -273,7 +273,7 @@ test('任务提取后按期限、来源和压力统一纠偏紧急度', async ()
 });
 ```
 
-- [ ] **Step 2: Run the focused extraction test**
+- [x] **Step 2: Run the focused extraction test**
 
 ```powershell
 $env:PATH = "$PWD\.conda;$env:PATH"
@@ -282,7 +282,7 @@ $env:PATH = "$PWD\.conda;$env:PATH"
 
 Expected: PASS because Task 2 already implemented the policy. If it fails, fix only the policy/workflow boundary demonstrated by the failure; do not weaken the assertions.
 
-- [ ] **Step 3: Run the complete extraction workflow tests**
+- [x] **Step 3: Run the complete extraction workflow tests**
 
 ```powershell
 $env:PATH = "$PWD\.conda;$env:PATH"
@@ -291,7 +291,7 @@ $env:PATH = "$PWD\.conda;$env:PATH"
 
 Expected: all extraction tests pass. Update any older assertion only when it conflicts with the approved tier table; retain stable IDs, completed-fact filtering, SMART criteria, retry, size, and API boundary assertions.
 
-- [ ] **Step 4: Commit the workflow regression**
+- [x] **Step 4: Commit the workflow regression**
 
 ```powershell
 git add -- tests/server/extract-tasks.test.js
