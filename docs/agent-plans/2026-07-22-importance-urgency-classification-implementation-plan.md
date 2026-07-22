@@ -305,7 +305,7 @@ git commit -m "test: cover task urgency tiers"
 - Modify: `tests/server/prompt-contract.test.js`
 - Modify: `tests/prompt-cases.md:18-29`
 
-- [ ] **Step 1: Write the failing documentation contract test**
+- [x] **Step 1: Write the failing documentation contract test**
 
 Append this test to `tests/server/prompt-contract.test.js`:
 
@@ -322,7 +322,7 @@ test('人工提示词用例覆盖重要性证据、紧急度分层和空象限',
 });
 ```
 
-- [ ] **Step 2: Run the focused test and confirm RED**
+- [x] **Step 2: Run the focused test and confirm RED**
 
 ```powershell
 $env:PATH = "$PWD\.conda;$env:PATH"
@@ -331,7 +331,7 @@ $env:PATH = "$PWD\.conda;$env:PATH"
 
 Expected: FAIL because the existing Step 2 table does not cover the new classification evidence.
 
-- [ ] **Step 3: Add the classification cases to `tests/prompt-cases.md`**
+- [x] **Step 3: Add the classification cases to `tests/prompt-cases.md`**
 
 Extend the Step 2 table with these rows:
 
@@ -351,7 +351,7 @@ After the table add this boundary note:
 分类自然语言质量仅进行人工/模型评测，自动化测试只验证提示词规则、服务端紧急度政策和 JSON 契约。自动化测试使用假模型，不得调用真实付费 API；若用户自行选择真实模型复测，只使用虚构内容并记录模型名称、日期和失败样例。
 ```
 
-- [ ] **Step 4: Run the focused and complete prompt contract tests**
+- [x] **Step 4: Run the focused and complete prompt contract tests**
 
 ```powershell
 $env:PATH = "$PWD\.conda;$env:PATH"
@@ -361,7 +361,7 @@ $env:PATH = "$PWD\.conda;$env:PATH"
 
 Expected: both commands exit 0 and the complete file has zero failures.
 
-- [ ] **Step 5: Commit the evaluation cases**
+- [x] **Step 5: Commit the evaluation cases**
 
 ```powershell
 git add -- tests/prompt-cases.md tests/server/prompt-contract.test.js
