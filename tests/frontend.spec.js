@@ -315,6 +315,28 @@ test('模型任务名使用行内 Markdown 且不露出标记', async ({ page })
   await expect(firstTask.locator('.task-name')).not.toContainText('**校对今天的方案终稿**');
 });
 
+test('已分类任务卡显式展示重要性和紧急度二值标签', async ({ page }) => {
+  await advanceToTasks(page);
+
+  const firstQuadrant = page.locator('.task').filter({ hasText: '跟进两个客户投诉' });
+  await expect(firstQuadrant.locator('.t.imp')).toHaveText('重要');
+  await expect(firstQuadrant.locator('.t.urg')).toHaveText('紧急');
+  await expect(firstQuadrant).not.toContainText('不重要');
+  await expect(firstQuadrant).not.toContainText('不紧急');
+
+  const secondQuadrant = page.locator('.task').filter({ hasText: '复盘上季度转化缺口原因' });
+  await expect(secondQuadrant.locator('.t.imp')).toHaveText('重要');
+  await expect(secondQuadrant).toContainText('不紧急');
+
+  const thirdQuadrant = page.locator('.task').filter({ hasText: '校对今天的方案终稿' });
+  await expect(thirdQuadrant).toContainText('不重要');
+  await expect(thirdQuadrant.locator('.t.urg')).toHaveText('紧急');
+
+  const fourthQuadrant = page.locator('.task').filter({ hasText: '回复非紧急群消息' });
+  await expect(fourthQuadrant).toContainText('不重要');
+  await expect(fourthQuadrant).toContainText('不紧急');
+});
+
 test('任务卡安全展示完成标准且手动任务流程保持可用', async ({ page }) => {
   await page.addInitScript(() => { window.__criteriaXss = false; });
   const criteria = [
@@ -748,12 +770,17 @@ test('未标注手动任务在矩阵前后分别显示待 AI 判定和 AI 判定
   await page.locator('#f-due').fill('2026-08-01');
   await page.locator('#f-cost').fill('1h');
   await page.getByRole('button', { name: /添加到列表/ }).click();
-  await expect(page.locator('.task').filter({ hasText: '待判定任务' })).toContainText('待 AI 判定');
+  const unclassifiedTask = page.locator('.task').filter({ hasText: '待判定任务' });
+  await expect(unclassifiedTask).toContainText('待 AI 判定');
+  await expect(unclassifiedTask).not.toContainText('不重要');
+  await expect(unclassifiedTask).not.toContainText('不紧急');
   await page.getByRole('button', { name: /矩阵判定/ }).click();
   await page.getByRole('button', { name: '上一步' }).click();
   const taskRow = page.locator('.task').filter({ hasText: '待判定任务' });
   await expect(taskRow).toContainText('AI 判定');
   await expect(taskRow).not.toContainText('待 AI 判定');
+  await expect(taskRow).toContainText('不重要');
+  await expect(taskRow).toContainText('不紧急');
 });
 
 test('矩阵响应修改已有标签时不渲染部分结果', async ({ page }) => {

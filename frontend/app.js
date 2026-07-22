@@ -357,8 +357,12 @@ function hydrateGoals() {
 
 function taskTags(task) {
   const tags = [];
-  if (task.importance === '高') tags.push(['重要', 'imp']);
-  if (task.urgency === '高') tags.push(['紧急', 'urg']);
+  if (task.importance) {
+    tags.push(task.importance === '高' ? ['重要', 'imp'] : ['不重要', '']);
+  }
+  if (task.urgency) {
+    tags.push(task.urgency === '高' ? ['紧急', 'urg'] : ['不紧急', '']);
+  }
   if (task.classificationSource === 'unclassified') tags.push(['待 AI 判定', '']);
   if (task.classificationSource === 'ai-matrix') tags.push(['AI 判定', '']);
   tags.push([`来源:${task.source}`, '']);

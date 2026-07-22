@@ -22,7 +22,7 @@
 - Modify: `tests/frontend.spec.js:310-378,743-757`
 - Modify: `frontend/app.js:358-369`
 
-- [ ] **Step 1: Add the failing classified-task card test**
+- [x] **Step 1: Add the failing classified-task card test**
 
 Insert this test after `模型任务名使用行内 Markdown 且不露出标记` in `tests/frontend.spec.js`:
 
@@ -50,7 +50,7 @@ test('已分类任务卡显式展示重要性和紧急度二值标签', async ({
 });
 ```
 
-- [ ] **Step 2: Extend the unclassified manual-task boundary assertions**
+- [x] **Step 2: Extend the unclassified manual-task boundary assertions**
 
 In `未标注手动任务在矩阵前后分别显示待 AI 判定和 AI 判定`, replace the first single assertion with:
 
@@ -68,16 +68,16 @@ await expect(taskRow).toContainText('不重要');
 await expect(taskRow).toContainText('不紧急');
 ```
 
-- [ ] **Step 3: Run the focused tests and confirm RED**
+- [x] **Step 3: Run the focused tests and confirm RED**
 
 ```powershell
 $env:PATH = "$PWD\.conda;$env:PATH"
-& .\.conda\npx.cmd playwright test tests\frontend.spec.js --grep "已分类任务卡|未标注手动任务"
+& .\.conda\node.exe .\node_modules\@playwright\test\cli.js test frontend.spec.js:318 frontend.spec.js:765
 ```
 
 Expected: FAIL because medium/low classified tasks do not yet render `不重要` or `不紧急`; the unclassified task must still pass the new negative assertions before matrix classification.
 
-- [ ] **Step 4: Implement the minimal task-tag mapping**
+- [x] **Step 4: Implement the minimal task-tag mapping**
 
 Replace the first two conditions in `taskTags()` with:
 
@@ -92,25 +92,25 @@ if (task.urgency) {
 
 Keep `待 AI 判定`, `AI 判定`, source, deadline, and effort logic unchanged.
 
-- [ ] **Step 5: Run the focused tests and confirm GREEN**
+- [x] **Step 5: Run the focused tests and confirm GREEN**
 
 ```powershell
 $env:PATH = "$PWD\.conda;$env:PATH"
-& .\.conda\npx.cmd playwright test tests\frontend.spec.js --grep "已分类任务卡|未标注手动任务"
+& .\.conda\node.exe .\node_modules\@playwright\test\cli.js test frontend.spec.js:318 frontend.spec.js:765
 ```
 
 Expected: 2 tests pass, 0 fail.
 
-- [ ] **Step 6: Run the complete frontend Playwright file**
+- [x] **Step 6: Run the complete frontend Playwright file**
 
 ```powershell
 $env:PATH = "$PWD\.conda;$env:PATH"
-& .\.conda\npx.cmd playwright test tests\frontend.spec.js
+& .\.conda\npx.cmd playwright test frontend.spec.js
 ```
 
 Expected: all tests in `frontend.spec.js` pass.
 
-- [ ] **Step 7: Commit the implementation**
+- [x] **Step 7: Commit the implementation**
 
 ```powershell
 git add -- frontend/app.js tests/frontend.spec.js docs/agent-plans/2026-07-22-explicit-task-classification-labels-implementation-plan.md
