@@ -123,7 +123,7 @@ git commit -m "fix: show explicit task classification labels"
 **Files:**
 - Verify only; do not modify unrelated files.
 
-- [ ] **Step 1: Run the complete project suite**
+- [x] **Step 1: Run the complete project suite**
 
 ```powershell
 $env:PATH = "$PWD\.conda;$env:PATH"
@@ -132,7 +132,7 @@ $env:PATH = "$PWD\.conda;$env:PATH"
 
 Expected: server and Playwright suites exit 0 using fake model configuration.
 
-- [ ] **Step 2: Run whitespace and hook checks**
+- [x] **Step 2: Run whitespace and hook checks**
 
 ```powershell
 git diff --check
@@ -141,7 +141,7 @@ git hook run pre-commit
 
 Expected: both commands exit 0 without bypassing hooks.
 
-- [ ] **Step 3: Review final scope and status**
+- [x] **Step 3: Review final scope and status**
 
 ```powershell
 git status --short --branch
@@ -151,7 +151,7 @@ git log -3 --oneline
 
 Expected: no tracked working-tree changes remain after commits; pre-existing unrelated untracked files remain untouched.
 
-- [ ] **Step 4: Commit the completed execution record**
+- [x] **Step 4: Commit the completed execution record**
 
 ```powershell
 git add -- docs/agent-plans/2026-07-22-explicit-task-classification-labels-implementation-plan.md
