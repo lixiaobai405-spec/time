@@ -94,6 +94,12 @@ function hasUrgencySignal(task, goalText = '') {
   ].filter(Boolean).join('\n'));
 }
 
+function calendarDayDistance(fromDate, toDate) {
+  const from = new Date(`${fromDate}T00:00:00.000Z`);
+  const to = new Date(`${toDate}T00:00:00.000Z`);
+  return Math.round((to.getTime() - from.getTime()) / 86_400_000);
+}
+
 function applyDeadlineUrgency(task, context = {}) {
   const result = { ...task };
   const parsed = parseDue(task?.due, context);
@@ -106,10 +112,24 @@ function applyDeadlineUrgency(task, context = {}) {
     return result;
   }
 
-  const needsEvidence = result.source === '中长期'
-    || Boolean(parsed && parsed.date > referenceDate);
-  if (needsEvidence && result.urgency === '高'
-      && !hasUrgencySignal(result, context.goalText)) {
+  if (hasUrgencySignal(result, context.goalText)) {
+    result.urgency = '高';
+    return result;
+  }
+
+  if (parsed) {
+    const daysUntilDue = calendarDayDistance(referenceDate, parsed.date);
+    result.urgency = daysUntilDue <= 7 ? '中' : '低';
+    return result;
+  }
+
+  const dueText = typeof result.due === 'string' ? result.due.trim() : '';
+  const isUnknown = !dueText || dueText === '待确认';
+  if (result.source === '今天' && isUnknown) {
+    result.urgency = '高';
+  } else if (isUnknown || result.source === '中长期') {
+    result.urgency = '低';
+  } else {
     result.urgency = '中';
   }
   return result;

@@ -121,7 +121,7 @@ git commit -m "feat: define task classification evidence"
 - Modify: `tests/server/deadline-policy.test.js`
 - Modify: `server/policies/deadline.js:97-116`
 
-- [ ] **Step 1: Replace overlapping urgency expectations with one tier table test**
+- [x] **Step 1: Replace overlapping urgency expectations with one tier table test**
 
 Keep the parsing, timezone, and immutability tests. Replace the current future/unknown urgency tests with this table-driven test:
 
@@ -153,7 +153,7 @@ test('期限、来源和明确压力按统一规则确定紧急度', () => {
 
 Retain the existing separate test proving that urgency signals found in the corresponding original goal text also elevate a future task to high.
 
-- [ ] **Step 2: Run the policy tests and confirm RED**
+- [x] **Step 2: Run the policy tests and confirm RED**
 
 ```powershell
 $env:PATH = "$PWD\.conda;$env:PATH"
@@ -162,7 +162,7 @@ $env:PATH = "$PWD\.conda;$env:PATH"
 
 Expected: FAIL for future low-to-medium, more-than-seven-days high-to-low, review `待确认` high-to-low, today-source unknown high, and unparseable natural deadline medium.
 
-- [ ] **Step 3: Add the calendar distance helper**
+- [x] **Step 3: Add the calendar distance helper**
 
 Add this function above `applyDeadlineUrgency` in `server/policies/deadline.js`:
 
@@ -174,7 +174,7 @@ function calendarDayDistance(fromDate, toDate) {
 }
 ```
 
-- [ ] **Step 4: Replace `applyDeadlineUrgency` with deterministic tiers**
+- [x] **Step 4: Replace `applyDeadlineUrgency` with deterministic tiers**
 
 Use this implementation:
 
@@ -218,7 +218,7 @@ function applyDeadlineUrgency(task, context = {}) {
 
 Do not export `calendarDayDistance`; it is an internal helper. Preserve the existing `parseDue`, timezone injection, urgency signal scan, and object immutability behavior.
 
-- [ ] **Step 5: Run the policy tests and confirm GREEN**
+- [x] **Step 5: Run the policy tests and confirm GREEN**
 
 ```powershell
 $env:PATH = "$PWD\.conda;$env:PATH"
@@ -227,7 +227,7 @@ $env:PATH = "$PWD\.conda;$env:PATH"
 
 Expected: all parsing, timezone, tier, goal-text signal, and immutability tests pass.
 
-- [ ] **Step 6: Commit the deterministic urgency policy**
+- [x] **Step 6: Commit the deterministic urgency policy**
 
 ```powershell
 git add -- server/policies/deadline.js tests/server/deadline-policy.test.js
