@@ -6,6 +6,11 @@ const { createAuthRateLimiters } = require('./auth/rate-limiters');
 const { createAuthRouter } = require('./auth/router');
 const { openDatabase } = require('./database/sqlite');
 const { createHistoryRouter } = require('./history/router');
+const { createDailyTrackingRouter } = require('./daily-tracking/router');
+const { createDailyTrackingService } = require('./daily-tracking/service');
+const {
+  createDailyTrackingRepository,
+} = require('./repositories/daily-tracking-repository');
 const { createHistoryRepository } = require('./repositories/history-repository');
 const { createSessionRepository } = require('./repositories/session-repository');
 const { createUserRepository } = require('./repositories/user-repository');
@@ -49,6 +54,11 @@ function includeSessionMaxAge(sessionMiddleware, sessionMaxAgeMs) {
 async function createRuntime(config) {
   const database = await openDatabase({ filename: config.databasePath });
   const historyRepository = createHistoryRepository({ database });
+  const dailyTrackingRepository = createDailyTrackingRepository({ database });
+  const dailyTrackingService = createDailyTrackingService({
+    dailyTrackingRepository,
+    historyRepository,
+  });
   const userRepository = createUserRepository({ database });
   const sessionRepository = createSessionRepository({ database });
   const sessionCookie = Object.freeze({
@@ -114,6 +124,7 @@ async function createRuntime(config) {
     sessionCookie,
   });
   const authBoundary = Object.freeze({
+    dailyTrackingRouter: createDailyTrackingRouter({ dailyTrackingService }),
     historyRouter: createHistoryRouter({ historyRepository }),
     router,
     requireAuth,

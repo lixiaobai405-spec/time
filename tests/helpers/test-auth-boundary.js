@@ -2,6 +2,7 @@ const express = require('express');
 
 function createTestAuthBoundary() {
   return Object.freeze({
+    dailyTrackingRouter: express.Router(),
     historyRouter: express.Router(),
     sessionMiddleware(request, _response, next) {
       request.sessionID = 'test-session-id';

@@ -44,6 +44,7 @@ function createApp({ modelClient, authBoundary, logger, now = Date.now } = {}) {
     !authBoundary
     || typeof authBoundary.sessionMiddleware !== 'function'
     || typeof authBoundary.router !== 'function'
+    || typeof authBoundary.dailyTrackingRouter !== 'function'
     || typeof authBoundary.historyRouter !== 'function'
     || typeof authBoundary.requireAuth !== 'function'
     || typeof authBoundary.requireSameOrigin !== 'function'
@@ -88,6 +89,7 @@ function createApp({ modelClient, authBoundary, logger, now = Date.now } = {}) {
   app.use('/api/auth', authBoundary.router);
   app.use('/api/time-management', authBoundary.requireAuth);
   app.use('/api/time-management', requireMutationSecurity(authBoundary));
+  app.use('/api/time-management/daily-tracking', authBoundary.dailyTrackingRouter);
   app.use('/api/time-management/history', authBoundary.historyRouter);
   app.post('/api/time-management/intake/check', (request, response, next) => {
     try {
