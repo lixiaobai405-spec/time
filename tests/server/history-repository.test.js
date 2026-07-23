@@ -48,12 +48,74 @@ test('all repository operations require a server-supplied userId', async (t) => 
   const calls = [
     () => repository.save({ snapshot: historySnapshot() }),
     () => repository.list({}),
+    () => repository.listTasksCreatedBetween({
+      startUtc: '2026-07-22T16:00:00.000Z',
+      endUtc: '2026-07-23T16:00:00.000Z',
+    }),
     () => repository.getById({ id: '10000000-0000-4000-8000-000000000001' }),
     () => repository.deleteById({ id: '10000000-0000-4000-8000-000000000001' }),
   ];
   for (const call of calls) {
     await assert.rejects(call, (error) => error.code === 'AUTH_REQUIRED');
   }
+});
+
+test('daily source query returns only one users histories inside a half-open range', async (t) => {
+  const { database } = await createTestDatabase(t);
+  await seedUser(database, USER_A, 'History_A');
+  await seedUser(database, USER_B, 'History_B');
+  let currentTime = '2026-07-22T15:59:59.999Z';
+  const ids = [
+    '51000000-0000-4000-8000-000000000001',
+    '52000000-0000-4000-8000-000000000002',
+    '53000000-0000-4000-8000-000000000003',
+    '54000000-0000-4000-8000-000000000004',
+  ];
+  const repository = createHistoryRepository({
+    database,
+    now: () => currentTime,
+    randomUUID: () => ids.shift(),
+  });
+
+  await repository.save({
+    userId: USER_A,
+    snapshot: historySnapshot({
+      clientRunId: '91000000-0000-4000-8000-000000000001',
+      title: '范围之前',
+    }),
+  });
+  currentTime = '2026-07-22T16:00:00.000Z';
+  await repository.save({
+    userId: USER_A,
+    snapshot: historySnapshot({
+      clientRunId: '92000000-0000-4000-8000-000000000002',
+      title: '范围之内',
+    }),
+  });
+  currentTime = '2026-07-22T17:00:00.000Z';
+  await repository.save({
+    userId: USER_B,
+    snapshot: historySnapshot({
+      clientRunId: '93000000-0000-4000-8000-000000000003',
+      title: '其他账号',
+    }),
+  });
+  currentTime = '2026-07-23T16:00:00.000Z';
+  await repository.save({
+    userId: USER_A,
+    snapshot: historySnapshot({
+      clientRunId: '94000000-0000-4000-8000-000000000004',
+      title: '范围之后',
+    }),
+  });
+
+  const result = await repository.listTasksCreatedBetween({
+    userId: USER_A,
+    startUtc: '2026-07-22T16:00:00.000Z',
+    endUtc: '2026-07-23T16:00:00.000Z',
+  });
+  assert.equal(result.historyCount, 1);
+  assert.deepEqual(result.tasks, historySnapshot().tasks);
 });
 
 test('user A cannot list, read, or delete user B history', async (t) => {

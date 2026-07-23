@@ -136,6 +136,34 @@ function createHistoryRepository({
       };
     },
 
+    async listTasksCreatedBetween({ userId, startUtc, endUtc } = {}) {
+      const ownerId = requireUserId(userId);
+      if (
+        typeof startUtc !== 'string'
+        || typeof endUtc !== 'string'
+        || Number.isNaN(Date.parse(startUtc))
+        || Number.isNaN(Date.parse(endUtc))
+        || startUtc >= endUtc
+      ) {
+        throw Object.assign(new Error('History date range is invalid.'), {
+          code: 'INPUT_INVALID',
+          status: 400,
+          expose: true,
+        });
+      }
+      const rows = await database.all(
+        `SELECT ${DETAIL_COLUMNS}
+         FROM time_management_runs
+         WHERE user_id = ? AND created_at >= ? AND created_at < ?
+         ORDER BY created_at ASC, id ASC`,
+        [ownerId, startUtc, endUtc],
+      );
+      return {
+        historyCount: rows.length,
+        tasks: rows.flatMap((row) => mapDetail(row).tasks),
+      };
+    },
+
     async getById({ userId, id } = {}) {
       const ownerId = requireUserId(userId);
       if (typeof id !== 'string' || !UUID.test(id)) return null;
