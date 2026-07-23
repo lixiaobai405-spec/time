@@ -437,11 +437,12 @@ function dailyTaskRow(task) {
   const category = categoryForTask(task);
   const hours = parseEstimatedHours(task.est);
   const priority = priorityForTask(task);
+  const due = splitDueValue(task.due);
   return `<div class="trow g-daily ${track.done ? 'doneRow' : ''}" data-daily-task-id="${escapeHtml(task.id)}">
     <button class="chk ${track.done ? 'on' : ''}" data-action="toggle-daily-done" data-task-id="${escapeHtml(task.id)}" aria-label="${track.done ? '取消完成' : '标记完成'}">${track.done ? '✓' : ''}</button>
     <div><span class="mobile-label">任务</span><input class="tname ${track.done ? 'done' : ''}" data-daily-task-id="${escapeHtml(task.id)}" data-daily-task-field="name" value="${escapeHtml(task.name)}"></div>
     <div><span class="mobile-label">类别</span><select data-daily-task-id="${escapeHtml(task.id)}" data-daily-task-field="category">${CATEGORY_KEYS.map(key => `<option value="${key}" ${category === key ? 'selected' : ''}>${key}</option>`).join('')}</select></div>
-    <div><span class="mobile-label">截止时间</span><input data-daily-task-id="${escapeHtml(task.id)}" data-daily-task-field="due" value="${escapeHtml(task.due === '待确认' ? '' : task.due)}" placeholder="YYYY-MM-DD"></div>
+    <div><span class="mobile-label">截止时间</span><div class="due-inputs"><input type="date" data-daily-task-id="${escapeHtml(task.id)}" data-daily-due-part="dueDate" value="${escapeHtml(due.date)}" aria-label="截止日期"><input type="time" data-daily-task-id="${escapeHtml(task.id)}" data-daily-due-part="dueTime" value="${escapeHtml(due.time)}" aria-label="截止时间（可选）" ${due.date ? '' : 'disabled'}></div></div>
     <div><span class="mobile-label">时长</span><input type="number" step="0.25" min="0" data-daily-task-id="${escapeHtml(task.id)}" data-daily-task-field="est" value="${Number.isFinite(hours) ? hours : ''}"></div>
     <div><span class="mobile-label">轻重缓急</span><select data-daily-task-id="${escapeHtml(task.id)}" data-daily-task-field="priority"><option value="">未选</option>${Object.entries(PRIORITIES).map(([key, item]) => `<option value="${key}" ${priority === key ? 'selected' : ''}>${item.label}</option>`).join('')}</select></div>
     <div><span class="mobile-label">完成时间</span><input type="datetime-local" data-daily-track-time="${escapeHtml(task.id)}" value="${escapeHtml(track.doneAt)}" ${track.done ? '' : 'disabled'}></div>
@@ -734,7 +735,9 @@ function updateDailyTask(taskId, field, value) {
   if (!task) return;
   if (field === 'name') task.name = value;
   else if (field === 'category') task.source = CATS[value]?.source || '今天';
-  else if (field === 'due') task.due = value.trim() || '待确认';
+  else if (field === 'dueDate' || field === 'dueTime') {
+    task.due = combineDueValue(task.due, field, value);
+  }
   else if (field === 'est') task.est = normalizeEstimate(value);
   else if (field === 'priority') {
     const priority = PRIORITIES[value];
@@ -1383,6 +1386,13 @@ document.addEventListener('change', event => {
   const field = event.target.dataset.taskField;
   if (taskId && field) {
     updateTask(taskId, field, event.target.value);
+    return;
+  }
+  const dailyDueTaskId = event.target.dataset.dailyTaskId;
+  const dailyDuePart = event.target.dataset.dailyDuePart;
+  if (dailyDueTaskId && dailyDuePart) {
+    updateDailyTask(dailyDueTaskId, dailyDuePart, event.target.value);
+    render();
     return;
   }
   const trackingId = event.target.dataset.trackTime;
