@@ -2,7 +2,7 @@ const { test, expect } = require('@playwright/test');
 
 const TASKS = [
   {
-    id: 'task-y', name: '补交上周未完成的月报', source: '复盘', due: '2026-07-22', est: '1h',
+    id: 'task-y', name: '补交上周未完成的月报', source: '复盘', due: '2026-07-22 18:00', est: '1h',
     importance: '高', urgency: '高', acceptanceCriteria: [], nextAction: '', status: 'pending', classificationSource: 'ai-extraction',
   },
   {
@@ -128,7 +128,7 @@ async function installMocks(page) {
   });
 }
 
-async function completeFiveSteps(page) {
+async function openAiConfirmation(page) {
   await page.goto('/');
   await page.getByRole('button', { name: /开始梳理/ }).click();
   await page.locator('#entry-昨天').fill('补交上周未完成的月报');
@@ -137,6 +137,10 @@ async function completeFiveSteps(page) {
   await page.locator('#entry-后天').fill('制定团队能力建设季度规划');
   await page.getByRole('button', { name: /AI 拆解为任务/ }).click();
   await expect(page.locator('.panel-h')).toHaveText('AI 拆解确认');
+}
+
+async function completeFiveSteps(page) {
+  await openAiConfirmation(page);
   await page.getByRole('button', { name: 'SMART 校验' }).click();
   await expect(page.locator('#panel').getByText('全部任务通过 SMART 校验')).toBeVisible();
   await page.getByRole('button', { name: /时间分布诊断/ }).click();
@@ -149,6 +153,36 @@ async function completeFiveSteps(page) {
 
 test.beforeEach(async ({ page }) => {
   await installMocks(page);
+});
+
+test('AI 拆解确认用日历选择日期并保留可选时间', async ({ page }) => {
+  let smartPayload = null;
+  page.on('request', request => {
+    if (request.url().endsWith('/api/time-management/tasks/smart-check')) {
+      smartPayload = request.postDataJSON();
+    }
+  });
+
+  await openAiConfirmation(page);
+
+  const firstRow = page.locator('[data-task-row="task-y"]');
+  const date = firstRow.locator('[data-task-field="dueDate"]');
+  const time = firstRow.locator('[data-task-field="dueTime"]');
+
+  await expect(date).toHaveAttribute('type', 'date');
+  await expect(time).toHaveAttribute('type', 'time');
+  await expect(date).toHaveValue('2026-07-22');
+  await expect(time).toHaveValue('18:00');
+
+  await date.fill('2026-07-25');
+  await time.fill('');
+  await page.getByRole('button', { name: 'SMART 校验' }).click();
+  expect(smartPayload.tasks[0].due).toBe('2026-07-25');
+
+  await date.fill('');
+  await expect(time).toBeDisabled();
+  await page.getByRole('button', { name: 'SMART 校验' }).click();
+  expect(smartPayload.tasks[0].due).toBe('待确认');
 });
 
 test('新版参考界面完整贯穿五步后端流程', async ({ page }) => {

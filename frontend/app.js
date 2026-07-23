@@ -81,6 +81,23 @@ function escapeHtml(value) {
   })[character]);
 }
 
+const DUE_VALUE_PATTERN = /^(\d{4}-\d{2}-\d{2})(?:[ T](\d{2}:\d{2}))?$/;
+
+function splitDueValue(value) {
+  const match = DUE_VALUE_PATTERN.exec(String(value || '').trim());
+  return match
+    ? { date: match[1], time: match[2] || '' }
+    : { date: '', time: '' };
+}
+
+function combineDueValue(currentValue, field, value) {
+  const current = splitDueValue(currentValue);
+  const date = field === 'dueDate' ? value : current.date;
+  const time = field === 'dueTime' ? value : current.time;
+  if (!date) return '待确认';
+  return time ? `${date} ${time}` : date;
+}
+
 function localDateIso(date = new Date()) {
   const year = date.getFullYear();
   const month = String(date.getMonth() + 1).padStart(2, '0');
@@ -314,10 +331,11 @@ function taskEditRow(task) {
   const category = categoryForTask(task);
   const hours = parseEstimatedHours(task.est);
   const priority = priorityForTask(task);
+  const due = splitDueValue(task.due);
   return `<div class="trow g-edit ${fields.size ? 'miss' : ''}" data-task-row="${escapeHtml(task.id)}">
     <div><span class="mobile-label">任务</span><input data-task-id="${escapeHtml(task.id)}" data-task-field="name" value="${escapeHtml(task.name)}" class="${fields.has('name') ? 'miss' : ''}" aria-label="任务描述"></div>
     <div><span class="mobile-label">类别</span><select data-task-id="${escapeHtml(task.id)}" data-task-field="category" aria-label="所属类别">${CATEGORY_KEYS.map(key => `<option value="${key}" ${category === key ? 'selected' : ''}>${key}</option>`).join('')}</select></div>
-    <div><span class="mobile-label">截止时间</span><input data-task-id="${escapeHtml(task.id)}" data-task-field="due" value="${escapeHtml(task.due === '待确认' ? '' : task.due)}" placeholder="YYYY-MM-DD" class="${fields.has('due') ? 'miss' : ''}" aria-label="截止时间"></div>
+    <div><span class="mobile-label">截止时间</span><div class="due-inputs"><input type="date" data-task-id="${escapeHtml(task.id)}" data-task-field="dueDate" value="${escapeHtml(due.date)}" class="${fields.has('due') ? 'miss' : ''}" aria-label="截止日期"><input type="time" data-task-id="${escapeHtml(task.id)}" data-task-field="dueTime" value="${escapeHtml(due.time)}" aria-label="截止时间（可选）" ${due.date ? '' : 'disabled'}></div></div>
     <div><span class="mobile-label">预估时长</span><input type="number" step="0.25" min="0" data-task-id="${escapeHtml(task.id)}" data-task-field="est" value="${Number.isFinite(hours) ? hours : ''}" placeholder="小时" class="${fields.has('est') ? 'miss' : ''}" aria-label="预估时长"></div>
     <div><span class="mobile-label">轻重缓急</span><select data-task-id="${escapeHtml(task.id)}" data-task-field="priority" class="${fields.has('priority') ? 'miss' : ''}" aria-label="轻重缓急"><option value="">未选</option>${Object.entries(PRIORITIES).map(([key, value]) => `<option value="${key}" ${priority === key ? 'selected' : ''}>${value.label}</option>`).join('')}</select></div>
     <button class="del" data-action="delete-task" data-task-id="${escapeHtml(task.id)}" aria-label="删除任务">×</button>
@@ -963,7 +981,9 @@ function updateTask(taskId, field, value) {
   if (!task) return;
   if (field === 'name') task.name = value.trim();
   else if (field === 'category') task.source = CATS[value]?.source || '今天';
-  else if (field === 'due') task.due = value.trim() || '待确认';
+  else if (field === 'dueDate' || field === 'dueTime') {
+    task.due = combineDueValue(task.due, field, value);
+  }
   else if (field === 'est') task.est = normalizeEstimate(value);
   else if (field === 'priority') {
     const priority = PRIORITIES[value];
