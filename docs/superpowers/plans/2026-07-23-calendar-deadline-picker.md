@@ -30,7 +30,7 @@ No dependency, server API, migration, or database file changes are required.
 - Modify: `frontend/app.js:961-977`
 - Modify: `frontend/index.html:128-136`
 
-- [ ] **Step 1: Write the failing AI confirmation test**
+- [x] **Step 1: Write the failing AI confirmation test**
 
 Change the first mocked task deadline so existing date-time data is covered:
 
@@ -92,7 +92,7 @@ test('AI 拆解确认用日历选择日期并保留可选时间', async ({ page 
 });
 ```
 
-- [ ] **Step 2: Run the focused test and verify it fails**
+- [x] **Step 2: Run the focused test and verify it fails**
 
 Run:
 
@@ -102,7 +102,7 @@ npx playwright test tests/reference-five-step.spec.js -g "AI 拆解确认用日�
 
 Expected: FAIL because `[data-task-field="dueDate"]` and `[data-task-field="dueTime"]` do not exist.
 
-- [ ] **Step 3: Add deadline parsing and combining helpers**
+- [x] **Step 3: Add deadline parsing and combining helpers**
 
 Add near the other top-level utility functions in `frontend/app.js`:
 
@@ -127,7 +127,7 @@ function combineDueValue(currentValue, field, value) {
 
 This accepts the two existing persisted forms, treats `待确认` as empty controls, and never creates a time-only deadline.
 
-- [ ] **Step 4: Render native inputs in AI confirmation**
+- [x] **Step 4: Render native inputs in AI confirmation**
 
 At the start of `taskEditRow`, derive the parts:
 
@@ -169,7 +169,7 @@ else if (field === 'dueDate' || field === 'dueTime') {
 
 Remove the obsolete `field === 'due'` branch after both render sites have been converted.
 
-- [ ] **Step 5: Add desktop and mobile layout rules**
+- [x] **Step 5: Add desktop and mobile layout rules**
 
 In `frontend/index.html`, update the grid widths and add:
 
@@ -186,7 +186,7 @@ Inside the existing narrow-screen media query add:
 .due-inputs{grid-template-columns:1fr}
 ```
 
-- [ ] **Step 6: Run the focused test and AI workflow regression**
+- [x] **Step 6: Run the focused test and AI workflow regression**
 
 Run:
 
@@ -196,7 +196,7 @@ npx playwright test tests/reference-five-step.spec.js
 
 Expected: all tests in `reference-five-step.spec.js` PASS, including the new date/time test and the existing 375px overflow test.
 
-- [ ] **Step 7: Commit Task 1**
+- [x] **Step 7: Commit Task 1**
 
 ```powershell
 git add frontend/app.js frontend/index.html tests/reference-five-step.spec.js
@@ -213,7 +213,7 @@ Expected: the commit contains only the three listed files.
 - Modify: `frontend/app.js:714-729`
 - Modify: `frontend/app.js:1361-1377`
 
-- [ ] **Step 1: Write the failing daily tracking assertions**
+- [x] **Step 1: Write the failing daily tracking assertions**
 
 In the existing test `旧历史入口打开今天清单并自动保存编辑和删除`, use concrete persisted deadlines:
 
@@ -274,7 +274,7 @@ await expect.poll(() => savedPayload?.tasks?.[0]?.due)
   .toBe('待确认');
 ```
 
-- [ ] **Step 2: Run the focused daily test and verify it fails**
+- [x] **Step 2: Run the focused daily test and verify it fails**
 
 Run:
 
@@ -284,7 +284,7 @@ npx playwright test tests/reference-auth-history.spec.js -g "旧历史入口打�
 
 Expected: FAIL because the daily date/time selectors do not exist.
 
-- [ ] **Step 3: Render daily date and optional time inputs**
+- [x] **Step 3: Render daily date and optional time inputs**
 
 At the start of `dailyTaskRow`, derive:
 
@@ -315,7 +315,7 @@ Replace the daily free-text deadline input with:
 </div>
 ```
 
-- [ ] **Step 4: Route daily date/time changes through autosave**
+- [x] **Step 4: Route daily date/time changes through autosave**
 
 Update `updateDailyTask`:
 
@@ -339,7 +339,7 @@ if (dailyDueTaskId && dailyDuePart) {
 
 The date/time inputs use `change`, not the task-name `input` path, so a completed picker choice causes one state update and one autosave schedule. Re-rendering immediately disables and clears the time control when the date becomes empty.
 
-- [ ] **Step 5: Run the focused daily test**
+- [x] **Step 5: Run the focused daily test**
 
 Run:
 
@@ -355,7 +355,7 @@ Expected: PASS, with saved values observed in this order:
 待确认
 ```
 
-- [ ] **Step 6: Run all daily/history UI tests**
+- [x] **Step 6: Run all daily/history UI tests**
 
 Run:
 
@@ -365,7 +365,7 @@ npx playwright test tests/reference-auth-history.spec.js
 
 Expected: all tests in `reference-auth-history.spec.js` PASS, including autosave conflict protection and mobile navigation.
 
-- [ ] **Step 7: Commit Task 2**
+- [x] **Step 7: Commit Task 2**
 
 ```powershell
 git add frontend/app.js tests/reference-auth-history.spec.js
@@ -379,7 +379,7 @@ Expected: the commit contains only the two listed files.
 **Files:**
 - Modify: `docs/superpowers/plans/2026-07-23-calendar-deadline-picker.md`
 
-- [ ] **Step 1: Run server regression tests**
+- [x] **Step 1: Run server regression tests**
 
 Run:
 
@@ -389,7 +389,7 @@ npm run test:server
 
 Expected: all Node server tests PASS. The exact count may grow over time; zero failures is the acceptance condition.
 
-- [ ] **Step 2: Run the complete Playwright suite**
+- [x] **Step 2: Run the complete Playwright suite**
 
 Run:
 
@@ -399,7 +399,7 @@ npm run test:e2e
 
 Expected: all Playwright tests PASS with zero failures.
 
-- [ ] **Step 3: Inspect the final diff and dependency boundary**
+- [x] **Step 3: Inspect the final diff and dependency boundary**
 
 Run:
 
@@ -415,11 +415,11 @@ Expected:
 - `package.json` and `package-lock.json` have no changes.
 - Existing user changes to `.gitignore` and `tests/manual-test-input-template.md` remain untouched.
 
-- [ ] **Step 4: Update this plan with verification evidence**
+- [x] **Step 4: Update this plan with verification evidence**
 
 Check all completed boxes and append the actual server-test and Playwright results under a `## Verification` section. Do not claim tests passed unless their current command output shows zero failures.
 
-- [ ] **Step 5: Commit the completed plan**
+- [x] **Step 5: Commit the completed plan**
 
 ```powershell
 git add -f docs/superpowers/plans/2026-07-23-calendar-deadline-picker.md
@@ -437,3 +437,19 @@ Dependencies unchanged: skipping npm ci
 ```
 
 The service still needs a restart and both health checks must return `{"status":"ok"}`.
+
+## Verification
+
+Verified on 2026-07-23:
+
+- AI confirmation RED: failed because `dueDate` did not exist.
+- AI confirmation focused GREEN: 1 passed, 0 failed.
+- `tests/reference-five-step.spec.js`: 5 passed, 0 failed.
+- Daily tracking RED: failed because `data-daily-due-part="dueDate"` did not exist.
+- Daily tracking focused GREEN: 1 passed, 0 failed.
+- `tests/reference-auth-history.spec.js`: 4 passed, 0 failed.
+- Complete Playwright suite: 9 passed, 0 failed.
+- Server suite on the local Node 24.15.0 environment: 229 passed, 1 failed.
+- The single server failure is the pre-existing runtime assertion that requires Node 20.20.2; the same failure was present in the pre-change baseline and the user approved continuing with it documented.
+- `git diff a62c14e..HEAD -- package.json package-lock.json`: no changes.
+- Existing user changes in `.gitignore` and `tests/manual-test-input-template.md` remained untouched.
