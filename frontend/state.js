@@ -21,6 +21,22 @@ function idleHistorySave() {
   return { status: 'idle', id: null, message: '' };
 }
 
+function emptyDaily() {
+  return {
+    loaded: false,
+    loading: false,
+    trackingDate: '',
+    tasks: [],
+    tracking: {},
+    removedTaskIds: [],
+    revision: 0,
+    updatedAt: null,
+    sourceSummary: { historyCount: 0, taskCount: 0 },
+    saveStatus: 'idle',
+    error: null,
+  };
+}
+
 export const state = {
   authReady: false,
   user: null,
@@ -45,6 +61,7 @@ export const state = {
   tracking: {},
   sessionHistory: [],
   rolledDates: {},
+  daily: emptyDaily(),
 
   historySave: idleHistorySave(),
   historyItems: [],
@@ -125,6 +142,7 @@ export function resetState() {
   state.historyDetail = null;
   state.sessionHistory = [];
   state.rolledDates = {};
+  state.daily = emptyDaily();
 }
 
 // Compatibility exports retained for existing callers while the UI migrates to the five-step names.

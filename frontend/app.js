@@ -3,6 +3,7 @@ import {
   deleteJson,
   getJson,
   postJson,
+  putJson,
   setCsrfToken,
 } from './api.js';
 import {
@@ -65,6 +66,11 @@ const ICONS = Object.freeze({
 });
 
 let operationId = 0;
+let dailyLoadId = 0;
+let dailyChangeVersion = 0;
+let dailySaveTimer = null;
+let dailySaveInFlight = false;
+let dailySaveQueued = false;
 const app = () => document.getElementById('app');
 const topbar = () => document.getElementById('topbar');
 const modalHost = () => document.getElementById('modalHost');
@@ -118,6 +124,10 @@ function normalizeEstimate(value) {
 
 function tracked(taskId) {
   return state.tracking[taskId] || { done: false, doneAt: '' };
+}
+
+function dailyTracked(taskId) {
+  return state.daily.tracking[taskId] || { done: false, doneAt: '' };
 }
 
 function toast(message) {
@@ -183,7 +193,7 @@ function renderLogin() {
   app().innerHTML = `<div class="login-wrap"><section class="login-card">
     <div class="brand-mark" style="width:44px;height:44px;border-radius:12px">${ICONS.clock}</div>
     <div class="login-h">${register ? '注册账号' : '登录'}</div>
-    <div class="login-sub">登录后可保存报告历史；事务草稿和每日跟踪只保留在当前页面会话。</div>
+    <div class="login-sub">登录后可按账号保存报告历史和当天的每日跟踪清单。</div>
     <div class="tabs"><button class="tab ${register ? '' : 'on'}" data-action="auth-login-tab">登录</button><button class="tab ${register ? 'on' : ''}" data-action="auth-register-tab">注册</button></div>
     <form data-auth-form="${register ? 'register' : 'login'}">
       ${authField('用户名', 'username', 'text', 'username', '请输入用户名')}
@@ -405,31 +415,60 @@ function renderWorkspace() {
 }
 
 function dailyTaskRow(task) {
-  const track = tracked(task.id);
+  const track = dailyTracked(task.id);
   const category = categoryForTask(task);
   const hours = parseEstimatedHours(task.est);
   const priority = priorityForTask(task);
-  return `<div class="trow g-daily ${track.done ? 'doneRow' : ''}">
-    <button class="chk ${track.done ? 'on' : ''}" data-action="toggle-done" data-task-id="${escapeHtml(task.id)}" aria-label="${track.done ? '取消完成' : '标记完成'}">${track.done ? '✓' : ''}</button>
-    <div><span class="mobile-label">任务</span><input class="tname ${track.done ? 'done' : ''}" data-task-id="${escapeHtml(task.id)}" data-task-field="name" value="${escapeHtml(task.name)}"></div>
-    <div><span class="mobile-label">类别</span><select data-task-id="${escapeHtml(task.id)}" data-task-field="category">${CATEGORY_KEYS.map(key => `<option value="${key}" ${category === key ? 'selected' : ''}>${key}</option>`).join('')}</select></div>
-    <div><span class="mobile-label">截止时间</span><input data-task-id="${escapeHtml(task.id)}" data-task-field="due" value="${escapeHtml(task.due === '待确认' ? '' : task.due)}" placeholder="YYYY-MM-DD"></div>
-    <div><span class="mobile-label">时长</span><input type="number" step="0.25" min="0" data-task-id="${escapeHtml(task.id)}" data-task-field="est" value="${Number.isFinite(hours) ? hours : ''}"></div>
-    <div><span class="mobile-label">轻重缓急</span><select data-task-id="${escapeHtml(task.id)}" data-task-field="priority"><option value="">未选</option>${Object.entries(PRIORITIES).map(([key, item]) => `<option value="${key}" ${priority === key ? 'selected' : ''}>${item.label}</option>`).join('')}</select></div>
-    <div><span class="mobile-label">完成时间</span><input type="datetime-local" data-track-time="${escapeHtml(task.id)}" value="${escapeHtml(track.doneAt)}" ${track.done ? '' : 'disabled'}></div>
-    <button class="del" data-action="delete-task" data-task-id="${escapeHtml(task.id)}" aria-label="删除任务">×</button>
+  return `<div class="trow g-daily ${track.done ? 'doneRow' : ''}" data-daily-task-id="${escapeHtml(task.id)}">
+    <button class="chk ${track.done ? 'on' : ''}" data-action="toggle-daily-done" data-task-id="${escapeHtml(task.id)}" aria-label="${track.done ? '取消完成' : '标记完成'}">${track.done ? '✓' : ''}</button>
+    <div><span class="mobile-label">任务</span><input class="tname ${track.done ? 'done' : ''}" data-daily-task-id="${escapeHtml(task.id)}" data-daily-task-field="name" value="${escapeHtml(task.name)}"></div>
+    <div><span class="mobile-label">类别</span><select data-daily-task-id="${escapeHtml(task.id)}" data-daily-task-field="category">${CATEGORY_KEYS.map(key => `<option value="${key}" ${category === key ? 'selected' : ''}>${key}</option>`).join('')}</select></div>
+    <div><span class="mobile-label">截止时间</span><input data-daily-task-id="${escapeHtml(task.id)}" data-daily-task-field="due" value="${escapeHtml(task.due === '待确认' ? '' : task.due)}" placeholder="YYYY-MM-DD"></div>
+    <div><span class="mobile-label">时长</span><input type="number" step="0.25" min="0" data-daily-task-id="${escapeHtml(task.id)}" data-daily-task-field="est" value="${Number.isFinite(hours) ? hours : ''}"></div>
+    <div><span class="mobile-label">轻重缓急</span><select data-daily-task-id="${escapeHtml(task.id)}" data-daily-task-field="priority"><option value="">未选</option>${Object.entries(PRIORITIES).map(([key, item]) => `<option value="${key}" ${priority === key ? 'selected' : ''}>${item.label}</option>`).join('')}</select></div>
+    <div><span class="mobile-label">完成时间</span><input type="datetime-local" data-daily-track-time="${escapeHtml(task.id)}" value="${escapeHtml(track.doneAt)}" ${track.done ? '' : 'disabled'}></div>
+    <button class="del" data-action="delete-daily-task" data-task-id="${escapeHtml(task.id)}" aria-label="删除任务">×</button>
   </div>`;
 }
 
+function dailySaveText() {
+  if (state.daily.saveStatus === 'saving') return '正在保存…';
+  if (state.daily.saveStatus === 'saved') return '已自动保存';
+  if (state.daily.saveStatus === 'dirty') return '有未保存更改';
+  if (state.daily.saveStatus === 'failed') {
+    return state.daily.error?.message || '保存失败，请重试';
+  }
+  return state.daily.loaded ? '已加载今日清单' : '';
+}
+
+function dailyFailureRequiresReload() {
+  return ['DAILY_TRACKING_CONFLICT', 'DAILY_TRACKING_DATE_CHANGED']
+    .includes(state.daily.error?.code);
+}
+
 function renderDaily() {
-  const list = state.tasks.filter(task => ['昨天', '今天'].includes(categoryForTask(task)));
-  const doneCount = list.filter(task => tracked(task.id).done).length;
-  const undoneToday = list.filter(task => categoryForTask(task) === '今天' && !tracked(task.id).done).length;
-  app().innerHTML = `<div class="phead"><div class="ptitle">每日跟踪</div></div><div class="pdesc">登记完成情况并记录实际完成时间；这些记录只保留在当前页面会话。</div>
-    <div class="panelbox"><div class="pb-h"><span class="n">✓</span>今日登记 · ${TODAY}</div><div class="pb-d">已完成 ${doneCount} / ${list.length} 项。勾选后自动填入本地完成时间，可手动修正。</div>
-      <div style="margin-bottom:12px"><button class="btn btn-ghost btn-sm" data-action="open-add-task" data-default-category="今天">+ 手动添加任务</button></div>
-      <div class="tgrid"><div class="trow hd g-daily"><div></div><div>任务</div><div>类别</div><div>截止时间</div><div>时长</div><div>轻重缓急</div><div>完成时间</div><div></div></div>${list.length ? list.map(dailyTaskRow).join('') : '<div class="trow"><div style="color:var(--muted);font-size:12px">暂无“今天/昨天”类任务。</div></div>'}</div>
-      <div class="roll-box"><b>滚动规则：</b>今日未完成 ${undoneToday} 项。结束当日后，已完成项进入本次会话历史；未完成的“今天”任务滚入“昨天”。<div style="margin-top:11px"><button class="btn btn-primary btn-sm" data-action="rollover">结束当日并滚动</button></div></div>
+  if (state.daily.loading && !state.daily.loaded) {
+    app().innerHTML = `<div class="phead"><div class="ptitle">每日跟踪</div></div>
+      <div class="history-loading">正在加载今天的每日清单…</div>`;
+    return;
+  }
+  if (state.daily.error && !state.daily.loaded) {
+    app().innerHTML = `<div class="phead"><div class="ptitle">每日跟踪</div></div>
+      <div class="history-error">${escapeHtml(state.daily.error.message || '每日跟踪加载失败')}</div>
+      <button class="btn btn-ghost btn-sm" data-action="reload-daily">重新加载</button>`;
+    return;
+  }
+  const list = state.daily.tasks;
+  const doneCount = list.filter(task => dailyTracked(task.id).done).length;
+  const summary = state.daily.sourceSummary;
+  const statusClass = state.daily.saveStatus === 'failed' ? 'failed' : state.daily.saveStatus;
+  const failureAction = dailyFailureRequiresReload()
+    ? '<button class="btn btn-ghost btn-sm" data-action="reload-daily">重新加载今天</button>'
+    : '<button class="btn btn-ghost btn-sm" data-action="retry-daily-save">重试</button>';
+  app().innerHTML = `<div class="phead"><div class="ptitle">每日跟踪</div><div id="daily-save-status" class="daily-save-status ${escapeHtml(statusClass)}" role="status" aria-live="polite">${escapeHtml(dailySaveText())}${state.daily.saveStatus === 'failed' ? ` ${failureAction}` : ''}</div></div>
+    <div class="pdesc">已汇总今天生成的 ${summary.historyCount} 条记录，共 ${summary.taskCount} 项任务。无论从哪条历史进入，这里始终是 ${escapeHtml(state.daily.trackingDate || TODAY)} 的账号清单。</div>
+    <div class="panelbox"><div class="pb-h"><span class="n">✓</span>今日登记 · ${escapeHtml(state.daily.trackingDate || TODAY)}</div><div class="pb-d">已完成 ${doneCount} / ${list.length} 项。修改、完成或删除后将自动保存。</div>
+      <div class="tgrid"><div class="trow hd g-daily"><div></div><div>任务</div><div>类别</div><div>截止时间</div><div>时长</div><div>轻重缓急</div><div>完成时间</div><div></div></div>${list.length ? list.map(dailyTaskRow).join('') : '<div class="history-empty">今天还没有生成任何历史任务，请先完成五步梳理流程。</div>'}</div>
     </div>`;
 }
 
@@ -467,7 +506,7 @@ function renderHistoryDetail() {
       <section class="history-section"><h2>任务清单</h2><div class="history-tasks">${item.tasks.map(task => `<article><h3>${escapeHtml(task.name)}</h3><p>${escapeHtml(categoryForTask(task))} · ${escapeHtml(task.importance || '待确认')}/${escapeHtml(task.urgency || '待确认')} · 截止 ${escapeHtml(task.due || '待确认')} · ${escapeHtml(task.est || '')}</p></article>`).join('')}</div></section>
       <section class="history-section"><h2>轻重缓急矩阵</h2><div class="history-quadrants">${item.matrix.quadrants.map(quadrant => `<div><strong>${escapeHtml(quadrant.name)} · ${quadrant.energyPercent}%</strong><p>${quadrant.taskIds.map(id => escapeHtml(taskById.get(id)?.name || '')).filter(Boolean).join('、') || '暂无任务'}</p></div>`).join('')}</div></section>
       <section class="history-section"><h2>优化报告</h2><div id="history-report-markdown" class="markdown-body"></div></section>
-    </div><div class="history-actions" style="justify-content:flex-end;margin-top:14px"><button class="btn btn-ghost btn-sm" data-action="history-copy">复制历史报告</button><button class="btn btn-danger btn-sm" data-action="history-delete" data-history-id="${escapeHtml(item.id)}">删除历史</button></div>`;
+    </div><div class="history-actions" style="justify-content:flex-end;margin-top:14px"><button class="btn btn-primary btn-sm" data-action="open-daily">进入每日跟踪</button><button class="btn btn-ghost btn-sm" data-action="history-copy">复制历史报告</button><button class="btn btn-danger btn-sm" data-action="history-delete" data-history-id="${escapeHtml(item.id)}">删除历史</button></div>`;
   hydrateHistoryReport();
 }
 
@@ -503,6 +542,224 @@ function render() {
 function renderAtTop() {
   render();
   window.scrollTo({ top: 0, left: 0, behavior: 'auto' });
+}
+
+function validateDailyPayload(payload) {
+  if (
+    !payload
+    || typeof payload.trackingDate !== 'string'
+    || !Array.isArray(payload.tasks)
+    || !payload.tracking
+    || typeof payload.tracking !== 'object'
+    || !Array.isArray(payload.removedTaskIds)
+    || !Number.isInteger(payload.revision)
+    || !payload.sourceSummary
+  ) {
+    throw new Error('每日跟踪返回结构异常，请重试。');
+  }
+  return payload;
+}
+
+function applyDailyPayload(payload, saveStatus = 'idle') {
+  const value = validateDailyPayload(payload);
+  state.daily = {
+    loaded: true,
+    loading: false,
+    trackingDate: value.trackingDate,
+    tasks: value.tasks,
+    tracking: value.tracking,
+    removedTaskIds: value.removedTaskIds,
+    revision: value.revision,
+    updatedAt: value.updatedAt || null,
+    sourceSummary: value.sourceSummary,
+    saveStatus,
+    error: null,
+  };
+}
+
+function updateDailySaveStatus() {
+  const element = document.getElementById('daily-save-status');
+  if (!element) return;
+  element.className = `daily-save-status ${state.daily.saveStatus}`;
+  element.textContent = dailySaveText();
+  if (state.daily.saveStatus === 'failed') {
+    const button = document.createElement('button');
+    button.className = 'btn btn-ghost btn-sm';
+    button.dataset.action = dailyFailureRequiresReload()
+      ? 'reload-daily'
+      : 'retry-daily-save';
+    button.textContent = dailyFailureRequiresReload() ? '重新加载今天' : '重试';
+    element.append(' ', button);
+  }
+}
+
+function hasUnsafeDailyChanges() {
+  return state.daily.loaded
+    && ['dirty', 'saving', 'failed'].includes(state.daily.saveStatus);
+}
+
+function confirmDailyLeave(nextScreen) {
+  if (
+    state.screen !== 'daily'
+    || nextScreen === 'daily'
+    || !hasUnsafeDailyChanges()
+  ) {
+    return true;
+  }
+  return window.confirm('每日跟踪仍有未保存更改，确定离开吗？');
+}
+
+function dailySnapshot() {
+  return {
+    trackingDate: state.daily.trackingDate,
+    tasks: state.daily.tasks,
+    tracking: state.daily.tracking,
+    removedTaskIds: state.daily.removedTaskIds,
+    revision: state.daily.revision,
+  };
+}
+
+function scheduleDailySave(delay = 800) {
+  clearTimeout(dailySaveTimer);
+  state.daily.saveStatus = 'dirty';
+  updateDailySaveStatus();
+  if (dailySaveInFlight) {
+    dailySaveQueued = true;
+    return;
+  }
+  dailySaveTimer = setTimeout(() => saveDaily(), delay);
+}
+
+async function saveDaily() {
+  clearTimeout(dailySaveTimer);
+  dailySaveTimer = null;
+  if (!state.daily.loaded || !state.daily.trackingDate) return;
+  if (dailySaveInFlight) {
+    dailySaveQueued = true;
+    return;
+  }
+  dailySaveInFlight = true;
+  dailySaveQueued = false;
+  const version = dailyChangeVersion;
+  const snapshot = JSON.parse(JSON.stringify(dailySnapshot()));
+  state.daily.saveStatus = 'saving';
+  updateDailySaveStatus();
+  try {
+    const result = validateDailyPayload(await putJson(
+      '/api/time-management/daily-tracking/today',
+      snapshot,
+    ));
+    if (version === dailyChangeVersion) {
+      applyDailyPayload(result, 'saved');
+      if (state.screen === 'daily') render();
+    } else {
+      state.daily.revision = result.revision;
+      state.daily.updatedAt = result.updatedAt || null;
+      state.daily.saveStatus = 'dirty';
+      updateDailySaveStatus();
+      dailySaveQueued = true;
+    }
+  } catch (error) {
+    state.daily.saveStatus = 'failed';
+    state.daily.error = error;
+    updateDailySaveStatus();
+    toast(error.message || '每日跟踪保存失败，请重试。');
+  } finally {
+    dailySaveInFlight = false;
+    if (dailySaveQueued && state.daily.saveStatus !== 'failed') {
+      dailySaveQueued = false;
+      scheduleDailySave(0);
+    }
+  }
+}
+
+async function loadDaily() {
+  const id = ++dailyLoadId;
+  clearTimeout(dailySaveTimer);
+  state.daily.loading = true;
+  state.daily.error = null;
+  state.daily.saveStatus = 'idle';
+  render();
+  try {
+    const result = validateDailyPayload(await getJson(
+      '/api/time-management/daily-tracking/today',
+    ));
+    if (id !== dailyLoadId || state.screen !== 'daily') return;
+    dailyChangeVersion = 0;
+    applyDailyPayload(result);
+    render();
+    if (result.hasUnpersistedMerge) scheduleDailySave(0);
+  } catch (error) {
+    if (id !== dailyLoadId || state.screen !== 'daily') return;
+    state.daily.loading = false;
+    state.daily.loaded = false;
+    state.daily.error = error;
+    state.daily.saveStatus = 'failed';
+    render();
+  }
+}
+
+function reloadDaily() {
+  if (
+    hasUnsafeDailyChanges()
+    && !window.confirm('重新加载将放弃当前未保存更改，确定继续吗？')
+  ) {
+    return;
+  }
+  state.daily.saveStatus = 'idle';
+  state.daily.error = null;
+  loadDaily();
+}
+
+function updateDailyTask(taskId, field, value) {
+  const task = state.daily.tasks.find(item => item.id === taskId);
+  if (!task) return;
+  if (field === 'name') task.name = value;
+  else if (field === 'category') task.source = CATS[value]?.source || '今天';
+  else if (field === 'due') task.due = value.trim() || '待确认';
+  else if (field === 'est') task.est = normalizeEstimate(value);
+  else if (field === 'priority') {
+    const priority = PRIORITIES[value];
+    task.importance = priority?.importance ?? null;
+    task.urgency = priority?.urgency ?? null;
+    task.classificationSource = priority ? 'manual' : 'unclassified';
+  }
+  dailyChangeVersion += 1;
+  scheduleDailySave();
+}
+
+function toggleDailyDone(taskId) {
+  const current = dailyTracked(taskId);
+  state.daily.tracking[taskId] = current.done
+    ? { done: false, doneAt: '' }
+    : { done: true, doneAt: current.doneAt || localDateTimeValue() };
+  dailyChangeVersion += 1;
+  render();
+  scheduleDailySave();
+}
+
+function updateDailyDoneAt(taskId, value) {
+  if (!state.daily.tasks.some(task => task.id === taskId)) return;
+  state.daily.tracking[taskId] = { done: true, doneAt: value };
+  dailyChangeVersion += 1;
+  scheduleDailySave();
+}
+
+function deleteDailyTask(taskId) {
+  const task = state.daily.tasks.find(item => item.id === taskId);
+  if (!task || !window.confirm(`确定从今日清单删除“${task.name}”吗？`)) return;
+  state.daily.tasks = state.daily.tasks.filter(item => item.id !== taskId);
+  delete state.daily.tracking[taskId];
+  if (!state.daily.removedTaskIds.includes(taskId)) {
+    state.daily.removedTaskIds.push(taskId);
+  }
+  state.daily.sourceSummary = {
+    ...state.daily.sourceSummary,
+    taskCount: state.daily.tasks.length,
+  };
+  dailyChangeVersion += 1;
+  render();
+  scheduleDailySave();
 }
 
 function hydrateReport() {
@@ -928,6 +1185,9 @@ async function deleteHistory(id) {
 }
 
 function navigate(screen) {
+  if (screen === state.screen && screen === 'daily') return;
+  if (!confirmDailyLeave(screen)) return;
+  if (screen !== 'daily') dailyLoadId += 1;
   cancelPending();
   state.error = null;
   if (screen === 'workspace') {
@@ -938,6 +1198,11 @@ function navigate(screen) {
     state.historyDetail = null;
     render();
     loadHistory();
+    return;
+  } else if (screen === 'daily') {
+    state.screen = 'daily';
+    renderAtTop();
+    loadDaily();
     return;
   } else state.screen = screen;
   renderAtTop();
@@ -1051,6 +1316,7 @@ async function submitRecovery(form) {
 }
 
 async function logout() {
+  if (!confirmDailyLeave('login')) return;
   if (state.pending) return;
   cancelPending();
   state.pending = 'auth';
@@ -1080,6 +1346,12 @@ document.addEventListener('submit', event => {
 });
 
 document.addEventListener('input', event => {
+  const dailyTaskId = event.target.dataset.dailyTaskId;
+  const dailyTaskField = event.target.dataset.dailyTaskField;
+  if (dailyTaskId && dailyTaskField) {
+    updateDailyTask(dailyTaskId, dailyTaskField, event.target.value);
+    return;
+  }
   const key = event.target.dataset.entry;
   if (!key) return;
   state.entries[key] = event.target.value;
@@ -1096,6 +1368,11 @@ document.addEventListener('change', event => {
   const trackingId = event.target.dataset.trackTime;
   if (trackingId) {
     state.tracking[trackingId] = { done: true, doneAt: event.target.value };
+    return;
+  }
+  const dailyTrackingId = event.target.dataset.dailyTrackTime;
+  if (dailyTrackingId) {
+    updateDailyDoneAt(dailyTrackingId, event.target.value);
   }
 });
 
@@ -1123,13 +1400,18 @@ document.addEventListener('click', event => {
   else if (action === 'save-task') saveTask();
   else if (action === 'delete-task') deleteTask(element.dataset.taskId);
   else if (action === 'toggle-done') toggleDone(element.dataset.taskId);
+  else if (action === 'delete-daily-task') deleteDailyTask(element.dataset.taskId);
+  else if (action === 'toggle-daily-done') toggleDailyDone(element.dataset.taskId);
+  else if (action === 'retry-daily-save') saveDaily();
+  else if (action === 'reload-daily') reloadDaily();
+  else if (action === 'open-daily') navigate('daily');
   else if (action === 'rollover') rolloverDay();
   else if (action === 'copy-report') copyText(document.querySelector('.panel-body')?.innerText.trim(), '已复制报告');
   else if (action === 'history-retry') saveCurrentHistory();
   else if (action === 'history-more') loadHistory({ append: true });
   else if (action === 'history-detail') openHistoryDetail(element.dataset.historyId);
   else if (action === 'history-delete') deleteHistory(element.dataset.historyId);
-  else if (action === 'history-back') { state.historyDetail = null; state.screen = 'history'; render(); }
+  else if (action === 'history-back') { state.historyDetail = null; navigate('history'); }
   else if (action === 'history-copy') copyText(document.querySelector('.history-detail-content')?.innerText.trim(), '已复制历史报告');
   else if (action === 'auth-login-tab') { state.authMode = 'login'; state.authError = null; render(); }
   else if (action === 'auth-register-tab') { state.authMode = 'register'; state.authError = null; render(); }
@@ -1146,6 +1428,12 @@ document.addEventListener('keydown', event => {
     event.preventDefault();
     navigate(state.user ? 'home' : 'login');
   }
+});
+
+window.addEventListener('beforeunload', event => {
+  if (!hasUnsafeDailyChanges()) return;
+  event.preventDefault();
+  event.returnValue = '';
 });
 
 render();

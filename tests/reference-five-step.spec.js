@@ -108,6 +108,24 @@ async function installMocks(page) {
       body: JSON.stringify({ id: 'history-1', ...body, createdAt: '2026-07-22T12:00:00.000Z', updatedAt: '2026-07-22T12:00:00.000Z' }),
     });
   });
+  await page.route('**/api/time-management/daily-tracking/today', async route => {
+    const request = route.request();
+    const body = request.method() === 'PUT' ? request.postDataJSON() : null;
+    return route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        trackingDate: '2026-07-23',
+        tasks: body?.tasks || TASKS,
+        tracking: body?.tracking || {},
+        removedTaskIds: body?.removedTaskIds || [],
+        revision: request.method() === 'PUT' ? 1 : 0,
+        updatedAt: request.method() === 'PUT' ? '2026-07-23T02:00:00.000Z' : null,
+        sourceSummary: { historyCount: 1, taskCount: (body?.tasks || TASKS).length },
+        hasUnpersistedMerge: false,
+      }),
+    });
+  });
 }
 
 async function completeFiveSteps(page) {
@@ -170,7 +188,7 @@ test('工作台、每日跟踪和历史记录使用参考稿导航', async ({ pa
   await completeFiveSteps(page);
   await page.locator('.tnav').filter({ hasText: /^每日跟踪$/ }).click();
   await expect(page.locator('.ptitle')).toHaveText('每日跟踪');
-  await expect(page.locator('.g-daily')).toHaveCount(3);
+  await expect(page.locator('.g-daily')).toHaveCount(5);
   await page.locator('.tnav').filter({ hasText: /^工作台$/ }).click();
   await expect(page.locator('.ptitle')).toHaveText('工作台');
   await expect(page.locator('.hcard')).toHaveCount(4);

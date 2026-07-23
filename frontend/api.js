@@ -53,6 +53,10 @@ export function postJson(path, body) {
   return requestJson(path, { method: 'POST', body, cancelPrevious: true });
 }
 
+export function putJson(path, body) {
+  return requestJson(path, { method: 'PUT', body });
+}
+
 export function deleteJson(path) {
   return requestJson(path, { method: 'DELETE', cancelPrevious: true });
 }
