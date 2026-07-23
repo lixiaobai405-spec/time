@@ -1,7 +1,8 @@
 const migration001 = require('./migrations/001-auth-history');
 const migration002 = require('./migrations/002-case-sensitive-usernames');
+const migration003 = require('./migrations/003-daily-tracking');
 
-const MIGRATIONS = Object.freeze([migration001, migration002]);
+const MIGRATIONS = Object.freeze([migration001, migration002, migration003]);
 
 function validateMigrations(migrations) {
   const versions = new Set();

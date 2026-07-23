@@ -34,10 +34,10 @@ test('openDatabase enables required pragmas and applies all migrations once', as
   assert.deepEqual(
     (await fixture.database.all('SELECT version FROM schema_migrations ORDER BY version'))
       .map((row) => row.version),
-    [1, 2],
+    [1, 2, 3],
   );
 
-  for (const table of ['users', 'sessions', 'time_management_runs']) {
+  for (const table of ['users', 'sessions', 'time_management_runs', 'daily_tracking_days']) {
     const row = await fixture.database.get(
       "SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?",
       [table],
@@ -49,9 +49,51 @@ test('openDatabase enables required pragmas and applies all migrations once', as
   const reopened = await openDatabase({ filename: fixture.filename });
   assert.equal(
     (await reopened.get('SELECT COUNT(*) AS count FROM schema_migrations')).count,
-    2,
+    3,
   );
   await reopened.close();
+});
+
+test('daily tracking migration enforces one checklist per user and date', async (t) => {
+  const { database } = await createTestDatabase(t);
+  const timestamp = '2026-07-23T00:00:00.000Z';
+  await database.run(
+    `INSERT INTO users (
+      id, username, normalized_username, password_hash, recovery_code_hash,
+      recovery_code_version, created_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    ['user-daily', 'DailyUser', 'DailyUser', 'password-hash', 'recovery-hash', 1,
+      timestamp, timestamp],
+  );
+  const values = [
+    'daily-1',
+    'user-daily',
+    '2026-07-23',
+    '[]',
+    '{}',
+    '[]',
+    1,
+    timestamp,
+    timestamp,
+  ];
+  await database.run(
+    `INSERT INTO daily_tracking_days (
+      id, user_id, tracking_date, tasks_json, tracking_json,
+      removed_task_ids_json, revision, created_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    values,
+  );
+
+  await assert.rejects(
+    database.run(
+      `INSERT INTO daily_tracking_days (
+        id, user_id, tracking_date, tasks_json, tracking_json,
+        removed_task_ids_json, revision, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ['daily-2', ...values.slice(1)],
+    ),
+    /UNIQUE constraint failed/,
+  );
 });
 
 test('migration 2 preserves the original case of existing usernames', async (t) => {
@@ -76,7 +118,7 @@ test('migration 2 preserves the original case of existing usernames', async (t) 
     assert.deepEqual(
       (await migrated.all('SELECT version FROM schema_migrations ORDER BY version'))
         .map((row) => row.version),
-      [1, 2],
+      [1, 2, 3],
     );
   } finally {
     await migrated.close();
