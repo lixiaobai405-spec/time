@@ -110,6 +110,41 @@ test('模型缺少截止时间时标准化为待确认', async () => {
   assert.match(result.tasks[0].id, /^[0-9a-f-]{36}$/i);
 });
 
+test('模型相对截止时间转换为具体上海日期且模糊期限变为待确认', async () => {
+  const now = () => new Date('2026-07-20T04:00:00.000Z');
+  const result = await extractTasks({
+    goals: goals({
+      今天: '今天提交方案，另有事项尽快处理',
+      明天: '明天提交验收清单',
+      后天: '后天完成复盘',
+    }),
+    now,
+    modelClient: queuedModel([{ tasks: [
+      modelTask({ name: '提交方案', due: '今天18:00' }),
+      modelTask({ name: '处理模糊事项', due: '尽快' }),
+      modelTask({
+        name: '提交验收清单',
+        source: '短期目标',
+        due: '明天',
+        acceptanceCriteria: ['清单已提交'],
+      }),
+      modelTask({
+        name: '完成复盘',
+        source: '中长期',
+        due: '后天 09:30',
+        acceptanceCriteria: ['复盘已记录'],
+      }),
+    ] }]),
+  });
+
+  assert.deepEqual(result.tasks.map(item => item.due), [
+    '2026-07-20 18:00',
+    '待确认',
+    '2026-07-21',
+    '2026-07-22 09:30',
+  ]);
+});
+
 test('任务提取后按期限、来源和压力统一纠偏紧急度', async () => {
   const result = await extractTasks({
     goals: goals({
@@ -131,7 +166,7 @@ test('任务提取后按期限、来源和压力统一纠偏紧急度', async ()
   assert.deepEqual(result.tasks.map(item => item.urgency), [
     '高',
     '低',
-    '中',
+    '低',
     '中',
     '低',
   ]);

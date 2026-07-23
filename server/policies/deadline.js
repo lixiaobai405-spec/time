@@ -1,6 +1,6 @@
 const DEFAULT_TIME_ZONE = 'Asia/Shanghai';
 const EXPLICIT_DUE_PATTERN = /^(\d{4})-(\d{2})-(\d{2})(?:[ T](\d{2}):(\d{2}))?$/;
-const RELATIVE_DUE_PATTERN = /^(今天|今日|明天)(?:\s*([01]?\d|2[0-3]):([0-5]\d)\s*前?)?$/;
+const RELATIVE_DUE_PATTERN = /^(今天|今日|明天|后天)(?:\s*([01]?\d|2[0-3]):([0-5]\d)\s*前?)?$/;
 const URGENCY_SIGNAL = /紧急|立即|马上|尽快|今天必须|今日必须|当天交付|影响当天交付|阻塞/;
 
 function resolveNow(now) {
@@ -69,7 +69,8 @@ function parseRelativeDue(due, context = {}) {
     context.now || Date.now,
     context.timeZone || DEFAULT_TIME_ZONE,
   );
-  const date = addCalendarDays(referenceDate, relativeDay === '明天' ? 1 : 0);
+  const offsets = { 今天: 0, 今日: 0, 明天: 1, 后天: 2 };
+  const date = addCalendarDays(referenceDate, offsets[relativeDay]);
   const time = hourText == null
     ? null
     : `${String(Number(hourText)).padStart(2, '0')}:${minuteText}`;
@@ -82,6 +83,12 @@ function parseRelativeDue(due, context = {}) {
 
 function parseDue(due, context = {}) {
   return parseExplicitDue(due) || parseRelativeDue(due, context);
+}
+
+function normalizeDue(due, context = {}) {
+  const parsed = parseDue(due, context);
+  if (!parsed) return '待确认';
+  return parsed.time ? `${parsed.date} ${parsed.time}` : parsed.date;
 }
 
 function hasUrgencySignal(task, goalText = '') {
@@ -101,8 +108,11 @@ function calendarDayDistance(fromDate, toDate) {
 }
 
 function applyDeadlineUrgency(task, context = {}) {
-  const result = { ...task };
   const parsed = parseDue(task?.due, context);
+  const result = {
+    ...task,
+    due: normalizeDue(task?.due, context),
+  };
   const referenceDate = referenceDateInTimeZone(
     context.now || Date.now,
     context.timeZone || DEFAULT_TIME_ZONE,
@@ -112,7 +122,7 @@ function applyDeadlineUrgency(task, context = {}) {
     return result;
   }
 
-  if (hasUrgencySignal(result, context.goalText)) {
+  if (hasUrgencySignal(task, context.goalText)) {
     result.urgency = '高';
     return result;
   }
@@ -123,14 +133,10 @@ function applyDeadlineUrgency(task, context = {}) {
     return result;
   }
 
-  const dueText = typeof result.due === 'string' ? result.due.trim() : '';
-  const isUnknown = !dueText || dueText === '待确认';
-  if (result.source === '今天' && isUnknown) {
+  if (result.source === '今天') {
     result.urgency = '高';
-  } else if (isUnknown || result.source === '中长期') {
-    result.urgency = '低';
   } else {
-    result.urgency = '中';
+    result.urgency = '低';
   }
   return result;
 }
@@ -138,6 +144,7 @@ function applyDeadlineUrgency(task, context = {}) {
 module.exports = {
   DEFAULT_TIME_ZONE,
   applyDeadlineUrgency,
+  normalizeDue,
   parseDue,
   parseExplicitDue,
   referenceDateInTimeZone,
