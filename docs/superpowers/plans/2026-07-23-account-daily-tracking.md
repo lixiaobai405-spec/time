@@ -363,7 +363,7 @@ Expected: no whitespace errors; only the user's pre-existing `.gitignore` and `t
 
 Confirm every acceptance criterion in `docs/superpowers/specs/2026-07-23-account-daily-tracking-design.md`: account/day uniqueness, same-day aggregation, old-history entry behavior, ID deduplication, autosave persistence, deletion tombstones, new-source append, immutable history, conflict/date errors, security, and non-destructive migration.
 
-- [ ] **Step 6: Push and verify GitHub**
+- [x] **Step 6: Push and verify GitHub**
 
 ```powershell
 git push origin main
