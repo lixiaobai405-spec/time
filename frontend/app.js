@@ -792,14 +792,42 @@ function rolloverDay() {
   toast(`已归档 ${done.length} 项，其余今日任务已滚入“昨天”`);
 }
 
+function copyTextFallback(text) {
+  if (typeof document.execCommand !== 'function') return false;
+  const activeElement = document.activeElement;
+  const textarea = document.createElement('textarea');
+  textarea.value = text;
+  textarea.readOnly = true;
+  textarea.dataset.copyFallback = '';
+  textarea.setAttribute('aria-hidden', 'true');
+  textarea.style.position = 'fixed';
+  textarea.style.left = '-9999px';
+  textarea.style.opacity = '0';
+  document.body.appendChild(textarea);
+  try {
+    textarea.focus();
+    textarea.select();
+    textarea.setSelectionRange(0, textarea.value.length);
+    return document.execCommand('copy');
+  } finally {
+    textarea.remove();
+    if (activeElement instanceof HTMLElement) activeElement.focus({ preventScroll: true });
+  }
+}
+
 async function copyText(text, success) {
   if (!text) return toast('没有可复制内容');
-  try {
-    await navigator.clipboard.writeText(text);
-    toast(success);
-  } catch {
-    toast('复制失败，请手动选择内容');
+  let copied = false;
+  if (typeof navigator.clipboard?.writeText === 'function') {
+    try {
+      await navigator.clipboard.writeText(text);
+      copied = true;
+    } catch {
+      copied = false;
+    }
   }
+  if (!copied) copied = copyTextFallback(text);
+  toast(copied ? success : '复制失败，请手动选择内容');
 }
 
 function currentHistoryTitle() {

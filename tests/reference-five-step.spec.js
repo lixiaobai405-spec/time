@@ -142,6 +142,30 @@ test('新版参考界面完整贯穿五步后端流程', async ({ page }) => {
   await expect(page.getByText('历史已保存。')).toBeVisible();
 });
 
+test('公网 HTTP 无 Clipboard API 时使用兼容方式复制报告', async ({ page }) => {
+  await page.addInitScript(() => {
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: undefined,
+    });
+    document.execCommand = command => {
+      if (command !== 'copy') return false;
+      const input = document.activeElement;
+      window.__fallbackCopiedText = input?.value?.slice(input.selectionStart, input.selectionEnd) || '';
+      return true;
+    };
+  });
+
+  await completeFiveSteps(page);
+  await page.getByRole('button', { name: '复制报告' }).click();
+
+  await expect(page.locator('#toast')).toHaveText('已复制报告');
+  const copiedText = await page.evaluate(() => window.__fallbackCopiedText);
+  expect(copiedText).toContain('今日执行顺序');
+  expect(copiedText).toContain('时间投入优化目标');
+  await expect(page.locator('[data-copy-fallback]')).toHaveCount(0);
+});
+
 test('工作台、每日跟踪和历史记录使用参考稿导航', async ({ page }) => {
   await completeFiveSteps(page);
   await page.locator('.tnav').filter({ hasText: /^每日跟踪$/ }).click();
