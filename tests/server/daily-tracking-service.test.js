@@ -48,6 +48,10 @@ test('daily merge preserves saved edits, deduplicates IDs, keeps same-name IDs, 
       updatedAt: '2026-07-23T01:00:00.000Z',
     },
     sourceTasks: [original, original, removed, sameNameDifferentId],
+    dueContext: {
+      now: () => new Date('2026-07-20T04:00:00.000Z'),
+      timeZone: 'Asia/Shanghai',
+    },
   });
 
   assert.deepEqual(result.tasks.map((task) => task.id), [
@@ -60,6 +64,41 @@ test('daily merge preserves saved edits, deduplicates IDs, keeps same-name IDs, 
     [TASK_ONE_ID]: { done: true, doneAt: '2026-07-23T09:30' },
   });
   assert.deepEqual(result.removedTaskIds, [TASK_TWO_ID]);
+  assert.equal(result.hasUnpersistedMerge, true);
+});
+
+test('daily merge removes edited tasks whose source history disappeared', () => {
+  const survivingSource = historySnapshot().tasks[0];
+  const deletedSource = historySnapshot().tasks[1];
+  const staleRemovedId = '44444444-4444-4444-8444-444444444444';
+  const result = mergeDailyTracking({
+    saved: {
+      tasks: [
+        { ...survivingSource, name: '保留用户编辑', due: '明天' },
+        { ...deletedSource, name: '来源删除后即使编辑也删除' },
+      ],
+      tracking: {
+        [survivingSource.id]: { done: true, doneAt: '2026-07-20T09:30' },
+        [deletedSource.id]: { done: true, doneAt: '2026-07-20T10:00' },
+      },
+      removedTaskIds: [staleRemovedId],
+      revision: 3,
+      updatedAt: '2026-07-20T02:00:00.000Z',
+    },
+    sourceTasks: [survivingSource],
+    dueContext: {
+      now: () => new Date('2026-07-20T04:00:00.000Z'),
+      timeZone: 'Asia/Shanghai',
+    },
+  });
+
+  assert.deepEqual(result.tasks.map(item => item.id), [survivingSource.id]);
+  assert.equal(result.tasks[0].name, '保留用户编辑');
+  assert.equal(result.tasks[0].due, '2026-07-21');
+  assert.deepEqual(result.tracking, {
+    [survivingSource.id]: { done: true, doneAt: '2026-07-20T09:30' },
+  });
+  assert.deepEqual(result.removedTaskIds, []);
   assert.equal(result.hasUnpersistedMerge, true);
 });
 

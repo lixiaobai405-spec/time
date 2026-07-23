@@ -1,5 +1,6 @@
 const { shanghaiBusinessDay } = require('./business-date');
 const { validateDailyWrite } = require('./contracts');
+const { normalizeDue } = require('../policies/deadline');
 
 function dateChangedError() {
   return Object.assign(new Error('日期已变化，请重新进入今日跟踪。'), {
@@ -9,7 +10,7 @@ function dateChangedError() {
   });
 }
 
-function mergeDailyTracking({ saved, sourceTasks }) {
+function mergeDailyTracking({ saved, sourceTasks, dueContext = {} }) {
   const value = saved || {
     tasks: [],
     tracking: {},
@@ -17,29 +18,50 @@ function mergeDailyTracking({ saved, sourceTasks }) {
     revision: 0,
     updatedAt: null,
   };
-  const removed = new Set(value.removedTaskIds || []);
-  const tasks = (value.tasks || []).filter((task) => !removed.has(task.id));
-  const present = new Set(tasks.map((task) => task.id));
-  let added = 0;
-  const sourceIds = new Set();
+  const sourceById = new Map();
   for (const task of sourceTasks || []) {
-    if (sourceIds.has(task.id)) continue;
-    sourceIds.add(task.id);
-    if (present.has(task.id) || removed.has(task.id)) continue;
-    tasks.push(task);
-    present.add(task.id);
-    added += 1;
+    if (!sourceById.has(task.id)) sourceById.set(task.id, task);
   }
+  const sourceIds = new Set(sourceById.keys());
+  const removedTaskIds = (value.removedTaskIds || [])
+    .filter(taskId => sourceIds.has(taskId));
+  const removed = new Set(removedTaskIds);
+  let changed = removedTaskIds.length !== (value.removedTaskIds || []).length;
+
+  const tasks = [];
+  const present = new Set();
+  for (const task of value.tasks || []) {
+    if (!sourceIds.has(task.id) || removed.has(task.id)) {
+      changed = true;
+      continue;
+    }
+    const normalized = { ...task, due: normalizeDue(task.due, dueContext) };
+    if (normalized.due !== task.due) changed = true;
+    tasks.push(normalized);
+    present.add(task.id);
+  }
+
+  for (const task of sourceById.values()) {
+    if (present.has(task.id) || removed.has(task.id)) continue;
+    tasks.push({ ...task, due: normalizeDue(task.due, dueContext) });
+    present.add(task.id);
+    changed = true;
+  }
+
   const tracking = Object.fromEntries(
     Object.entries(value.tracking || []).filter(([taskId]) => present.has(taskId)),
   );
+  if (Object.keys(tracking).length !== Object.keys(value.tracking || {}).length) {
+    changed = true;
+  }
+
   return {
     tasks: JSON.parse(JSON.stringify(tasks)),
     tracking: JSON.parse(JSON.stringify(tracking)),
-    removedTaskIds: [...removed],
+    removedTaskIds,
     revision: value.revision || 0,
     updatedAt: value.updatedAt || null,
-    hasUnpersistedMerge: added > 0,
+    hasUnpersistedMerge: changed,
   };
 }
 
@@ -86,7 +108,8 @@ function createDailyTrackingService({
 
   return Object.freeze({
     async getToday({ userId } = {}) {
-      const day = shanghaiBusinessDay(now());
+      const instant = now();
+      const day = shanghaiBusinessDay(instant);
       const [saved, source] = await Promise.all([
         dailyTrackingRepository.get({ userId, trackingDate: day.trackingDate }),
         sourceForDay(userId, day),
@@ -94,17 +117,20 @@ function createDailyTrackingService({
       return responseFor(day, source, mergeDailyTracking({
         saved,
         sourceTasks: source.tasks,
+        dueContext: { now: instant, timeZone: 'Asia/Shanghai' },
       }));
     },
 
     async saveToday({ userId, snapshot } = {}) {
       const value = validateDailyWrite(snapshot);
-      const day = shanghaiBusinessDay(now());
+      const instant = now();
+      const day = shanghaiBusinessDay(instant);
       if (value.trackingDate !== day.trackingDate) throw dateChangedError();
       const source = await sourceForDay(userId, day);
       const merged = mergeDailyTracking({
         saved: value,
         sourceTasks: source.tasks,
+        dueContext: { now: instant, timeZone: 'Asia/Shanghai' },
       });
       const stored = await dailyTrackingRepository.save({
         userId,
