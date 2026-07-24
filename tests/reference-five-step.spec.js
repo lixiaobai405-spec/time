@@ -155,8 +155,13 @@ test.beforeEach(async ({ page }) => {
   await installMocks(page);
 });
 
-test('AI 拆解确认用日历选择日期并保留可选时间', async ({ page }) => {
+test('AI 拆解确认只用日历选择日期并明确预估时长单位', async ({ page }) => {
   let smartPayload = null;
+  const browserErrors = [];
+  page.on('pageerror', error => browserErrors.push(error.message));
+  page.on('console', message => {
+    if (message.type() === 'error') browserErrors.push(message.text());
+  });
   page.on('request', request => {
     if (request.url().endsWith('/api/time-management/tasks/smart-check')) {
       smartPayload = request.postDataJSON();
@@ -167,22 +172,22 @@ test('AI 拆解确认用日历选择日期并保留可选时间', async ({ page 
 
   const firstRow = page.locator('[data-task-row="task-y"]');
   const date = firstRow.locator('[data-task-field="dueDate"]');
-  const time = firstRow.locator('[data-task-field="dueTime"]');
 
   await expect(date).toHaveAttribute('type', 'date');
-  await expect(time).toHaveAttribute('type', 'time');
+  await expect(page.locator('[data-task-field="dueTime"]')).toHaveCount(0);
+  await expect(page.locator('.trow.hd.g-edit')).toContainText('预估时长（小时）');
+  await expect(firstRow.locator('[data-task-field="est"]'))
+    .toHaveAttribute('aria-label', '预估时长（小时）');
   await expect(date).toHaveValue('2026-07-22');
-  await expect(time).toHaveValue('18:00');
 
   await date.fill('2026-07-25');
-  await time.fill('');
   await page.getByRole('button', { name: 'SMART 校验' }).click();
   expect(smartPayload.tasks[0].due).toBe('2026-07-25');
 
   await date.fill('');
-  await expect(time).toBeDisabled();
   await page.getByRole('button', { name: 'SMART 校验' }).click();
   expect(smartPayload.tasks[0].due).toBe('待确认');
+  expect(browserErrors).toEqual([]);
 });
 
 test('新版参考界面完整贯穿五步后端流程', async ({ page }) => {

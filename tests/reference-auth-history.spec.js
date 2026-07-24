@@ -177,6 +177,11 @@ test('旧历史入口打开今天清单并自动保存编辑和删除', async ({
   });
 
   await registerAndLogin(page, '每日用户');
+  const browserErrors = [];
+  page.on('pageerror', error => browserErrors.push(error.message));
+  page.on('console', message => {
+    if (message.type() === 'error') browserErrors.push(message.text());
+  });
   await page.locator('.tnav').filter({ hasText: /^历史记录$/ }).click();
   await page.getByRole('button', { name: '查看详情' }).click();
   await expect(page.getByText('旧历史报告')).toBeVisible();
@@ -186,28 +191,19 @@ test('旧历史入口打开今天清单并自动保存编辑和删除', async ({
   await expect(page.getByText('已汇总今天生成的 2 条记录，共 2 项任务')).toBeVisible();
   const firstDailyRow = page.locator(`[data-daily-task-id="${taskOne.id}"]`);
   const dueDate = firstDailyRow.locator('[data-daily-due-part="dueDate"]');
-  const dueTime = firstDailyRow.locator('[data-daily-due-part="dueTime"]');
 
   await expect(dueDate).toHaveAttribute('type', 'date');
-  await expect(dueTime).toHaveAttribute('type', 'time');
+  await expect(page.locator('[data-daily-due-part="dueTime"]')).toHaveCount(0);
+  await expect(page.locator('.trow.hd.g-daily')).toContainText('预估时长（小时）');
   await expect(dueDate).toHaveValue('2026-07-23');
-  await expect(dueTime).toHaveValue('18:00');
 
   savedPayload = null;
   await dueDate.fill('2026-07-25');
-  await dueTime.fill('19:30');
-  await expect.poll(() => savedPayload?.tasks?.[0]?.due)
-    .toBe('2026-07-25 19:30');
-
-  savedPayload = null;
-  await dueTime.fill('');
   await expect.poll(() => savedPayload?.tasks?.[0]?.due)
     .toBe('2026-07-25');
 
   savedPayload = null;
   await dueDate.fill('');
-  await expect(dueTime).toBeDisabled();
-  await expect(dueTime).toHaveValue('');
   await expect.poll(() => savedPayload?.tasks?.[0]?.due)
     .toBe('待确认');
 
@@ -233,6 +229,7 @@ test('旧历史入口打开今天清单并自动保存编辑和删除', async ({
   await expect(page.locator('[data-daily-task-field="name"]').first())
     .toHaveValue('用户编辑后的名称');
   await expect(page.locator('.g-daily[data-daily-task-id]')).toHaveCount(1);
+  expect(browserErrors).toEqual([]);
 });
 
 test('自动保存冲突保留本地编辑并提供重新加载今天', async ({ page }) => {

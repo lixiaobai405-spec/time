@@ -90,12 +90,8 @@ function splitDueValue(value) {
     : { date: '', time: '' };
 }
 
-function combineDueValue(currentValue, field, value) {
-  const current = splitDueValue(currentValue);
-  const date = field === 'dueDate' ? value : current.date;
-  const time = field === 'dueTime' ? value : current.time;
-  if (!date) return '待确认';
-  return time ? `${date} ${time}` : date;
+function dateOnlyDueValue(value) {
+  return splitDueValue(value).date || '待确认';
 }
 
 function localDateIso(date = new Date()) {
@@ -335,8 +331,8 @@ function taskEditRow(task) {
   return `<div class="trow g-edit ${fields.size ? 'miss' : ''}" data-task-row="${escapeHtml(task.id)}">
     <div><span class="mobile-label">任务</span><input data-task-id="${escapeHtml(task.id)}" data-task-field="name" value="${escapeHtml(task.name)}" class="${fields.has('name') ? 'miss' : ''}" aria-label="任务描述"></div>
     <div><span class="mobile-label">类别</span><select data-task-id="${escapeHtml(task.id)}" data-task-field="category" aria-label="所属类别">${CATEGORY_KEYS.map(key => `<option value="${key}" ${category === key ? 'selected' : ''}>${key}</option>`).join('')}</select></div>
-    <div><span class="mobile-label">截止时间</span><div class="due-inputs"><input type="date" data-task-id="${escapeHtml(task.id)}" data-task-field="dueDate" value="${escapeHtml(due.date)}" class="${fields.has('due') ? 'miss' : ''}" aria-label="截止日期"><input type="time" data-task-id="${escapeHtml(task.id)}" data-task-field="dueTime" value="${escapeHtml(due.time)}" aria-label="截止时间（可选）" ${due.date ? '' : 'disabled'}></div></div>
-    <div><span class="mobile-label">预估时长</span><input type="number" step="0.25" min="0" data-task-id="${escapeHtml(task.id)}" data-task-field="est" value="${Number.isFinite(hours) ? hours : ''}" placeholder="小时" class="${fields.has('est') ? 'miss' : ''}" aria-label="预估时长"></div>
+    <div><span class="mobile-label">截止日期</span><input type="date" data-task-id="${escapeHtml(task.id)}" data-task-field="dueDate" value="${escapeHtml(due.date)}" class="${fields.has('due') ? 'miss' : ''}" aria-label="截止日期"></div>
+    <div><span class="mobile-label">预估时长（小时）</span><input type="number" step="0.25" min="0" data-task-id="${escapeHtml(task.id)}" data-task-field="est" value="${Number.isFinite(hours) ? hours : ''}" placeholder="小时" class="${fields.has('est') ? 'miss' : ''}" aria-label="预估时长（小时）"></div>
     <div><span class="mobile-label">轻重缓急</span><select data-task-id="${escapeHtml(task.id)}" data-task-field="priority" class="${fields.has('priority') ? 'miss' : ''}" aria-label="轻重缓急"><option value="">未选</option>${Object.entries(PRIORITIES).map(([key, value]) => `<option value="${key}" ${priority === key ? 'selected' : ''}>${value.label}</option>`).join('')}</select></div>
     <button class="del" data-action="delete-task" data-task-id="${escapeHtml(task.id)}" aria-label="删除任务">×</button>
   </div>`;
@@ -345,10 +341,10 @@ function taskEditRow(task) {
 function stepTwoBody() {
   const needFix = state.smart?.summary?.needFix || 0;
   return `${panelHead('节点 ② · AI动作 + 你确认', 'AI 拆解确认', 'AI 已把四栏文字拆成结构化任务。补齐标红字段，并由后端执行正式 SMART 校验。')}
-    <div class="panel-body"><div class="aibar"><span class="sp">AI</span><div style="flex:1">任务需具体、有截止时间、可解析工时和明确轻重缓急；后端不替你虚构缺失条件。</div>
+    <div class="panel-body"><div class="aibar"><span class="sp">AI</span><div style="flex:1">任务需具体、有截止日期、可解析工时和明确轻重缓急；后端不替你虚构缺失条件。</div>
       <button class="btn btn-ghost btn-sm" data-action="smart-check" ${state.pending ? 'disabled' : ''}>${state.pending === 'smart' ? '<span class="mini-spin"></span>校验中…' : 'SMART 校验'}</button>
       <button class="btn btn-ghost btn-sm" data-action="open-add-task">+ 手动添加任务</button></div>
-      <div class="tgrid"><div class="trow hd g-edit"><div>任务</div><div>类别</div><div>截止时间</div><div>预估时长</div><div>轻重缓急</div><div></div></div>
+      <div class="tgrid"><div class="trow hd g-edit"><div>任务</div><div>类别</div><div>截止日期</div><div>预估时长（小时）</div><div>轻重缓急</div><div></div></div>
         ${state.tasks.length ? state.tasks.map(taskEditRow).join('') : '<div class="trow"><div style="color:var(--muted);font-size:12px">暂无任务，请返回上一步重新填写。</div></div>'}
       </div>
       ${state.smartChecked ? `<div style="margin-top:12px;font-size:12.5px;color:${needFix ? 'var(--warn)' : 'var(--ok)'};font-weight:700">${needFix ? `还有 ${needFix} 条任务需要补全` : '全部任务通过 SMART 校验'}</div>` : ''}
@@ -442,8 +438,8 @@ function dailyTaskRow(task) {
     <button class="chk ${track.done ? 'on' : ''}" data-action="toggle-daily-done" data-task-id="${escapeHtml(task.id)}" aria-label="${track.done ? '取消完成' : '标记完成'}">${track.done ? '✓' : ''}</button>
     <div><span class="mobile-label">任务</span><input class="tname ${track.done ? 'done' : ''}" data-daily-task-id="${escapeHtml(task.id)}" data-daily-task-field="name" value="${escapeHtml(task.name)}"></div>
     <div><span class="mobile-label">类别</span><select data-daily-task-id="${escapeHtml(task.id)}" data-daily-task-field="category">${CATEGORY_KEYS.map(key => `<option value="${key}" ${category === key ? 'selected' : ''}>${key}</option>`).join('')}</select></div>
-    <div><span class="mobile-label">截止时间</span><div class="due-inputs"><input type="date" data-daily-task-id="${escapeHtml(task.id)}" data-daily-due-part="dueDate" value="${escapeHtml(due.date)}" aria-label="截止日期"><input type="time" data-daily-task-id="${escapeHtml(task.id)}" data-daily-due-part="dueTime" value="${escapeHtml(due.time)}" aria-label="截止时间（可选）" ${due.date ? '' : 'disabled'}></div></div>
-    <div><span class="mobile-label">时长</span><input type="number" step="0.25" min="0" data-daily-task-id="${escapeHtml(task.id)}" data-daily-task-field="est" value="${Number.isFinite(hours) ? hours : ''}"></div>
+    <div><span class="mobile-label">截止日期</span><input type="date" data-daily-task-id="${escapeHtml(task.id)}" data-daily-due-part="dueDate" value="${escapeHtml(due.date)}" aria-label="截止日期"></div>
+    <div><span class="mobile-label">预估时长（小时）</span><input type="number" step="0.25" min="0" data-daily-task-id="${escapeHtml(task.id)}" data-daily-task-field="est" value="${Number.isFinite(hours) ? hours : ''}" aria-label="预估时长（小时）"></div>
     <div><span class="mobile-label">轻重缓急</span><select data-daily-task-id="${escapeHtml(task.id)}" data-daily-task-field="priority"><option value="">未选</option>${Object.entries(PRIORITIES).map(([key, item]) => `<option value="${key}" ${priority === key ? 'selected' : ''}>${item.label}</option>`).join('')}</select></div>
     <div><span class="mobile-label">完成时间</span><input type="datetime-local" data-daily-track-time="${escapeHtml(task.id)}" value="${escapeHtml(track.doneAt)}" ${track.done ? '' : 'disabled'}></div>
     <button class="del" data-action="delete-daily-task" data-task-id="${escapeHtml(task.id)}" aria-label="删除任务">×</button>
@@ -487,7 +483,7 @@ function renderDaily() {
   app().innerHTML = `<div class="phead"><div class="ptitle">每日跟踪</div><div id="daily-save-status" class="daily-save-status ${escapeHtml(statusClass)}" role="status" aria-live="polite">${escapeHtml(dailySaveText())}${state.daily.saveStatus === 'failed' ? ` ${failureAction}` : ''}</div></div>
     <div class="pdesc">已汇总今天生成的 ${summary.historyCount} 条记录，共 ${summary.taskCount} 项任务。无论从哪条历史进入，这里始终是 ${escapeHtml(state.daily.trackingDate || TODAY)} 的账号清单。</div>
     <div class="panelbox"><div class="pb-h"><span class="n">✓</span>今日登记 · ${escapeHtml(state.daily.trackingDate || TODAY)}</div><div class="pb-d">已完成 ${doneCount} / ${list.length} 项。修改、完成或删除后将自动保存。</div>
-      <div class="tgrid"><div class="trow hd g-daily"><div></div><div>任务</div><div>类别</div><div>截止时间</div><div>时长</div><div>轻重缓急</div><div>完成时间</div><div></div></div>${list.length ? list.map(dailyTaskRow).join('') : '<div class="history-empty">今天还没有生成任何历史任务，请先完成五步梳理流程。</div>'}</div>
+      <div class="tgrid"><div class="trow hd g-daily"><div></div><div>任务</div><div>类别</div><div>截止日期</div><div>预估时长（小时）</div><div>轻重缓急</div><div>完成时间</div><div></div></div>${list.length ? list.map(dailyTaskRow).join('') : '<div class="history-empty">今天还没有生成任何历史任务，请先完成五步梳理流程。</div>'}</div>
     </div>`;
 }
 
@@ -585,7 +581,7 @@ function applyDailyPayload(payload, saveStatus = 'idle') {
     loaded: true,
     loading: false,
     trackingDate: value.trackingDate,
-    tasks: value.tasks,
+    tasks: value.tasks.map(task => ({ ...task, due: dateOnlyDueValue(task.due) })),
     tracking: value.tracking,
     removedTaskIds: value.removedTaskIds,
     revision: value.revision,
@@ -735,9 +731,7 @@ function updateDailyTask(taskId, field, value) {
   if (!task) return;
   if (field === 'name') task.name = value;
   else if (field === 'category') task.source = CATS[value]?.source || '今天';
-  else if (field === 'dueDate' || field === 'dueTime') {
-    task.due = combineDueValue(task.due, field, value);
-  }
+  else if (field === 'dueDate') task.due = value || '待确认';
   else if (field === 'est') task.est = normalizeEstimate(value);
   else if (field === 'priority') {
     const priority = PRIORITIES[value];
@@ -836,7 +830,7 @@ async function decomposeTasks() {
     if (!isCurrent(id)) return;
     state.pending = null;
     state.intake = intake;
-    state.tasks = result.tasks;
+    state.tasks = result.tasks.map(task => ({ ...task, due: dateOnlyDueValue(task.due) }));
     state.smart = result.smart;
     state.smartChecked = false;
     state.distribution = null;
@@ -984,9 +978,7 @@ function updateTask(taskId, field, value) {
   if (!task) return;
   if (field === 'name') task.name = value.trim();
   else if (field === 'category') task.source = CATS[value]?.source || '今天';
-  else if (field === 'dueDate' || field === 'dueTime') {
-    task.due = combineDueValue(task.due, field, value);
-  }
+  else if (field === 'dueDate') task.due = value || '待确认';
   else if (field === 'est') task.est = normalizeEstimate(value);
   else if (field === 'priority') {
     const priority = PRIORITIES[value];
