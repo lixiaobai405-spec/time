@@ -35,6 +35,13 @@ const CATS = Object.freeze({
   },
 });
 
+const PLACEHOLDERS = Object.freeze({
+  昨天: '记录尚未完成或被拖延的事项，例如未解决问题、延期任务、临时救火事项；',
+  今天: '记录今天计划完成的主要工作事项，请填写具体任务；',
+  明天: '记录未来1-4周需要投入时间建设和改善的事项，例如流程优化、机制建设、团队培养、能力提升；',
+  后天: '记录未来规划和提前布局事项，例如战略思考、重要项目准备、能力储备。',
+});
+
 const SOURCE_TO_CATEGORY = Object.freeze({
   复盘: '昨天', 今天: '今天', 临时: '今天', 短期目标: '明天', 中长期: '后天',
 });
@@ -79,19 +86,6 @@ function escapeHtml(value) {
   return String(value ?? '').replace(/[&<>"']/g, character => ({
     '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
   })[character]);
-}
-
-const DUE_VALUE_PATTERN = /^(\d{4}-\d{2}-\d{2})(?:[ T](\d{2}:\d{2}))?$/;
-
-function splitDueValue(value) {
-  const match = DUE_VALUE_PATTERN.exec(String(value || '').trim());
-  return match
-    ? { date: match[1], time: match[2] || '' }
-    : { date: '', time: '' };
-}
-
-function dateOnlyDueValue(value) {
-  return splitDueValue(value).date || '待确认';
 }
 
 function localDateIso(date = new Date()) {
@@ -273,14 +267,9 @@ function distributionStatus(category, percent) {
 function renderHome() {
   const distribution = state.distribution || previewDistribution();
   const percentages = distribution.percentages || {};
-  const due = state.tasks.filter(task => {
-    const track = tracked(task.id);
-    return !track.done && /^\d{4}-\d{2}-\d{2}$/.test(task.due) && task.due <= TODAY;
-  });
   const totalHours = distribution.totalHours ?? previewDistribution().totalHours;
   app().innerHTML = `<div class="phead"><div class="ptitle">工作台</div></div>
     <div class="pdesc">${escapeHtml(state.user.username)}，今天是 ${TODAY}。当前 ${state.tasks.length} 条任务，预估投入 ${totalHours || 0} 小时。</div>
-    ${due.length ? `<div class="remind"><div class="ic">!</div><div><b>到期提醒 · ${due.length} 项已到期或逾期未完成</b><div class="list">${due.map(task => `${escapeHtml(task.name)}（截止 ${escapeHtml(task.due)}）`).join(' · ')}</div></div></div>` : ''}
     <div class="hgrid">${CATEGORY_KEYS.map(key => {
       const percent = Number(percentages[key] || 0);
       const status = distributionStatus(key, percent);
@@ -307,7 +296,7 @@ function stepOneBody() {
         const warning = state.intake?.warnings?.find(item => item.key === key);
         return `<div class="col"><div class="col-h"><span class="col-badge" style="background:${category.color}">${category.badge}</span><span class="col-t">${category.short}</span><span class="col-target" style="color:${category.color}">${category.target}</span></div>
           <div class="col-d">${category.description}</div>
-          <textarea id="entry-${key}" data-entry="${key}" placeholder="每行写一件事，可顺带写明日期、耗时和轻重缓急">${escapeHtml(state.entries[key])}</textarea>
+          <textarea id="entry-${key}" data-entry="${key}" placeholder="${escapeHtml(PLACEHOLDERS[key] || '')}">${escapeHtml(state.entries[key])}</textarea>
           ${key === '昨天' ? '<div class="col-note">首次使用手填遗留事项；每日跟踪结束后，未完成任务会滚入该类。</div>' : ''}
           ${warning ? `<div class="field-fb warn">${escapeHtml(warning.message)}</div>` : ''}
         </div>`;
@@ -327,11 +316,9 @@ function taskEditRow(task) {
   const category = categoryForTask(task);
   const hours = parseEstimatedHours(task.est);
   const priority = priorityForTask(task);
-  const due = splitDueValue(task.due);
   return `<div class="trow g-edit ${fields.size ? 'miss' : ''}" data-task-row="${escapeHtml(task.id)}">
     <div><span class="mobile-label">任务</span><input data-task-id="${escapeHtml(task.id)}" data-task-field="name" value="${escapeHtml(task.name)}" class="${fields.has('name') ? 'miss' : ''}" aria-label="任务描述"></div>
     <div><span class="mobile-label">类别</span><select data-task-id="${escapeHtml(task.id)}" data-task-field="category" aria-label="所属类别">${CATEGORY_KEYS.map(key => `<option value="${key}" ${category === key ? 'selected' : ''}>${key}</option>`).join('')}</select></div>
-    <div><span class="mobile-label">截止日期</span><input type="date" data-task-id="${escapeHtml(task.id)}" data-task-field="dueDate" value="${escapeHtml(due.date)}" class="${fields.has('due') ? 'miss' : ''}" aria-label="截止日期"></div>
     <div><span class="mobile-label">预估时长（小时）</span><input type="number" step="0.25" min="0" data-task-id="${escapeHtml(task.id)}" data-task-field="est" value="${Number.isFinite(hours) ? hours : ''}" placeholder="小时" class="${fields.has('est') ? 'miss' : ''}" aria-label="预估时长（小时）"></div>
     <div><span class="mobile-label">轻重缓急</span><select data-task-id="${escapeHtml(task.id)}" data-task-field="priority" class="${fields.has('priority') ? 'miss' : ''}" aria-label="轻重缓急"><option value="">未选</option>${Object.entries(PRIORITIES).map(([key, value]) => `<option value="${key}" ${priority === key ? 'selected' : ''}>${value.label}</option>`).join('')}</select></div>
     <button class="del" data-action="delete-task" data-task-id="${escapeHtml(task.id)}" aria-label="删除任务">×</button>
@@ -341,10 +328,10 @@ function taskEditRow(task) {
 function stepTwoBody() {
   const needFix = state.smart?.summary?.needFix || 0;
   return `${panelHead('节点 ② · AI动作 + 你确认', 'AI 拆解确认', 'AI 已把四栏文字拆成结构化任务。补齐标红字段，并由后端执行正式 SMART 校验。')}
-    <div class="panel-body"><div class="aibar"><span class="sp">AI</span><div style="flex:1">任务需具体、有截止日期、可解析工时和明确轻重缓急；后端不替你虚构缺失条件。</div>
+    <div class="panel-body"><div class="aibar"><span class="sp">AI</span><div style="flex:1">任务需具体、具有可解析工时和明确轻重缓急；后端不替你虚构缺失条件。</div>
       <button class="btn btn-ghost btn-sm" data-action="smart-check" ${state.pending ? 'disabled' : ''}>${state.pending === 'smart' ? '<span class="mini-spin"></span>校验中…' : 'SMART 校验'}</button>
       <button class="btn btn-ghost btn-sm" data-action="open-add-task">+ 手动添加任务</button></div>
-      <div class="tgrid"><div class="trow hd g-edit"><div>任务</div><div>类别</div><div>截止日期</div><div>预估时长（小时）</div><div>轻重缓急</div><div></div></div>
+      <div class="tgrid"><div class="trow hd g-edit"><div>任务</div><div>类别</div><div>预估时长（小时）</div><div>轻重缓急</div><div></div></div>
         ${state.tasks.length ? state.tasks.map(taskEditRow).join('') : '<div class="trow"><div style="color:var(--muted);font-size:12px">暂无任务，请返回上一步重新填写。</div></div>'}
       </div>
       ${state.smartChecked ? `<div style="margin-top:12px;font-size:12.5px;color:${needFix ? 'var(--warn)' : 'var(--ok)'};font-weight:700">${needFix ? `还有 ${needFix} 条任务需要补全` : '全部任务通过 SMART 校验'}</div>` : ''}
@@ -380,7 +367,7 @@ function quadrantBox(name) {
   const ids = quadrant?.taskIds || [];
   return `<div class="quad ${QUADRANT_CLASSES[name]}">${quadrant ? `<div class="energy">${quadrant.energyPercent}%</div>` : ''}<div class="quad-h">${title}</div><div class="quad-m">${meta}</div>${ids.length ? ids.map(id => {
     const task = taskById.get(id);
-    return `<div class="qt">${escapeHtml(task?.name || '')}<small> · ${escapeHtml(categoryForTask(task))}${task?.due ? ` · 截止${escapeHtml(task.due)}` : ''}</small></div>`;
+    return `<div class="qt">${escapeHtml(task?.name || '')}<small> · ${escapeHtml(categoryForTask(task))}</small></div>`;
   }).join('') : '<div class="qt" style="opacity:.6">暂无</div>'}</div>`;
 }
 
@@ -433,12 +420,10 @@ function dailyTaskRow(task) {
   const category = categoryForTask(task);
   const hours = parseEstimatedHours(task.est);
   const priority = priorityForTask(task);
-  const due = splitDueValue(task.due);
   return `<div class="trow g-daily ${track.done ? 'doneRow' : ''}" data-daily-task-id="${escapeHtml(task.id)}">
     <button class="chk ${track.done ? 'on' : ''}" data-action="toggle-daily-done" data-task-id="${escapeHtml(task.id)}" aria-label="${track.done ? '取消完成' : '标记完成'}">${track.done ? '✓' : ''}</button>
     <div><span class="mobile-label">任务</span><input class="tname ${track.done ? 'done' : ''}" data-daily-task-id="${escapeHtml(task.id)}" data-daily-task-field="name" value="${escapeHtml(task.name)}"></div>
     <div><span class="mobile-label">类别</span><select data-daily-task-id="${escapeHtml(task.id)}" data-daily-task-field="category">${CATEGORY_KEYS.map(key => `<option value="${key}" ${category === key ? 'selected' : ''}>${key}</option>`).join('')}</select></div>
-    <div><span class="mobile-label">截止日期</span><input type="date" data-daily-task-id="${escapeHtml(task.id)}" data-daily-due-part="dueDate" value="${escapeHtml(due.date)}" aria-label="截止日期"></div>
     <div><span class="mobile-label">预估时长（小时）</span><input type="number" step="0.25" min="0" data-daily-task-id="${escapeHtml(task.id)}" data-daily-task-field="est" value="${Number.isFinite(hours) ? hours : ''}" aria-label="预估时长（小时）"></div>
     <div><span class="mobile-label">轻重缓急</span><select data-daily-task-id="${escapeHtml(task.id)}" data-daily-task-field="priority"><option value="">未选</option>${Object.entries(PRIORITIES).map(([key, item]) => `<option value="${key}" ${priority === key ? 'selected' : ''}>${item.label}</option>`).join('')}</select></div>
     <div><span class="mobile-label">完成时间</span><input type="datetime-local" data-daily-track-time="${escapeHtml(task.id)}" value="${escapeHtml(track.doneAt)}" ${track.done ? '' : 'disabled'}></div>
@@ -483,7 +468,7 @@ function renderDaily() {
   app().innerHTML = `<div class="phead"><div class="ptitle">每日跟踪</div><div id="daily-save-status" class="daily-save-status ${escapeHtml(statusClass)}" role="status" aria-live="polite">${escapeHtml(dailySaveText())}${state.daily.saveStatus === 'failed' ? ` ${failureAction}` : ''}</div></div>
     <div class="pdesc">已汇总今天生成的 ${summary.historyCount} 条记录，共 ${summary.taskCount} 项任务。无论从哪条历史进入，这里始终是 ${escapeHtml(state.daily.trackingDate || TODAY)} 的账号清单。</div>
     <div class="panelbox"><div class="pb-h"><span class="n">✓</span>今日登记 · ${escapeHtml(state.daily.trackingDate || TODAY)}</div><div class="pb-d">已完成 ${doneCount} / ${list.length} 项。修改、完成或删除后将自动保存。</div>
-      <div class="tgrid"><div class="trow hd g-daily"><div></div><div>任务</div><div>类别</div><div>截止日期</div><div>预估时长（小时）</div><div>轻重缓急</div><div>完成时间</div><div></div></div>${list.length ? list.map(dailyTaskRow).join('') : '<div class="history-empty">今天还没有生成任何历史任务，请先完成五步梳理流程。</div>'}</div>
+      <div class="tgrid"><div class="trow hd g-daily"><div></div><div>任务</div><div>类别</div><div>预估时长（小时）</div><div>轻重缓急</div><div>完成时间</div><div></div></div>${list.length ? list.map(dailyTaskRow).join('') : '<div class="history-empty">今天还没有生成任何历史任务，请先完成五步梳理流程。</div>'}</div>
     </div>`;
 }
 
@@ -518,7 +503,7 @@ function renderHistoryDetail() {
   const taskById = new Map(item.tasks.map(task => [task.id, task]));
   app().innerHTML = `<div class="phead"><button class="btn btn-ghost btn-sm" data-action="history-back">返回</button><div class="ptitle">${escapeHtml(item.title)}</div></div><div class="pdesc">生成时间：${escapeHtml(formatTimestamp(item.createdAt))} · 只读账号历史</div>
     <div class="history-detail-content"><section class="history-section"><h2>事务填写</h2><div class="history-goals">${Object.entries(item.goals).map(([key, value]) => `<div><strong>${escapeHtml(key)}</strong><p>${escapeHtml(value || '未填写')}</p></div>`).join('')}</div></section>
-      <section class="history-section"><h2>任务清单</h2><div class="history-tasks">${item.tasks.map(task => `<article><h3>${escapeHtml(task.name)}</h3><p>${escapeHtml(categoryForTask(task))} · ${escapeHtml(task.importance || '待确认')}/${escapeHtml(task.urgency || '待确认')} · 截止 ${escapeHtml(task.due || '待确认')} · ${escapeHtml(task.est || '')}</p></article>`).join('')}</div></section>
+      <section class="history-section"><h2>任务清单</h2><div class="history-tasks">${item.tasks.map(task => `<article><h3>${escapeHtml(task.name)}</h3><p>${escapeHtml(categoryForTask(task))} · ${escapeHtml(task.importance || '待确认')}/${escapeHtml(task.urgency || '待确认')} · ${escapeHtml(task.est || '')}</p></article>`).join('')}</div></section>
       <section class="history-section"><h2>轻重缓急矩阵</h2><div class="history-quadrants">${item.matrix.quadrants.map(quadrant => `<div><strong>${escapeHtml(quadrant.name)} · ${quadrant.energyPercent}%</strong><p>${quadrant.taskIds.map(id => escapeHtml(taskById.get(id)?.name || '')).filter(Boolean).join('、') || '暂无任务'}</p></div>`).join('')}</div></section>
       <section class="history-section"><h2>优化报告</h2><div id="history-report-markdown" class="markdown-body"></div></section>
     </div><div class="history-actions" style="justify-content:flex-end;margin-top:14px"><button class="btn btn-primary btn-sm" data-action="open-daily">进入每日跟踪</button><button class="btn btn-ghost btn-sm" data-action="history-copy">复制历史报告</button><button class="btn btn-danger btn-sm" data-action="history-delete" data-history-id="${escapeHtml(item.id)}">删除历史</button></div>`;
@@ -533,7 +518,7 @@ function renderModal() {
   if (state.modal.type === 'add-task') {
     modalHost().innerHTML = `<div class="mask" data-modal-mask><section class="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title"><h3 id="modal-title">手动添加任务</h3><div class="sub">补充 AI 未拆解到的事项，保存后需要重新执行后续节点。</div>
       <div class="field"><label class="fl" for="m-name">任务描述 <span class="req">*</span></label><input id="m-name" placeholder="动词 + 对象 + 结果"></div>
-      <div class="grid2"><div class="field"><label class="fl" for="m-due">截止时间 <span class="req">*</span></label><input id="m-due" type="date"></div><div class="field"><label class="fl" for="m-est">预估时长（小时） <span class="req">*</span></label><input id="m-est" type="number" step="0.25" min="0.25"></div></div>
+      <div class="field"><label class="fl" for="m-est">预估时长（小时） <span class="req">*</span></label><input id="m-est" type="number" step="0.25" min="0.25"></div>
       <div class="grid2"><div class="field"><label class="fl" for="m-priority">轻重缓急 <span class="req">*</span></label><select id="m-priority"><option value="">请选择</option>${Object.entries(PRIORITIES).map(([key, item]) => `<option value="${key}">${item.label}</option>`).join('')}</select></div><div class="field"><label class="fl" for="m-category">所属类别</label><select id="m-category">${CATEGORY_KEYS.map(key => `<option value="${key}" ${key === state.modal.category ? 'selected' : ''}>${key}</option>`).join('')}</select></div></div>
       <div class="err hidden" id="m-error">请填写全部必填项。</div><div class="mact"><button class="btn btn-primary btn-sm" data-action="save-task">添加</button><button class="btn btn-ghost btn-sm" data-action="close-modal">取消</button></div>
     </section></div>`;
@@ -581,7 +566,7 @@ function applyDailyPayload(payload, saveStatus = 'idle') {
     loaded: true,
     loading: false,
     trackingDate: value.trackingDate,
-    tasks: value.tasks.map(task => ({ ...task, due: dateOnlyDueValue(task.due) })),
+    tasks: value.tasks.map(task => ({ ...task })),
     tracking: value.tracking,
     removedTaskIds: value.removedTaskIds,
     revision: value.revision,
@@ -731,7 +716,6 @@ function updateDailyTask(taskId, field, value) {
   if (!task) return;
   if (field === 'name') task.name = value;
   else if (field === 'category') task.source = CATS[value]?.source || '今天';
-  else if (field === 'dueDate') task.due = value || '待确认';
   else if (field === 'est') task.est = normalizeEstimate(value);
   else if (field === 'priority') {
     const priority = PRIORITIES[value];
@@ -822,7 +806,7 @@ async function decomposeTasks() {
   if (state.pending) return;
   const id = ++operationId;
   state.pending = 'decompose';
-  renderProcessing('正在拆解为结构化任务', '四栏输入先经服务端校验，再交给模型拆解', ['校验四栏输入', '拆分独立可执行任务', '识别截止时间与工时', '生成初始轻重缓急']);
+  renderProcessing('正在拆解为结构化任务', '四栏输入先经服务端校验，再交给模型拆解', ['校验四栏输入', '拆分独立可执行任务', '识别工时与轻重缓急', '生成初始轻重缓急']);
   try {
     const intake = await postJson('/api/time-management/intake/check', { entries: state.entries });
     if (!isCurrent(id)) return;
@@ -830,7 +814,7 @@ async function decomposeTasks() {
     if (!isCurrent(id)) return;
     state.pending = null;
     state.intake = intake;
-    state.tasks = result.tasks.map(task => ({ ...task, due: dateOnlyDueValue(task.due) }));
+    state.tasks = result.tasks.map(task => ({ ...task }));
     state.smart = result.smart;
     state.smartChecked = false;
     state.distribution = null;
@@ -978,7 +962,6 @@ function updateTask(taskId, field, value) {
   if (!task) return;
   if (field === 'name') task.name = value.trim();
   else if (field === 'category') task.source = CATS[value]?.source || '今天';
-  else if (field === 'dueDate') task.due = value || '待确认';
   else if (field === 'est') task.est = normalizeEstimate(value);
   else if (field === 'priority') {
     const priority = PRIORITIES[value];
@@ -1013,17 +996,16 @@ function closeModal() {
 
 function saveTask() {
   const name = document.getElementById('m-name')?.value.trim();
-  const due = document.getElementById('m-due')?.value;
   const estValue = document.getElementById('m-est')?.value;
   const priorityKey = document.getElementById('m-priority')?.value;
   const category = document.getElementById('m-category')?.value;
   const priority = PRIORITIES[priorityKey];
-  if (!name || !due || !normalizeEstimate(estValue) || !priority) {
+  if (!name || !normalizeEstimate(estValue) || !priority) {
     document.getElementById('m-error')?.classList.remove('hidden');
     return;
   }
   state.tasks.push({
-    id: createUuid(), name, source: CATS[category]?.source || '今天', due,
+    id: createUuid(), name, source: CATS[category]?.source || '今天', due: '待确认',
     est: normalizeEstimate(estValue), importance: priority.importance, urgency: priority.urgency,
     acceptanceCriteria: [], nextAction: '', status: 'pending', classificationSource: 'manual',
   });
@@ -1378,13 +1360,6 @@ document.addEventListener('change', event => {
   const field = event.target.dataset.taskField;
   if (taskId && field) {
     updateTask(taskId, field, event.target.value);
-    return;
-  }
-  const dailyDueTaskId = event.target.dataset.dailyTaskId;
-  const dailyDuePart = event.target.dataset.dailyDuePart;
-  if (dailyDueTaskId && dailyDuePart) {
-    updateDailyTask(dailyDueTaskId, dailyDuePart, event.target.value);
-    render();
     return;
   }
   const trackingId = event.target.dataset.trackTime;

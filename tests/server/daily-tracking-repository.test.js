@@ -63,6 +63,23 @@ test('daily repository creates, reads, and updates one account-day snapshot', as
   assert.equal(updated.tasks[0].name, '用户编辑后的任务名称');
 });
 
+test('daily repository normalizes a missing due without losing the task', async (t) => {
+  const { database } = await createTestDatabase(t);
+  await seedUser(database, USER_A, 'Daily_Optional_Due');
+  const repository = createDailyTrackingRepository({
+    database,
+    now: () => NOW,
+    randomUUID: () => '30000000-0000-4000-8000-000000000003',
+  });
+  const value = dailyValue();
+  delete value.tasks[0].due;
+
+  const saved = await repository.save(value);
+
+  assert.equal(saved.tasks.length, 1);
+  assert.equal(saved.tasks[0].due, '待确认');
+});
+
 test('daily repository isolates accounts and rejects stale revisions', async (t) => {
   const { database } = await createTestDatabase(t);
   await seedUser(database, USER_A, 'Daily_A');

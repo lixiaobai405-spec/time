@@ -60,8 +60,25 @@ test('SMART 校验返回逐字段可修正问题', () => {
   assert.equal(result.summary.needFix, 1);
   assert.deepEqual(
     result.results[0].issues.map(item => item.field),
-    ['name', 'due', 'est', 'priority'],
+    ['name', 'est', 'priority'],
   );
+});
+
+test('SMART 不因 due 缺失、空白或待确认而阻止有效任务', () => {
+  const missingDue = task({ id: 'missing-due' });
+  delete missingDue.due;
+
+  const result = checkTaskSmart({
+    tasks: [
+      missingDue,
+      task({ id: 'blank-due', due: '' }),
+      task({ id: 'pending-due', due: '待确认' }),
+    ],
+  });
+
+  assert.equal(result.overall, 'pass');
+  assert.deepEqual(result.summary, { total: 3, pass: 3, needFix: 0 });
+  assert.deepEqual(result.results.map(item => item.issues), [[], [], []]);
 });
 
 test('SMART 完整任务通过校验', () => {
@@ -77,6 +94,17 @@ test('最大余数法把四类占比稳定舍入为 100.0%', () => {
     Math.round(Object.values(result).reduce((sum, value) => sum + value, 0) * 10) / 10,
     100,
   );
+});
+
+test('时间分布接受缺少 due 的有效任务', () => {
+  const withoutDue = task({ id: 'without-due', source: '今天', est: '2h' });
+  delete withoutDue.due;
+
+  const result = diagnoseDistribution({ tasks: [withoutDue] });
+
+  assert.equal(result.totalMinutes, 120);
+  assert.equal(result.validTaskCount, 1);
+  assert.equal(result.percentages.今天, 100);
 });
 
 test('时间分布按服务端工时计算并返回未参与任务', () => {

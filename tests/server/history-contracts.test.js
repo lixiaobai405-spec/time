@@ -45,6 +45,20 @@ test('a complete version-1 history snapshot preserves the formal workflow contra
   assert.deepEqual(decodeStoredSnapshot(stored(snapshot)), snapshot);
 });
 
+test('history snapshots normalize missing, blank, and null due values', () => {
+  const missing = historySnapshot();
+  delete missing.tasks[0].due;
+  assert.equal(validateHistorySnapshot(missing).tasks[0].due, '待确认');
+
+  const blank = historySnapshot();
+  blank.tasks[0].due = '   ';
+  assert.equal(validateHistorySnapshot(blank).tasks[0].due, '待确认');
+
+  const nullable = historySnapshot();
+  nullable.tasks[0].due = null;
+  assert.equal(validateHistorySnapshot(nullable).tasks[0].due, '待确认');
+});
+
 test('history input rejects identity injection, unknown fields, bad UUIDs, and incomplete shapes', () => {
   inputInvalid(() => validateHistorySnapshot({ ...historySnapshot(), userId: 'attacker' }));
   inputInvalid(() => validateHistorySnapshot({ ...historySnapshot(), user_id: 'attacker' }));

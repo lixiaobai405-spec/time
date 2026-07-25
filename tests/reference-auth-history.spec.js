@@ -185,33 +185,24 @@ test('旧历史入口打开今天清单并自动保存编辑和删除', async ({
   await page.locator('.tnav').filter({ hasText: /^历史记录$/ }).click();
   await page.getByRole('button', { name: '查看详情' }).click();
   await expect(page.getByText('旧历史报告')).toBeVisible();
+  await expect(page.locator('.history-tasks')).not.toContainText('截止');
   await page.getByRole('button', { name: '进入每日跟踪' }).click();
 
   await expect(page.locator('.ptitle')).toHaveText('每日跟踪');
   await expect(page.getByText('已汇总今天生成的 2 条记录，共 2 项任务')).toBeVisible();
   const firstDailyRow = page.locator(`[data-daily-task-id="${taskOne.id}"]`);
-  const dueDate = firstDailyRow.locator('[data-daily-due-part="dueDate"]');
 
-  await expect(dueDate).toHaveAttribute('type', 'date');
-  await expect(page.locator('[data-daily-due-part="dueTime"]')).toHaveCount(0);
+  await expect(page.locator('[data-daily-due-part]')).toHaveCount(0);
+  await expect(page.locator('.trow.hd.g-daily')).not.toContainText('截止日期');
   await expect(page.locator('.trow.hd.g-daily')).toContainText('预估时长（小时）');
-  await expect(dueDate).toHaveValue('2026-07-23');
 
   savedPayload = null;
-  await dueDate.fill('2026-07-25');
-  await expect.poll(() => savedPayload?.tasks?.[0]?.due)
-    .toBe('2026-07-25');
-
-  savedPayload = null;
-  await dueDate.fill('');
-  await expect.poll(() => savedPayload?.tasks?.[0]?.due)
-    .toBe('待确认');
-
   const firstName = page.locator('[data-daily-task-field="name"]').first();
   await firstName.fill('用户编辑后的名称');
   await expect(page.getByText('正在保存…')).toBeVisible();
   await expect(page.getByText('已自动保存')).toBeVisible();
   expect(savedPayload.tasks[0].name).toBe('用户编辑后的名称');
+  expect(savedPayload.tasks[0].due).toBe('2026-07-23 18:00');
   await expect(page.getByRole('button', { name: /^保存$/ })).toHaveCount(0);
 
   savedPayload = null;

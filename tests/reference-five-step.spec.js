@@ -155,7 +155,7 @@ test.beforeEach(async ({ page }) => {
   await installMocks(page);
 });
 
-test('AI 拆解确认只用日历选择日期并明确预估时长单位', async ({ page }) => {
+test('AI 拆解确认和手动新增隐藏截止日期但保留内部 due', async ({ page }) => {
   let smartPayload = null;
   const browserErrors = [];
   page.on('pageerror', error => browserErrors.push(error.message));
@@ -170,23 +170,71 @@ test('AI 拆解确认只用日历选择日期并明确预估时长单位', async
 
   await openAiConfirmation(page);
 
-  const firstRow = page.locator('[data-task-row="task-y"]');
-  const date = firstRow.locator('[data-task-field="dueDate"]');
-
-  await expect(date).toHaveAttribute('type', 'date');
-  await expect(page.locator('[data-task-field="dueTime"]')).toHaveCount(0);
+  await expect(page.locator('[data-task-field="dueDate"]')).toHaveCount(0);
+  await expect(page.locator('.trow.hd.g-edit')).not.toContainText('截止日期');
   await expect(page.locator('.trow.hd.g-edit')).toContainText('预估时长（小时）');
-  await expect(firstRow.locator('[data-task-field="est"]'))
+  await expect(page.locator('[data-task-row="task-y"] [data-task-field="est"]'))
     .toHaveAttribute('aria-label', '预估时长（小时）');
-  await expect(date).toHaveValue('2026-07-22');
 
-  await date.fill('2026-07-25');
-  await page.getByRole('button', { name: 'SMART 校验' }).click();
-  expect(smartPayload.tasks[0].due).toBe('2026-07-25');
+  await page.getByRole('button', { name: '+ 手动添加任务' }).click();
+  await expect(page.locator('#m-due')).toHaveCount(0);
+  await page.locator('#m-name').fill('整理补充验收清单');
+  await page.locator('#m-est').fill('1');
+  await page.locator('#m-priority').selectOption('IU');
+  await page.locator('#m-category').selectOption('今天');
+  await page.getByRole('button', { name: '添加', exact: true }).click();
 
-  await date.fill('');
   await page.getByRole('button', { name: 'SMART 校验' }).click();
-  expect(smartPayload.tasks[0].due).toBe('待确认');
+
+  expect(smartPayload.tasks.find(task => task.id === 'task-y').due)
+    .toBe('2026-07-22 18:00');
+  expect(smartPayload.tasks.find(task => task.name === '整理补充验收清单').due)
+    .toBe('待确认');
+  expect(browserErrors).toEqual([]);
+});
+
+test('第一步骤四栏显示甲方指定提示语且不进入提交内容', async ({ page }) => {
+  let intakePayload = null;
+  const browserErrors = [];
+  page.on('pageerror', error => browserErrors.push(error.message));
+  page.on('console', message => {
+    if (message.type() === 'error') browserErrors.push(message.text());
+  });
+  page.on('request', request => {
+    if (request.url().endsWith('/api/time-management/intake/check')) {
+      intakePayload = request.postDataJSON();
+    }
+  });
+
+  await page.goto('/');
+  await page.getByRole('button', { name: /开始梳理/ }).click();
+
+  await expect(page.locator('#entry-昨天'))
+    .toHaveAttribute('placeholder', '记录尚未完成或被拖延的事项，例如未解决问题、延期任务、临时救火事项；');
+  await expect(page.locator('#entry-今天'))
+    .toHaveAttribute('placeholder', '记录今天计划完成的主要工作事项，请填写具体任务；');
+  await expect(page.locator('#entry-明天'))
+    .toHaveAttribute('placeholder', '记录未来1-4周需要投入时间建设和改善的事项，例如流程优化、机制建设、团队培养、能力提升；');
+  await expect(page.locator('#entry-后天'))
+    .toHaveAttribute('placeholder', '记录未来规划和提前布局事项，例如战略思考、重要项目准备、能力储备。');
+
+  await page.locator('#entry-昨天').fill('测试昨天事项');
+  await page.locator('#entry-今天').fill('测试今天事项');
+  await page.locator('#entry-明天').fill('测试明天事项');
+  await page.locator('#entry-后天').fill('测试后天事项');
+
+  await page.getByRole('button', { name: /AI 拆解为任务/ }).click();
+
+  expect(intakePayload.entries.昨天).toBe('测试昨天事项');
+  expect(intakePayload.entries.今天).toBe('测试今天事项');
+  expect(intakePayload.entries.明天).toBe('测试明天事项');
+  expect(intakePayload.entries.后天).toBe('测试后天事项');
+  for (const value of Object.values(intakePayload.entries)) {
+    expect(value).not.toContain('记录尚未完成');
+    expect(value).not.toContain('记录今天计划');
+    expect(value).not.toContain('1-4周');
+    expect(value).not.toContain('战略思考');
+  }
   expect(browserErrors).toEqual([]);
 });
 
@@ -223,13 +271,20 @@ test('公网 HTTP 无 Clipboard API 时使用兼容方式复制报告', async ({
   await expect(page.locator('[data-copy-fallback]')).toHaveCount(0);
 });
 
-test('工作台、每日跟踪和历史记录使用参考稿导航', async ({ page }) => {
+test('工作台、象限、每日跟踪和历史记录均不展示截止日期字段', async ({ page }) => {
   await completeFiveSteps(page);
+
+  await page.locator('.step').filter({ hasText: '优先级排序' }).click();
+  await expect(page.locator('.qt').filter({ hasText: '截止' })).toHaveCount(0);
+
   await page.locator('.tnav').filter({ hasText: /^每日跟踪$/ }).click();
   await expect(page.locator('.ptitle')).toHaveText('每日跟踪');
+  await expect(page.locator('[data-daily-due-part]')).toHaveCount(0);
   await expect(page.locator('.g-daily')).toHaveCount(5);
+
   await page.locator('.tnav').filter({ hasText: /^工作台$/ }).click();
   await expect(page.locator('.ptitle')).toHaveText('工作台');
+  await expect(page.locator('.remind')).toHaveCount(0);
   await expect(page.locator('.hcard')).toHaveCount(4);
 });
 

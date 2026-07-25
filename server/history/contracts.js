@@ -10,6 +10,7 @@ const {
   TASK_STATUS,
   TEXT_LIMITS,
   URGENCY,
+  normalizeOptionalDue,
   quadrantFor,
 } = require('../contracts/time-management');
 
@@ -255,9 +256,12 @@ function assertSemantics(snapshot) {
 }
 
 function validateHistorySnapshot(value) {
-  if (!validateShape(value)) throw inputError();
-  assertSemantics(value);
-  return JSON.parse(JSON.stringify(value));
+  const normalized = Array.isArray(value?.tasks)
+    ? { ...value, tasks: value.tasks.map(normalizeOptionalDue) }
+    : value;
+  if (!validateShape(normalized)) throw inputError();
+  assertSemantics(normalized);
+  return JSON.parse(JSON.stringify(normalized));
 }
 
 function decodeStoredSnapshot(record) {

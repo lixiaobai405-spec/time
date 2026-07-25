@@ -101,6 +101,13 @@ function sourceForCategory(category) {
   return CATEGORY_TO_SOURCE[category] || '今天';
 }
 
+function normalizeOptionalDue(task) {
+  if (!task || typeof task !== 'object' || Array.isArray(task)) return task;
+  if (task.due == null) return { ...task, due: '待确认' };
+  if (typeof task.due !== 'string') return task;
+  return { ...task, due: task.due.trim() || '待确认' };
+}
+
 function normalizeTask(task) {
   const hasClassification = IMPORTANCE.includes(task.importance)
     && URGENCY.includes(task.urgency);
@@ -141,6 +148,7 @@ module.exports = {
   TEXT_LIMITS,
   URGENCY,
   categoryForTask,
+  normalizeOptionalDue,
   normalizeTask,
   parseEstimatedMinutes,
   quadrantFor,

@@ -11,6 +11,7 @@ const {
   TEXT_LIMITS,
   URGENCY,
   categoryForTask,
+  normalizeOptionalDue,
   parseEstimatedMinutes,
 } = require('../contracts/time-management');
 
@@ -115,7 +116,10 @@ function buildDiagnosis(categories) {
 }
 
 function diagnoseDistribution({ tasks, requestBody } = {}) {
-  const input = requestBody || { tasks };
+  const rawInput = requestBody || { tasks };
+  const input = Array.isArray(rawInput?.tasks)
+    ? { ...rawInput, tasks: rawInput.tasks.map(normalizeOptionalDue) }
+    : rawInput;
   if (!validateRequest(input)) {
     throw publicError('INPUT_INVALID', '任务数据不符合时间分布诊断要求。', 400);
   }

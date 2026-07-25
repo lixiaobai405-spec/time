@@ -8,6 +8,7 @@ const {
   TASK_STATUS,
   TEXT_LIMITS,
   URGENCY,
+  normalizeOptionalDue,
 } = require('../contracts/time-management');
 const { UUID_PATTERN } = require('../history/contracts');
 
@@ -131,9 +132,12 @@ function assertSemantics(value) {
 }
 
 function validateDailyWrite(value) {
-  if (!validateShape(value)) throw inputError();
-  assertSemantics(value);
-  return JSON.parse(JSON.stringify(value));
+  const normalized = Array.isArray(value?.tasks)
+    ? { ...value, tasks: value.tasks.map(normalizeOptionalDue) }
+    : value;
+  if (!validateShape(normalized)) throw inputError();
+  assertSemantics(normalized);
+  return JSON.parse(JSON.stringify(normalized));
 }
 
 function decodeStoredDaily(row) {
