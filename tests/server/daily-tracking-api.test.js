@@ -98,7 +98,7 @@ test('daily API merges history, persists edits, rejects stale saves, and leaves 
   assert.deepEqual(opened.tasks, historySnapshot().tasks.map(task => ({
     ...task,
     due: task.due === '今天18:00'
-      ? `${opened.trackingDate} 18:00`
+      ? '待确认'
       : '待确认',
   })));
   assert.equal(opened.revision, 0);
@@ -228,4 +228,140 @@ test('deleting history removes its edited daily tasks but keeps other history ta
   const persisted = await persistedResponse.json();
   assert.deepEqual(persisted.tasks.map(task => task.id), secondIds);
   assert.equal(persisted.hasUnpersistedMerge, false);
+});
+
+test('daily API carries only unchecked tasks across skipped Shanghai days', async (t) => {
+  let currentInstant = new Date('2026-07-23T02:00:00.000Z');
+  const { baseUrl, database } = await createAuthTestApp(t, {
+    now: () => currentInstant,
+  });
+  const client = new AuthClient(baseUrl);
+  await login(client, 'Daily_Carry_Clock');
+
+  const historyResponse = await saveHistory(client);
+  assert.equal(historyResponse.status, 201);
+
+  const openedResponse = await client.request('/api/time-management/daily-tracking/today');
+  const opened = await openedResponse.json();
+  assert.equal(openedResponse.status, 200);
+  assert.equal(opened.trackingDate, '2026-07-23');
+  const task1 = opened.tasks[0];
+  const task2 = opened.tasks[1];
+
+  const editedTask2 = { ...task2, name: '跨日编辑后名称', due: '2026-07-25', owner: '张三' };
+  const day1Save = await saveDaily(client, {
+    trackingDate: opened.trackingDate,
+    tasks: [task1, editedTask2],
+    tracking: {
+      [task1.id]: { done: true, doneAt: '2026-07-23T09:30' },
+    },
+    removedTaskIds: [],
+    revision: opened.revision,
+  });
+  assert.equal(day1Save.status, 200);
+  const day1Saved = await day1Save.json();
+  assert.equal(day1Saved.revision, 1);
+
+  currentInstant = new Date('2026-07-26T02:00:00.000Z');
+  const day3Get = await client.request('/api/time-management/daily-tracking/today');
+  const day3 = await day3Get.json();
+  assert.equal(day3Get.status, 200);
+  assert.equal(day3.trackingDate, '2026-07-26');
+  const task1InDay3 = day3.tasks.find(t => t.id === task1.id);
+  assert.equal(task1InDay3, undefined, 'done:true task must NOT carry over');
+  const task2InDay3 = day3.tasks.find(t => t.id === task2.id);
+  assert.ok(task2InDay3, 'task without tracking entry must carry over');
+  assert.equal(task2InDay3.name, '跨日编辑后名称');
+  assert.equal(task2InDay3.due, '2026-07-25');
+  assert.equal(task2InDay3.owner, '张三');
+  assert.equal(task2InDay3.source, task2.source, 'source must not change');
+  assert.equal(day3.tracking[task2.id]?.done, undefined, 'carried task must not have done:true');
+  assert.equal(day3.revision, 0, 'new day GET must not auto-write DB');
+
+  const day3Save = await saveDaily(client, {
+    trackingDate: day3.trackingDate,
+    tasks: [],
+    tracking: {},
+    removedTaskIds: [task2.id],
+    revision: day3.revision,
+  });
+  assert.equal(day3Save.status, 200);
+
+  currentInstant = new Date('2026-07-27T02:00:00.000Z');
+  const day4Get = await client.request('/api/time-management/daily-tracking/today');
+  const day4 = await day4Get.json();
+  assert.equal(day4Get.status, 200);
+  assert.equal(day4.trackingDate, '2026-07-27');
+  assert.equal(day4.tasks.find(t => t.id === task2.id), undefined, 'deleted task must not reappear');
+});
+
+test('daily API includes history generated after prior snapshot as delta', async (t) => {
+  let currentInstant = new Date('2026-07-23T02:00:00.000Z');
+  const { baseUrl } = await createAuthTestApp(t, {
+    now: () => currentInstant,
+  });
+  const client = new AuthClient(baseUrl);
+  await login(client, 'Daily_Delta_Clock');
+
+  const firstHistory = await saveHistory(client);
+  assert.equal(firstHistory.status, 201);
+  const opened = await (await client.request('/api/time-management/daily-tracking/today')).json();
+  const day1TaskIds = opened.tasks.map(t => t.id);
+
+  await saveDaily(client, {
+    trackingDate: opened.trackingDate,
+    tasks: opened.tasks,
+    tracking: {},
+    removedTaskIds: [],
+    revision: opened.revision,
+  });
+
+  currentInstant = new Date('2026-07-23T03:00:00.000Z');
+  const secondSnapshot = remapHistoryTaskIds(historySnapshot(), [
+    '77777777-7777-4777-8777-777777777777',
+    '88888888-8888-4888-8888-888888888888',
+  ]);
+  const secondHistory = await saveHistory(client, secondSnapshot);
+  assert.equal(secondHistory.status, 201);
+
+  currentInstant = new Date('2026-07-24T02:00:00.000Z');
+  const day2Get = await client.request('/api/time-management/daily-tracking/today');
+  const day2 = await day2Get.json();
+  assert.equal(day2Get.status, 200);
+  assert.equal(day2.trackingDate, '2026-07-24');
+  for (const id of day1TaskIds) {
+    assert.ok(day2.tasks.find(t => t.id === id), `day1 task ${id} must carry over`);
+  }
+  for (const id of secondSnapshot.tasks.map(t => t.id)) {
+    assert.ok(day2.tasks.find(t => t.id === id), `delta task ${id} must appear`);
+  }
+  assert.equal(day2.tasks.length, day1TaskIds.length + secondSnapshot.tasks.length);
+});
+
+test('daily API returns 409 when merged tasks exceed capacity', async (t) => {
+  let currentInstant = new Date('2026-07-23T02:00:00.000Z');
+  const { baseUrl, database } = await createAuthTestApp(t, {
+    now: () => currentInstant,
+  });
+  const client = new AuthClient(baseUrl);
+  await login(client, 'Daily_Cap_Clock');
+
+  for (let batch = 0; batch < 51; batch += 1) {
+    const idA = `${String(batch * 2 + 1).padStart(8, '0')}-0000-4000-8000-000000000000`;
+    const idB = `${String(batch * 2 + 2).padStart(8, '0')}-0000-4000-8000-000000000000`;
+    const twoTaskSnapshot = remapHistoryTaskIds(historySnapshot(), [idA, idB]);
+    assert.equal((await saveHistory(client, twoTaskSnapshot)).status, 201);
+  }
+
+  const overResponse = await client.request('/api/time-management/daily-tracking/today');
+  assert.equal(overResponse.status, 409);
+  const body = await overResponse.json();
+  assert.equal(body.error.code, 'DAILY_TRACKING_CAPACITY_EXCEEDED');
+  assert.doesNotMatch(body.error.message, /SQLITE|SELECT|tasks_json/i);
+
+  const row = await database.get(
+    'SELECT COUNT(*) AS count FROM daily_tracking_days WHERE user_id = ? AND tracking_date = ?',
+    [(await (await client.request('/api/auth/me')).json()).user.id, '2026-07-23'],
+  );
+  assert.equal(row?.count || 0, 0, 'DB must not be auto-written on capacity error');
 });

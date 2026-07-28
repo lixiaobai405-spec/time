@@ -8,7 +8,9 @@ const {
   TASK_STATUS,
   TEXT_LIMITS,
   URGENCY,
+  normalizeDueForWrite,
   normalizeOptionalDue,
+  normalizeOptionalOwner,
 } = require('../contracts/time-management');
 const { UUID_PATTERN } = require('../history/contracts');
 
@@ -28,6 +30,7 @@ const taskSchema = {
     'source',
     'due',
     'est',
+    'owner',
     'acceptanceCriteria',
     'nextAction',
     'status',
@@ -41,6 +44,7 @@ const taskSchema = {
     source: { enum: SOURCES },
     due: { type: 'string', minLength: 1, maxLength: TEXT_LIMITS.due },
     est: { type: 'string', maxLength: TEXT_LIMITS.est },
+    owner: { type: 'string', minLength: 1, maxLength: TEXT_LIMITS.owner },
     acceptanceCriteria: {
       type: 'array',
       maxItems: 5,
@@ -131,13 +135,28 @@ function assertSemantics(value) {
   }
 }
 
-function validateDailyWrite(value) {
+function validateDaily(value, { dueMode }) {
+  if (!['read', 'write'].includes(dueMode)) throw inputError();
   const normalized = Array.isArray(value?.tasks)
-    ? { ...value, tasks: value.tasks.map(normalizeOptionalDue) }
+    ? {
+      ...value,
+      tasks: value.tasks.map((task) => {
+        const withOwner = normalizeOptionalOwner(normalizeOptionalDue(task));
+        return dueMode === 'write' ? normalizeDueForWrite(withOwner) : withOwner;
+      }),
+    }
     : value;
   if (!validateShape(normalized)) throw inputError();
   assertSemantics(normalized);
   return JSON.parse(JSON.stringify(normalized));
+}
+
+function validateDailyRead(value) {
+  return validateDaily(value, { dueMode: 'read' });
+}
+
+function validateDailyWrite(value) {
+  return validateDaily(value, { dueMode: 'write' });
 }
 
 function decodeStoredDaily(row) {
@@ -145,7 +164,7 @@ function decodeStoredDaily(row) {
     if (!row || row.schema_version !== undefined) throw storedDataError();
     return {
       id: row.id,
-      ...validateDailyWrite({
+      ...validateDailyRead({
         trackingDate: row.tracking_date,
         tasks: JSON.parse(row.tasks_json),
         tracking: JSON.parse(row.tracking_json),
@@ -163,5 +182,6 @@ function decodeStoredDaily(row) {
 module.exports = {
   DAILY_TRACKING_SCHEMA_VERSION,
   decodeStoredDaily,
+  validateDailyRead,
   validateDailyWrite,
 };

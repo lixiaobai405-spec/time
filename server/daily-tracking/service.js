@@ -1,6 +1,7 @@
 const { shanghaiBusinessDay } = require('./business-date');
 const { validateDailyWrite } = require('./contracts');
 const { normalizeDue } = require('../policies/deadline');
+const { TASK_LIMIT } = require('../contracts/time-management');
 
 function dateChangedError() {
   return Object.assign(new Error('日期已变化，请重新进入今日跟踪。'), {
@@ -8,6 +9,41 @@ function dateChangedError() {
     status: 409,
     expose: true,
   });
+}
+
+function unfinishedTasksFrom(snapshot) {
+  if (!snapshot) return [];
+  const removed = new Set(snapshot.removedTaskIds || []);
+  return (snapshot.tasks || []).filter((task) => (
+    !removed.has(task.id)
+    && snapshot.tracking?.[task.id]?.done !== true
+  ));
+}
+
+function uniqueTasksById(groups) {
+  const byId = new Map();
+  for (const group of groups || []) {
+    for (const task of group || []) {
+      if (!byId.has(task.id)) byId.set(task.id, task);
+    }
+  }
+  return [...byId.values()];
+}
+
+function capacityExceededError() {
+  return Object.assign(
+    new Error(`每日清单最多保留 ${TASK_LIMIT} 项任务，请先完成或删除部分任务。`),
+    {
+      code: 'DAILY_TRACKING_CAPACITY_EXCEEDED',
+      status: 409,
+      expose: true,
+    },
+  );
+}
+
+function assertWithinCapacity(merged) {
+  if (merged.tasks.length > TASK_LIMIT) throw capacityExceededError();
+  return merged;
 }
 
 function mergeDailyTracking({ saved, sourceTasks, dueContext = {} }) {
@@ -73,6 +109,7 @@ function createDailyTrackingService({
   if (
     !dailyTrackingRepository
     || typeof dailyTrackingRepository.get !== 'function'
+    || typeof dailyTrackingRepository.getLatestBefore !== 'function'
     || typeof dailyTrackingRepository.save !== 'function'
     || !historyRepository
     || typeof historyRepository.listTasksCreatedBetween !== 'function'
@@ -83,11 +120,33 @@ function createDailyTrackingService({
   }
 
   async function sourceForDay(userId, day) {
-    return historyRepository.listTasksCreatedBetween({
+    const previous = await dailyTrackingRepository.getLatestBefore({
+      userId,
+      trackingDate: day.trackingDate,
+    });
+    const carried = unfinishedTasksFrom(previous);
+    const previousIds = new Set([
+      ...(previous?.tasks || []).map((task) => task.id),
+      ...(previous?.removedTaskIds || []),
+    ]);
+    const missed = previous?.updatedAt && previous.updatedAt >= day.startUtc
+      ? { historyCount: 0, tasks: [] }
+      : await historyRepository.listTasksCreatedBetween({
+        userId,
+        ...(previous?.updatedAt ? { startUtc: previous.updatedAt } : {}),
+        endUtc: day.startUtc,
+      });
+    const today = await historyRepository.listTasksCreatedBetween({
       userId,
       startUtc: day.startUtc,
       endUtc: day.endUtc,
     });
+    const newlyDiscovered = [...missed.tasks, ...today.tasks]
+      .filter((task) => !previousIds.has(task.id));
+    return {
+      historyCount: today.historyCount,
+      tasks: uniqueTasksById([carried, newlyDiscovered]),
+    };
   }
 
   function responseFor(day, source, merged) {
@@ -114,11 +173,13 @@ function createDailyTrackingService({
         dailyTrackingRepository.get({ userId, trackingDate: day.trackingDate }),
         sourceForDay(userId, day),
       ]);
-      return responseFor(day, source, mergeDailyTracking({
+      const merged = mergeDailyTracking({
         saved,
         sourceTasks: source.tasks,
         dueContext: { now: instant, timeZone: 'Asia/Shanghai' },
-      }));
+      });
+      assertWithinCapacity(merged);
+      return responseFor(day, source, merged);
     },
 
     async saveToday({ userId, snapshot } = {}) {
@@ -132,6 +193,7 @@ function createDailyTrackingService({
         sourceTasks: source.tasks,
         dueContext: { now: instant, timeZone: 'Asia/Shanghai' },
       });
+      assertWithinCapacity(merged);
       const stored = await dailyTrackingRepository.save({
         userId,
         trackingDate: day.trackingDate,

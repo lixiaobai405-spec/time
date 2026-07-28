@@ -9,6 +9,8 @@ const {
   TASK_STATUS,
   TEXT_LIMITS,
   URGENCY,
+  normalizeOptionalDue,
+  normalizeOptionalOwner,
   quadrantFor,
 } = require('../contracts/time-management');
 const { loadStepPrompt } = require('../prompts/load-step-prompt');
@@ -38,6 +40,7 @@ const validateRequest = ajv.compile({
           source: { enum: SOURCES },
           due: { type: 'string', maxLength: TEXT_LIMITS.due },
           est: { type: 'string', minLength: 1, maxLength: TEXT_LIMITS.est },
+          owner: { type: 'string', maxLength: TEXT_LIMITS.owner },
           acceptanceCriteria: {
             type: 'array',
             maxItems: 5,
@@ -170,7 +173,15 @@ function normalizeModelError(error) {
 }
 
 async function classifyMatrix({ tasks, modelClient, requestBody }) {
-  const input = requestBody || { tasks };
+  const rawInput = requestBody || { tasks };
+  const input = Array.isArray(rawInput?.tasks)
+    ? {
+      ...rawInput,
+      tasks: rawInput.tasks.map(task => (
+        normalizeOptionalOwner(normalizeOptionalDue(task))
+      )),
+    }
+    : rawInput;
   if (!validateRequest(input)) {
     throw publicError('INPUT_INVALID', '输入内容不符合要求。', 400);
   }

@@ -464,3 +464,193 @@ test('frontend 中不包含模型密钥、测试密钥或持久存储凭据的�
   assert.doesNotMatch(source, /MODEL_API_KEY|sk-test-sensitive-123/);
   assert.doesNotMatch(source, /localStorage|sessionStorage|indexedDB|document\.cookie|cookieStore/i);
 });
+
+test('报告最终失败日志包含白名单诊断字段且不含敏感内容', async () => {
+  const entries = [];
+  const marker = 'PRIVATE_REPORT_SECURITY_AUDIT_MARKER';
+  const tasks = [{ id: 'current', name: '当前任务', source: '今天' }];
+  const invalid = {
+    order: [{ taskId: 'deleted', reason: marker }],
+    energyRules: ['保留重要时间'],
+    adjustments: ['每周复盘'],
+  };
+  const modelClient = { completeJson: async () => invalid };
+  const app = createApp({
+    authBoundary: createTestAuthBoundary(),
+    modelClient,
+    logger: entry => entries.push(entry),
+  });
+  const server = await listen(app);
+
+  try {
+    const response = await fetch(
+      `http://127.0.0.1:${server.address().port}/api/time-management/report/generate`,
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          tasks,
+          matrix: { quadrants: [{ q: '第一象限', taskIds: ['current'] }] },
+          goals: { 昨天: '', 后天: '' },
+        }),
+      },
+    );
+    const body = await response.json();
+    assert.equal(response.status, 502);
+    assert.equal(body.error.code, 'MODEL_OUTPUT_INVALID');
+
+    await new Promise(resolve => setImmediate(resolve));
+    assert.ok(entries.length >= 1);
+    const reportEntry = entries.find(entry => entry.path === '/api/time-management/report/generate');
+    assert.ok(reportEntry);
+    assert.equal(reportEntry.requestId, body.error.requestId);
+    assert.ok(['REPORT_ORDER_REFERENCE_INVALID', 'REPORT_ORDER_PRIORITY_MISMATCH', 'MODEL_JSON_INVALID']
+      .includes(reportEntry.modelOutputReason));
+    assert.equal(reportEntry.modelAttempts, 2);
+    assert.equal(Object.keys(reportEntry).sort().join(','), 'durationMs,modelAttempts,modelOutputReason,path,requestId,status');
+    assert.doesNotMatch(JSON.stringify(reportEntry), new RegExp(marker));
+    assert.doesNotMatch(JSON.stringify(reportEntry), /deleted/);
+  } finally {
+    await close(server);
+  }
+});
+
+test('普通请求日志只包含四个白名单字段', async () => {
+  const entries = [];
+  const app = createApp({
+    authBoundary: createTestAuthBoundary(),
+    modelClient: { completeJson: async () => passingReview() },
+    logger: entry => entries.push(entry),
+  });
+  const server = await listen(app);
+
+  try {
+    const response = await fetch(
+      `http://127.0.0.1:${server.address().port}/api/time-management/goals/check`,
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ goals: COMPLETE_GOALS }),
+      },
+    );
+    assert.equal(response.status, 200);
+    await new Promise(resolve => setImmediate(resolve));
+    assert.ok(entries.length >= 1);
+    const goalEntry = entries.find(entry => entry.path === '/api/time-management/goals/check');
+    assert.ok(goalEntry);
+    assert.equal(Object.keys(goalEntry).sort().join(','), 'durationMs,path,requestId,status');
+    assert.equal(goalEntry.modelOutputReason, undefined);
+    assert.equal(goalEntry.modelAttempts, undefined);
+  } finally {
+    await close(server);
+  }
+});
+
+test('新解析诊断码在日志中以固定枚举出现且不泄漏 marker', async () => {
+  const entries = [];
+  const marker = 'PRIVATE-NEW-DIAGNOSTIC-MARKER';
+  const tasks = [{ id: 'current', name: '当前任务', source: '今天' }];
+  const modelClient = {
+    completeJson: async () => {
+      throw Object.assign(new Error(`model output is invalid ${marker}`), {
+        code: 'MODEL_OUTPUT_INVALID',
+        diagnosticCode: 'MODEL_JSON_TRUNCATED',
+        modelAttempts: 2,
+      });
+    },
+  };
+  const app = createApp({
+    authBoundary: createTestAuthBoundary(),
+    modelClient,
+    logger: entry => entries.push(entry),
+  });
+  const server = await listen(app);
+
+  try {
+    const response = await fetch(
+      `http://127.0.0.1:${server.address().port}/api/time-management/report/generate`,
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          tasks,
+          matrix: { quadrants: [{ q: '第一象限', taskIds: ['current'] }] },
+          goals: { 昨天: '', 后天: '' },
+        }),
+      },
+    );
+    const body = await response.json();
+    assert.equal(response.status, 502);
+    assert.equal(body.error.code, 'MODEL_OUTPUT_INVALID');
+    assert.equal(body.error.diagnosticCode, undefined);
+    assert.doesNotMatch(JSON.stringify(body), /MODEL_JSON_TRUNCATED/);
+    assert.doesNotMatch(JSON.stringify(body), new RegExp(marker));
+
+    await new Promise(resolve => setImmediate(resolve));
+    const reportEntry = entries.find(entry => entry.path === '/api/time-management/report/generate');
+    assert.ok(reportEntry);
+    assert.equal(reportEntry.modelOutputReason, 'MODEL_JSON_TRUNCATED');
+    assert.equal(reportEntry.modelAttempts, 2);
+    assert.doesNotMatch(JSON.stringify(reportEntry), new RegExp(marker));
+    assert.equal(Object.keys(reportEntry).sort().join(','), 'durationMs,modelAttempts,modelOutputReason,path,requestId,status');
+  } finally {
+    await close(server);
+  }
+});
+
+test('报告 JSON 语法子类日志不包含原始解析错误', async () => {
+  const entries = [];
+  const marker = 'PRIVATE-JSON-PARSE-ERROR-MARKER';
+  const modelClient = {
+    async completeJson() {
+      throw Object.assign(
+        new Error(`Bad control character ${marker} at position 123`),
+        {
+          code: 'MODEL_OUTPUT_INVALID',
+          diagnosticCode: 'MODEL_JSON_CONTROL_CHARACTER_INVALID',
+        },
+      );
+    },
+  };
+  const app = createApp({
+    authBoundary: createTestAuthBoundary(),
+    modelClient,
+    logger: entry => entries.push(entry),
+  });
+  const server = await listen(app);
+
+  try {
+    const response = await fetch(
+      `http://127.0.0.1:${server.address().port}/api/time-management/report/generate`,
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          tasks: [{ id: 'current', name: '当前任务', source: '今天' }],
+          matrix: { quadrants: [{ q: '第一象限', taskIds: ['current'] }] },
+          goals: { 昨天: '', 后天: '' },
+        }),
+      },
+    );
+    const body = await response.json();
+    await new Promise(resolve => setImmediate(resolve));
+    const reportEntry = entries.find(
+      entry => entry.path === '/api/time-management/report/generate',
+    );
+
+    assert.equal(response.status, 502);
+    assert.equal(body.error.code, 'MODEL_OUTPUT_INVALID');
+    assert.equal(body.error.diagnosticCode, undefined);
+    assert.equal(reportEntry.modelOutputReason, 'MODEL_JSON_CONTROL_CHARACTER_INVALID');
+    assert.equal(reportEntry.modelAttempts, 2);
+    assert.equal(
+      Object.keys(reportEntry).sort().join(','),
+      'durationMs,modelAttempts,modelOutputReason,path,requestId,status',
+    );
+    assert.doesNotMatch(JSON.stringify(body), new RegExp(marker));
+    assert.doesNotMatch(JSON.stringify(reportEntry), new RegExp(marker));
+    assert.doesNotMatch(JSON.stringify(reportEntry), /position|control character/i);
+  } finally {
+    await close(server);
+  }
+});

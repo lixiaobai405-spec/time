@@ -45,6 +45,7 @@ function mapDetail(row) {
     tasksJson: row.tasks_json,
     matrixJson: row.matrix_json,
     reportJson: row.report_json,
+    distributionJson: row.distribution_json,
     schemaVersion: row.schema_version,
   });
   return {
@@ -58,7 +59,7 @@ function mapDetail(row) {
 
 const DETAIL_COLUMNS = `
   id, client_run_id, title, goals_json, tasks_json, matrix_json, report_json,
-  schema_version, created_at, updated_at
+  distribution_json, schema_version, created_at, updated_at
 `;
 
 function createHistoryRepository({
@@ -69,7 +70,7 @@ function createHistoryRepository({
   return Object.freeze({
     async save({ userId, snapshot }) {
       const ownerId = requireUserId(userId);
-      const value = validateHistorySnapshot(snapshot);
+      const value = validateHistorySnapshot(snapshot, { dueMode: 'write' });
       const id = randomUUID();
       if (!UUID.test(id)) throw new Error('History UUID source returned an invalid result.');
       const timestamp = now();
@@ -78,8 +79,8 @@ function createHistoryRepository({
         const inserted = await transaction.run(
           `INSERT INTO time_management_runs (
             id, user_id, client_run_id, title, goals_json, tasks_json, matrix_json,
-            report_json, schema_version, created_at, updated_at
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            report_json, distribution_json, schema_version, created_at, updated_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
           ON CONFLICT(user_id, client_run_id) DO NOTHING`,
           [
             id,
@@ -90,6 +91,7 @@ function createHistoryRepository({
             JSON.stringify(value.tasks),
             JSON.stringify(value.matrix),
             JSON.stringify(value.report),
+            JSON.stringify(value.distribution),
             HISTORY_SCHEMA_VERSION,
             timestamp,
             timestamp,
@@ -138,12 +140,18 @@ function createHistoryRepository({
 
     async listTasksCreatedBetween({ userId, startUtc, endUtc } = {}) {
       const ownerId = requireUserId(userId);
+      const hasStart = startUtc !== undefined && startUtc !== null;
       if (
-        typeof startUtc !== 'string'
-        || typeof endUtc !== 'string'
-        || Number.isNaN(Date.parse(startUtc))
+        typeof endUtc !== 'string'
         || Number.isNaN(Date.parse(endUtc))
-        || startUtc >= endUtc
+        || (
+          hasStart
+          && (
+            typeof startUtc !== 'string'
+            || Number.isNaN(Date.parse(startUtc))
+            || startUtc >= endUtc
+          )
+        )
       ) {
         throw Object.assign(new Error('History date range is invalid.'), {
           code: 'INPUT_INVALID',
@@ -151,12 +159,16 @@ function createHistoryRepository({
           expose: true,
         });
       }
+      const lowerBoundSql = hasStart ? 'AND created_at >= ?' : '';
+      const params = hasStart
+        ? [ownerId, startUtc, endUtc]
+        : [ownerId, endUtc];
       const rows = await database.all(
         `SELECT ${DETAIL_COLUMNS}
          FROM time_management_runs
-         WHERE user_id = ? AND created_at >= ? AND created_at < ?
+         WHERE user_id = ? ${lowerBoundSql} AND created_at < ?
          ORDER BY created_at ASC, id ASC`,
-        [ownerId, startUtc, endUtc],
+        params,
       );
       return {
         historyCount: rows.length,

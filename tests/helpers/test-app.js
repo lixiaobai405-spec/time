@@ -9,13 +9,15 @@ const SESSION_SECRET = 'fake-auth-api-session-secret-with-at-least-forty-eight-b
 
 async function createAuthTestApp(t, options = {}) {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'time-auth-app-'));
-  const runtime = await createRuntime({
+  const config = {
     databasePath: path.join(directory, 'auth.sqlite'),
     sessionSecret: SESSION_SECRET,
     sessionCookieSecure: false,
     sessionMaxAgeMs: 604_800_000,
     ...options.config,
-  });
+  };
+  const runtimeOptions = options.now ? { now: options.now } : {};
+  const runtime = await createRuntime(config, runtimeOptions);
   const app = createApp({
     modelClient: options.modelClient || { completeJson: async () => ({}) },
     authBoundary: runtime.authBoundary,

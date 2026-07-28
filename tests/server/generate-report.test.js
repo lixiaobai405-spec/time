@@ -2,10 +2,14 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 
 const { generateReport } = require('../../server/workflows/generate-report');
+const {
+  buildReportScheduleContext,
+  hasScheduleConflict,
+} = require('../../server/policies/report-schedule');
 const { createTestAuthBoundary } = require('../helpers/test-auth-boundary');
 
 function task(id, overrides = {}) {
-  return { id, name: `任务 ${id}`, source: '今天', ...overrides };
+  return { id, name: `任务 ${id}`, source: '今天', due: '待确认', owner: '待确认', ...overrides };
 }
 
 function matrixFor(tasks) {
@@ -451,14 +455,50 @@ test('报告时间建议首次冲突时携带调度上下文并重试成功', as
   });
 });
 
-test('报告连续两次建议冲突时间时返回稳定模型输出错误', async () => {
+test('报告连续两次建议冲突时间时返回重新校验后的安全回退', async () => {
   const tasks = [task('meeting', {
     name: '召开风险会议',
     due: '今天18:00',
     est: '30分钟',
   })];
   const invalid = reportFor(tasks, {
-    adjustments: ['17:45-18:30 集中推进另一项方案'],
+    adjustments: ['17:45-18:30集中推进另一项方案'],
+  });
+  const modelClient = queuedModel([invalid, invalid]);
+
+  const result = await generateReport({
+    tasks,
+    matrix: matrixFor(tasks),
+    goals: { 昨天: '', 后天: '' },
+    modelClient,
+    now: () => new Date('2026-07-20T04:00:00.000Z'),
+  });
+
+  assert.equal(modelClient.calls.length, 2);
+  assert.deepEqual(result.adjustments, [
+    '调整任务安排时，避开已有截止点和保护时段，并按当前优先级推进。',
+  ]);
+  assert.equal(
+    hasScheduleConflict(
+      result,
+      buildReportScheduleContext({
+        tasks,
+        now: () => new Date('2026-07-20T04:00:00.000Z'),
+        timeZone: 'Asia/Shanghai',
+      }),
+    ),
+    false,
+  );
+});
+
+test('时间冲突回退导致剩余保护任务安排丢失时仍拒绝报告', async () => {
+  const tasks = Array.from({ length: 6 }, (_, index) => task(`due-${index + 1}`, {
+    name: `任务 ${index + 1}`,
+    due: `2026-07-20 ${String(13 + index).padStart(2, '0')}:00`,
+    est: '30分钟',
+  }));
+  const invalid = reportFor(tasks, {
+    adjustments: ['16:45-17:15安排紧急方案'],
   });
   const modelClient = queuedModel([invalid, invalid]);
 
@@ -470,13 +510,16 @@ test('报告连续两次建议冲突时间时返回稳定模型输出错误', as
       modelClient,
       now: () => new Date('2026-07-20T04:00:00.000Z'),
     }),
-    error => error.code === 'MODEL_OUTPUT_INVALID' && error.status === 502,
+    error => error.code === 'MODEL_OUTPUT_INVALID'
+      && error.diagnosticCode === 'REPORT_REMAINING_PROTECTED_UNSCHEDULED'
+      && error.modelAttempts === 2,
   );
   assert.equal(modelClient.calls.length, 2);
 });
 
-test('报告 API 连续时间冲突只返回安全错误而不泄漏模型原文', async () => {
+test('报告 API 连续时间冲突时返回安全回退且日志保持普通成功字段', async () => {
   const { createApp } = require('../../server/app');
+  const entries = [];
   const tasks = [task('meeting', {
     name: '召开风险会议',
     due: '今天18:00',
@@ -488,6 +531,7 @@ test('报告 API 连续时间冲突只返回安全错误而不泄漏模型原文
   const app = createApp({
     authBoundary: createTestAuthBoundary(),
     modelClient,
+    logger: entry => entries.push(entry),
     now: () => new Date('2026-07-20T04:00:00.000Z'),
   });
   const server = await listen(app);
@@ -505,11 +549,23 @@ test('报告 API 连续时间冲突只返回安全错误而不泄漏模型原文
         }),
       },
     );
-    const serialized = JSON.stringify(await response.json());
-    assert.equal(response.status, 502);
-    assert.match(serialized, /MODEL_OUTPUT_INVALID/);
-    assert.doesNotMatch(serialized, /PRIVATE-CONFLICT/);
+    const body = await response.json();
+    await new Promise(resolve => setImmediate(resolve));
+    const reportEntry = entries.find(
+      entry => entry.path === '/api/time-management/report/generate',
+    );
+
+    assert.equal(response.status, 200);
+    assert.deepEqual(body.adjustments, [
+      '调整任务安排时，避开已有截止点和保护时段，并按当前优先级推进。',
+    ]);
+    assert.doesNotMatch(JSON.stringify(body), /PRIVATE-CONFLICT/);
     assert.equal(modelClient.calls.length, 2);
+    assert.equal(
+      Object.keys(reportEntry).sort().join(','),
+      'durationMs,path,requestId,status',
+    );
+    assert.equal(reportEntry.status, 200);
   } finally {
     await close(server);
   }
@@ -554,4 +610,285 @@ test('POST /api/time-management/report/generate 返回结构化报告', async ()
   } finally {
     await close(server);
   }
+});
+
+test('报告语义失败后第二次请求携带安全定向反馈', async () => {
+  const tasks = [
+    task('later', { due: '2026-07-27 17:00' }),
+    task('earlier', { due: '2026-07-27 16:00' }),
+  ];
+  const invalid = reportFor(tasks);
+  const valid = reportFor(tasks, {
+    order: [
+      { taskId: 'earlier', reason: '16:00 前完成' },
+      { taskId: 'later', reason: '17:00 前完成' },
+    ],
+  });
+  const modelClient = queuedModel([invalid, valid]);
+
+  await generateReport({
+    tasks,
+    matrix: matrixFor(tasks),
+    goals: { 昨天: '', 后天: '' },
+    modelClient,
+    now: () => new Date('2026-07-27T04:00:00.000Z'),
+  });
+
+  const firstInput = JSON.parse(modelClient.calls[0].user);
+  const secondInput = JSON.parse(modelClient.calls[1].user);
+  assert.equal(firstInput.retryFeedback, undefined);
+  assert.deepEqual(secondInput.retryFeedback, {
+    failedRule: 'REPORT_ORDER_PRIORITY_MISMATCH',
+    correction: 'order.taskId 必须与 priorityContext.recommendedTaskIds 完全同序。',
+  });
+});
+
+test('报告连续两次语义失败时保留安全诊断码', async () => {
+  const tasks = [task('current')];
+  const invalid = reportFor(tasks, {
+    order: [{ taskId: 'deleted', reason: '旧任务' }],
+  });
+
+  await assert.rejects(
+    generateReport({
+      tasks,
+      matrix: matrixFor(tasks),
+      goals: { 昨天: '', 后天: '' },
+      modelClient: queuedModel([invalid, invalid]),
+    }),
+    error => error.code === 'MODEL_OUTPUT_INVALID'
+      && error.diagnosticCode === 'REPORT_ORDER_REFERENCE_INVALID'
+      && error.modelAttempts === 2,
+  );
+});
+
+test('报告 Schema 失败时第二次请求收到结构纠错', async () => {
+  const tasks = [task('task-a')];
+  const modelClient = queuedModel([
+    { order: [], energyRules: [], adjustments: [] },
+    reportFor(tasks),
+  ]);
+
+  await generateReport({
+    tasks,
+    matrix: matrixFor(tasks),
+    goals: { 昨天: '', 后天: '' },
+    modelClient,
+  });
+
+  const retry = JSON.parse(modelClient.calls[1].user).retryFeedback;
+  assert.equal(retry.failedRule, 'REPORT_SCHEMA_INVALID');
+  assert.match(retry.correction, /order|energyRules|adjustments/);
+});
+
+test('报告 API 连续失败时日志包含安全诊断元数据', async () => {
+  const { createApp } = require('../../server/app');
+  const entries = [];
+  const tasks = [task('current')];
+  const invalid = reportFor(tasks, {
+    order: [{ taskId: 'deleted', reason: '旧任务' }],
+  });
+  const marker = 'SENSITIVE-MODEL-OUTPUT-12345';
+  invalid.order[0].reason = marker;
+  const modelClient = queuedModel([invalid, invalid]);
+  const app = createApp({
+    authBoundary: createTestAuthBoundary(),
+    modelClient,
+    logger: entry => entries.push(entry),
+  });
+  const server = await listen(app);
+
+  try {
+    const response = await fetch(
+      `http://127.0.0.1:${server.address().port}/api/time-management/report/generate`,
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          tasks,
+          matrix: matrixFor(tasks),
+          goals: { 昨天: '', 后天: '' },
+        }),
+      },
+    );
+    const body = await response.json();
+    assert.equal(response.status, 502);
+    assert.equal(body.error.code, 'MODEL_OUTPUT_INVALID');
+    assert.equal(body.error.diagnosticCode, undefined);
+    assert.equal(body.error.modelOutputReason, undefined);
+    assert.match(JSON.stringify(body), /MODEL_OUTPUT_INVALID/);
+    assert.doesNotMatch(JSON.stringify(body), /deleted/);
+    assert.doesNotMatch(JSON.stringify(body), new RegExp(marker));
+
+    assert.equal(entries.length, 1);
+    const logEntry = entries[0];
+    assert.equal(logEntry.requestId, body.error.requestId);
+    assert.equal(logEntry.modelOutputReason, 'REPORT_ORDER_REFERENCE_INVALID');
+    assert.equal(logEntry.modelAttempts, 2);
+    assert.doesNotMatch(JSON.stringify(logEntry), new RegExp(marker));
+    assert.doesNotMatch(JSON.stringify(logEntry), /deleted/);
+    assert.equal(modelClient.calls.length, 2);
+  } finally {
+    await close(server);
+  }
+});
+
+function rejectingModel(diagnosticCode) {
+  const calls = [];
+  return {
+    calls,
+    async completeJson(input) {
+      calls.push(input);
+      throw Object.assign(new Error('model output is invalid'), {
+        code: 'MODEL_OUTPUT_INVALID',
+        diagnosticCode,
+      });
+    },
+  };
+}
+
+test('报告正文截断时第二次请求收到固定纠错且最终保留原因码', async () => {
+  const tasks = [task('current')];
+  const modelClient = rejectingModel('MODEL_JSON_TRUNCATED');
+
+  await assert.rejects(
+    generateReport({
+      tasks,
+      matrix: matrixFor(tasks),
+      goals: { 昨天: '', 后天: '' },
+      modelClient,
+    }),
+    error => error.code === 'MODEL_OUTPUT_INVALID'
+      && error.diagnosticCode === 'MODEL_JSON_TRUNCATED'
+      && error.modelAttempts === 2,
+  );
+
+  assert.equal(modelClient.calls.length, 2);
+  const retry = JSON.parse(modelClient.calls[1].user).retryFeedback;
+  assert.equal(retry.failedRule, 'MODEL_JSON_TRUNCATED');
+  assert.match(retry.correction, /完整 JSON|截断|缩短/);
+});
+
+test('报告控制字符语法失败时第二次请求收到固定纠错', async () => {
+  const tasks = [task('current')];
+  const modelClient = rejectingModel('MODEL_JSON_CONTROL_CHARACTER_INVALID');
+
+  await assert.rejects(
+    generateReport({
+      tasks,
+      matrix: matrixFor(tasks),
+      goals: { 昨天: '', 后天: '' },
+      modelClient,
+    }),
+    error => error.code === 'MODEL_OUTPUT_INVALID'
+      && error.diagnosticCode === 'MODEL_JSON_CONTROL_CHARACTER_INVALID'
+      && error.modelAttempts === 2,
+  );
+
+  assert.equal(modelClient.calls.length, 2);
+  const retry = JSON.parse(modelClient.calls[1].user).retryFeedback;
+  assert.equal(retry.failedRule, 'MODEL_JSON_CONTROL_CHARACTER_INVALID');
+  assert.match(retry.correction, /控制字符|\\n|转义/);
+});
+
+// --- Fix 3: generate-report entry normalizes missing due/owner ---
+
+test('report entry normalizes missing due and owner to 待确认 before model call', async () => {
+  const tasks = [task('t1', { name: '任务', source: '今天' })];
+  // deliberately omit due and owner
+  delete tasks[0].due;
+  delete tasks[0].owner;
+  const expected = reportFor(tasks);
+  const modelClient = queuedModel([expected]);
+
+  await generateReport({
+    tasks,
+    matrix: matrixFor(tasks),
+    goals: { 昨天: '', 后天: '' },
+    modelClient,
+  });
+
+  const sent = JSON.parse(modelClient.calls[0].user);
+  assert.equal(sent.tasks[0].due, '待确认');
+  assert.equal(sent.tasks[0].owner, '待确认');
+});
+
+test('report entry preserves distribution and retry feedback after normalization', async () => {
+  const tasks = [
+    task('later', { due: '2026-07-27 17:00' }),
+    task('earlier', { due: '2026-07-27 16:00' }),
+  ];
+  const invalid = reportFor(tasks);
+  const valid = reportFor(tasks, {
+    order: [
+      { taskId: 'earlier', reason: '16:00 前完成' },
+      { taskId: 'later', reason: '17:00 前完成' },
+    ],
+  });
+  const modelClient = queuedModel([invalid, valid]);
+  const distribution = {
+    totalMinutes: 120,
+    totalHours: 2,
+    validTaskCount: 2,
+    invalidTasks: [],
+    percentages: { 昨天: 0, 今天: 100, 明天: 0, 后天: 0 },
+    categories: [
+      { key: '昨天', percent: 0, status: 'under' },
+      { key: '今天', percent: 100, status: 'over' },
+      { key: '明天', percent: 0, status: 'under' },
+      { key: '后天', percent: 0, status: 'under' },
+    ],
+    diagnosis: ['今天投入偏高。'],
+    recommendations: ['适当授权。'],
+  };
+
+  await generateReport({
+    tasks,
+    matrix: matrixFor(tasks),
+    goals: { 昨天: '', 后天: '' },
+    distribution,
+    modelClient,
+    now: () => new Date('2026-07-27T04:00:00.000Z'),
+  });
+
+  assert.equal(modelClient.calls.length, 2);
+  // Verify distribution was passed through to model context
+  const firstInput = JSON.parse(modelClient.calls[0].user);
+  assert.deepEqual(firstInput.distribution, distribution);
+  // Verify retry feedback is present on second call
+  const secondInput = JSON.parse(modelClient.calls[1].user);
+  assert.equal(secondInput.retryFeedback.failedRule, 'REPORT_ORDER_PRIORITY_MISMATCH');
+});
+
+test('report entry normalization does not break existing safety diagnostics or fallback', async () => {
+  const tasks = [task('meeting', {
+    name: '召开风险会议',
+    due: '今天18:00',
+    est: '30分钟',
+  })];
+  const invalid = reportFor(tasks, {
+    adjustments: ['17:45-18:30集中推进另一项方案'],
+  });
+  const modelClient = queuedModel([invalid, invalid]);
+
+  const result = await generateReport({
+    tasks,
+    matrix: matrixFor(tasks),
+    goals: { 昨天: '', 后天: '' },
+    modelClient,
+    now: () => new Date('2026-07-20T04:00:00.000Z'),
+  });
+
+  assert.equal(modelClient.calls.length, 2);
+  assert.equal(
+    hasScheduleConflict(
+      result,
+      buildReportScheduleContext({
+        tasks,
+        now: () => new Date('2026-07-20T04:00:00.000Z'),
+        timeZone: 'Asia/Shanghai',
+      }),
+    ),
+    false,
+  );
 });

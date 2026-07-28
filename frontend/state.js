@@ -37,6 +37,18 @@ function emptyDaily() {
   };
 }
 
+function emptyHomeDaily() {
+  return {
+    loaded: false,
+    loading: false,
+    trackingDate: '',
+    tasks: [],
+    tracking: {},
+    sourceSummary: { historyCount: 0, taskCount: 0 },
+    error: null,
+  };
+}
+
 export const state = {
   authReady: false,
   user: null,
@@ -60,13 +72,15 @@ export const state = {
 
   tracking: {},
   sessionHistory: [],
-  rolledDates: {},
   daily: emptyDaily(),
 
   historySave: idleHistorySave(),
   historyItems: [],
   historyCursor: null,
   historyDetail: null,
+
+  homeDaily: emptyHomeDaily(),
+  homeDailyExpanded: false,
 
   pending: null,
   error: null,
@@ -141,8 +155,9 @@ export function resetState() {
   state.historyCursor = null;
   state.historyDetail = null;
   state.sessionHistory = [];
-  state.rolledDates = {};
   state.daily = emptyDaily();
+  state.homeDaily = emptyHomeDaily();
+  state.homeDailyExpanded = false;
 }
 
 // Compatibility exports retained for existing callers while the UI migrates to the five-step names.

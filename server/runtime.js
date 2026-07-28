@@ -51,13 +51,20 @@ function includeSessionMaxAge(sessionMiddleware, sessionMaxAgeMs) {
   };
 }
 
-async function createRuntime(config) {
+async function createRuntime(config, { now = () => new Date() } = {}) {
   const database = await openDatabase({ filename: config.databasePath });
-  const historyRepository = createHistoryRepository({ database });
-  const dailyTrackingRepository = createDailyTrackingRepository({ database });
+  const historyRepository = createHistoryRepository({
+    database,
+    now: () => now().toISOString(),
+  });
+  const dailyTrackingRepository = createDailyTrackingRepository({
+    database,
+    now: () => now().toISOString(),
+  });
   const dailyTrackingService = createDailyTrackingService({
     dailyTrackingRepository,
     historyRepository,
+    now,
   });
   const userRepository = createUserRepository({ database });
   const sessionRepository = createSessionRepository({ database });

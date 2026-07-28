@@ -1,6 +1,6 @@
 const crypto = require('node:crypto');
 
-const { decodeStoredDaily, validateDailyWrite } = require('../daily-tracking/contracts');
+const { decodeStoredDaily, validateDailyRead, validateDailyWrite } = require('../daily-tracking/contracts');
 const { UUID_PATTERN } = require('../history/contracts');
 
 const UUID = new RegExp(UUID_PATTERN);
@@ -38,7 +38,7 @@ function createDailyTrackingRepository({
   return Object.freeze({
     async get({ userId, trackingDate } = {}) {
       const ownerId = requireUserId(userId);
-      const probe = validateDailyWrite({
+      const probe = validateDailyRead({
         trackingDate,
         tasks: [],
         tracking: {},
@@ -49,6 +49,26 @@ function createDailyTrackingRepository({
         `SELECT ${COLUMNS}
          FROM daily_tracking_days
          WHERE user_id = ? AND tracking_date = ?`,
+        [ownerId, probe.trackingDate],
+      );
+      return row ? decodeStoredDaily(row) : null;
+    },
+
+    async getLatestBefore({ userId, trackingDate } = {}) {
+      const ownerId = requireUserId(userId);
+      const probe = validateDailyRead({
+        trackingDate,
+        tasks: [],
+        tracking: {},
+        removedTaskIds: [],
+        revision: 0,
+      });
+      const row = await database.get(
+        `SELECT ${COLUMNS}
+         FROM daily_tracking_days
+         WHERE user_id = ? AND tracking_date < ?
+         ORDER BY tracking_date DESC
+         LIMIT 1`,
         [ownerId, probe.trackingDate],
       );
       return row ? decodeStoredDaily(row) : null;

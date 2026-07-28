@@ -9,6 +9,7 @@ const {
   TEXT_LIMITS,
   URGENCY,
   normalizeOptionalDue,
+  normalizeOptionalOwner,
   parseEstimatedMinutes,
 } = require('../contracts/time-management');
 
@@ -28,13 +29,14 @@ const validateRequest = ajv.compile({
       items: {
         type: 'object',
         additionalProperties: false,
-        required: ['id', 'name', 'source', 'due', 'est', 'importance', 'urgency', 'status', 'classificationSource'],
+        required: ['id', 'name', 'source', 'due', 'est', 'owner', 'importance', 'urgency', 'status', 'classificationSource'],
         properties: {
           id: { type: 'string', minLength: 1, maxLength: 200 },
           name: { type: 'string', maxLength: TEXT_LIMITS.taskName },
           source: { enum: SOURCES },
           due: { type: 'string', maxLength: TEXT_LIMITS.due },
           est: { type: 'string', maxLength: TEXT_LIMITS.est },
+          owner: { type: 'string', maxLength: TEXT_LIMITS.owner },
           importance: nullableImportance,
           urgency: nullableUrgency,
           acceptanceCriteria: {
@@ -77,7 +79,7 @@ function issuesForTask(task) {
 function checkTaskSmart({ tasks, requestBody } = {}) {
   const rawInput = requestBody || { tasks };
   const input = Array.isArray(rawInput?.tasks)
-    ? { ...rawInput, tasks: rawInput.tasks.map(normalizeOptionalDue) }
+    ? { ...rawInput, tasks: rawInput.tasks.map(task => normalizeOptionalOwner(normalizeOptionalDue(task))) }
     : rawInput;
   if (!validateRequest(input)) {
     throw publicError('INPUT_INVALID', '任务数据不符合 SMART 校验要求。', 400);

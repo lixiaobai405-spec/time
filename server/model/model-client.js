@@ -12,6 +12,13 @@ function normalizeMaxAttempts(value) {
   return attempts;
 }
 
+function normalizeFinishReason(value) {
+  if (value === 'length' || value === 'content_filter' || value === 'stop') {
+    return value;
+  }
+  return 'other';
+}
+
 function createModelClient({
   modelApiBaseUrl,
   modelApiKey,
@@ -72,9 +79,16 @@ function createModelClient({
     try {
       payload = await response.json();
     } catch {
-      throw modelError('MODEL_OUTPUT_INVALID', 'model output is invalid');
+      const error = Object.assign(new Error('model output is invalid'), {
+        code: 'MODEL_OUTPUT_INVALID',
+        diagnosticCode: 'MODEL_RESPONSE_ENVELOPE_INVALID',
+      });
+      throw error;
     }
-    return parseModelJson(payload?.choices?.[0]?.message?.content);
+    const choice = payload?.choices?.[0];
+    return parseModelJson(choice?.message?.content, {
+      finishReason: normalizeFinishReason(choice?.finish_reason),
+    });
   }
 
   async function completeJson({ system, user, temperature = 0.2, maxAttempts = 2 }) {

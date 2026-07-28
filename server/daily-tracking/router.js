@@ -11,7 +11,7 @@ function databaseUnavailable() {
 }
 
 function isExpected(error) {
-  return ['INPUT_INVALID', 'DAILY_TRACKING_CONFLICT', 'DAILY_TRACKING_DATE_CHANGED']
+  return ['INPUT_INVALID', 'DAILY_TRACKING_CONFLICT', 'DAILY_TRACKING_DATE_CHANGED', 'DAILY_TRACKING_CAPACITY_EXCEEDED']
     .includes(error?.code);
 }
 

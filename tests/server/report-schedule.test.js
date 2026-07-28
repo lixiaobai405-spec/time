@@ -5,6 +5,7 @@ const {
   buildReportScheduleContext,
   hasScheduleConflict,
   parseEstimatedRangeMinutes,
+  stabilizeScheduleConflicts,
 } = require('../../server/policies/report-schedule');
 
 const SHANGHAI_NOON = () => new Date('2026-07-20T04:00:00.000Z');
@@ -108,4 +109,74 @@ test('安排被保护任务本身、非重叠时段和截止说明不误判', ()
   assert.equal(hasScheduleConflict(report({
     adjustments: ['召开风险会议需在18:00前完成'],
   }), scheduleContext), false);
+});
+
+test('稳定化只替换冲突条目并保留非冲突内容且不修改输入', () => {
+  const scheduleContext = buildReportScheduleContext({
+    tasks: [
+      task('review', { name: '审核方案', due: '今天17:00', est: '1h' }),
+      task('meeting', { name: '召开风险会议', due: '今天18:00', est: '30分钟' }),
+    ],
+    now: SHANGHAI_NOON,
+    timeZone: 'Asia/Shanghai',
+  });
+  const input = {
+    order: [{ taskId: 'review', reason: '优先处理审核方案' }],
+    energyRules: [
+      '17:00-18:30集中推进实施方案',
+      '19:00-20:00处理非紧急工作',
+      '17:30-18:00召开风险会议',
+    ],
+    adjustments: [
+      '16:30至17:30整理一般资料',
+      '每周复盘1次长期目标',
+    ],
+  };
+  const snapshot = structuredClone(input);
+
+  const result = stabilizeScheduleConflicts(input, scheduleContext);
+
+  assert.deepEqual(input, snapshot);
+  assert.notEqual(result, input);
+  assert.deepEqual(result.order, input.order);
+  assert.deepEqual(result.energyRules, [
+    '安排专注工作时，避开已有截止点和保护时段。',
+    '19:00-20:00处理非紧急工作',
+    '17:30-18:00召开风险会议',
+  ]);
+  assert.deepEqual(result.adjustments, [
+    '调整任务安排时，避开已有截止点和保护时段，并按当前优先级推进。',
+    '每周复盘1次长期目标',
+  ]);
+  assert.equal(hasScheduleConflict(result, scheduleContext), false);
+});
+
+test('多个同类冲突条目稳定化后去重且数组保持非空', () => {
+  const scheduleContext = buildReportScheduleContext({
+    tasks: [task('meeting', {
+      name: '召开风险会议',
+      due: '今天18:00',
+      est: '30分钟',
+    })],
+    now: SHANGHAI_NOON,
+    timeZone: 'Asia/Shanghai',
+  });
+  const result = stabilizeScheduleConflicts({
+    order: [],
+    energyRules: [
+      '17:30-18:30推进方案A',
+      '17:45-18:15推进方案B',
+    ],
+    adjustments: [
+      '17:30-18:30整理材料A',
+      '17:45-18:15整理材料B',
+    ],
+  }, scheduleContext);
+
+  assert.deepEqual(result.energyRules, [
+    '安排专注工作时，避开已有截止点和保护时段。',
+  ]);
+  assert.deepEqual(result.adjustments, [
+    '调整任务安排时，避开已有截止点和保护时段，并按当前优先级推进。',
+  ]);
 });

@@ -22,17 +22,23 @@ const entries = {
   后天: '',
 };
 
-const modelTask = {
-  name: '完成时间管理新版接口联调',
-  importance: '高',
-  urgency: '高',
-  source: '今天',
-  due: '2026-07-22',
-  est: '1h',
-  acceptanceCriteria: [],
-  nextAction: '',
-  status: 'pending',
-};
+function directTasks(taskOverridesArray) {
+  return {
+    tasks: taskOverridesArray.map((overrides) => ({
+      name: '完成时间管理新版接口联调',
+      importance: '高',
+      urgency: '高',
+      source: '今天',
+      due: '待确认',
+      est: '1h',
+      owner: '待确认',
+      acceptanceCriteria: [],
+      nextAction: '',
+      status: 'pending',
+      ...overrides,
+    })),
+  };
+}
 
 test('新版五步接口要求登录和会话 CSRF', async (t) => {
   const { baseUrl } = await createAuthTestApp(t);
@@ -49,7 +55,7 @@ test('四栏校验、任务拆解、SMART 和时间分布通过正式 API 串联
   const client = await authenticatedClient(t, {
     completeJson: async () => {
       modelCalls += 1;
-      return { tasks: [modelTask] };
+      return directTasks([{}]);
     },
   });
   const request = (path, body) => client.request(path, {
@@ -69,7 +75,11 @@ test('四栏校验、任务拆解、SMART 和时间分布通过正式 API 串联
   const decomposed = await decomposeResponse.json();
   assert.equal(modelCalls, 1);
   assert.equal(decomposed.tasks.length, 1);
-  assert.equal(decomposed.tasks[0].name, modelTask.name);
+  assert.equal(decomposed.tasks[0].name, '完成时间管理新版接口联调');
+  // 响应键为 intake、tasks、smart；不存在 warnings 和 analysisVersion
+  assert.deepEqual(Object.keys(decomposed).sort(), ['intake', 'smart', 'tasks']);
+  assert.equal('warnings' in decomposed, false);
+  assert.equal('analysisVersion' in decomposed, false);
   assert.equal(decomposed.smart.overall, 'pass');
 
   const smartResponse = await request('/api/time-management/tasks/smart-check', {
@@ -85,4 +95,18 @@ test('四栏校验、任务拆解、SMART 和时间分布通过正式 API 串联
   const distribution = await distributionResponse.json();
   assert.equal(distribution.totalMinutes, 60);
   assert.deepEqual(distribution.percentages, { 昨天: 0, 今天: 100, 明天: 0, 后天: 0 });
+});
+
+test('零任务返回 422 NO_ACTIONABLE_TASKS', async (t) => {
+  const client = await authenticatedClient(t, {
+    completeJson: async () => directTasks([]),
+  });
+  const response = await client.request('/api/time-management/tasks/decompose', {
+    method: 'POST',
+    csrfToken: client.sessionCsrfToken,
+    body: { entries },
+  });
+
+  assert.equal(response.status, 422);
+  assert.equal((await response.json()).error.code, 'NO_ACTIONABLE_TASKS');
 });

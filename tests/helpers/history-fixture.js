@@ -2,6 +2,31 @@ const CLIENT_RUN_ID = '99999999-9999-4999-8999-999999999999';
 const TASK_ONE_ID = '11111111-1111-4111-8111-111111111111';
 const TASK_TWO_ID = '22222222-2222-4222-8222-222222222222';
 
+const DISTRIBUTION_FIXTURE = Object.freeze({
+  totalMinutes: 90,
+  totalHours: 1.5,
+  validTaskCount: 2,
+  invalidTasks: [],
+  categories: [
+    { key: '昨天', minutes: 0, hours: 0, percent: 0, target: { min: 0, max: 2, label: '→0%' }, status: 'ok' },
+    { key: '今天', minutes: 90, hours: 1.5, percent: 100, target: { min: 70, max: 80, label: '70–80%' }, status: 'over' },
+    { key: '明天', minutes: 0, hours: 0, percent: 0, target: { min: 10, max: 20, label: '10–20%' }, status: 'under' },
+    { key: '后天', minutes: 0, hours: 0, percent: 0, target: { min: 3, max: 100, label: '5%' }, status: 'under' },
+  ],
+  percentages: { 昨天: 0, 今天: 100, 明天: 0, 后天: 0 },
+  diagnosis: [
+    '"昨天"投入已趋近 0%，遗留事项控制良好。',
+    '"今天"占 100%：日常事务占比过高。',
+    '"明天"占 0%：机制、流程或人才能力建设投入不足',
+    '"后天"占 0%：缺少未来规划和提前布局。',
+  ],
+  recommendations: [
+    '合并低价值日常事务，减少上下文切换和重复沟通。',
+    '为"明天"类机制、流程和带人工作设置不可挤占时段。',
+    '将"后天"目标拆成可检查的里程碑，并安排固定复盘。',
+  ],
+});
+
 function historySnapshot(overrides = {}) {
   const tasks = [
     {
@@ -12,6 +37,7 @@ function historySnapshot(overrides = {}) {
       source: '今天',
       due: '今天18:00',
       est: '约1h',
+      owner: '待确认',
       acceptanceCriteria: ['方案已提交'],
       nextAction: '',
       status: 'pending',
@@ -25,6 +51,7 @@ function historySnapshot(overrides = {}) {
       source: '临时',
       due: '待确认',
       est: '30分钟',
+      owner: '待确认',
       acceptanceCriteria: [],
       nextAction: '',
       status: 'pending',
@@ -41,6 +68,7 @@ function historySnapshot(overrides = {}) {
       后天: '年底前完成年度目标',
     },
     tasks,
+    distribution: DISTRIBUTION_FIXTURE,
     matrix: {
       classifications: [
         {
@@ -102,6 +130,7 @@ function historySnapshot(overrides = {}) {
 
 module.exports = {
   CLIENT_RUN_ID,
+  DISTRIBUTION_FIXTURE,
   TASK_ONE_ID,
   TASK_TWO_ID,
   historySnapshot,

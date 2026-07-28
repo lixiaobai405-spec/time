@@ -74,12 +74,17 @@ function createApp({ modelClient, authBoundary, logger, now = Date.now } = {}) {
     request.requestId = randomUUID();
     response.set('X-Request-Id', request.requestId);
     response.once('finish', () => {
-      writeLog(logger, {
+      const entry = {
         requestId: request.requestId,
         path: new URL(request.originalUrl, 'http://localhost').pathname,
         status: response.statusCode,
         durationMs: Date.now() - startedAt,
-      });
+      };
+      if (response.locals.modelOutputDiagnostic) {
+        entry.modelOutputReason = response.locals.modelOutputDiagnostic.reason;
+        entry.modelAttempts = response.locals.modelOutputDiagnostic.attempts;
+      }
+      writeLog(logger, entry);
     });
     next();
   });
@@ -179,6 +184,12 @@ function createApp({ modelClient, authBoundary, logger, now = Date.now } = {}) {
         now,
       }));
     } catch (error) {
+      if (error?.code === 'MODEL_OUTPUT_INVALID') {
+        response.locals.modelOutputDiagnostic = {
+          reason: error.diagnosticCode || 'MODEL_JSON_INVALID',
+          attempts: error.modelAttempts || 1,
+        };
+      }
       next(error);
     }
   });

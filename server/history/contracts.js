@@ -1,7 +1,9 @@
 const Ajv = require('ajv');
 
 const {
+  CATEGORY_KEYS,
   CLASSIFICATION_SOURCE,
+  DISTRIBUTION_TARGETS,
   ENERGY_POLICY,
   GOAL_KEYS,
   IMPORTANCE,
@@ -10,13 +12,87 @@ const {
   TASK_STATUS,
   TEXT_LIMITS,
   URGENCY,
+  normalizeDueForWrite,
   normalizeOptionalDue,
+  normalizeOptionalOwner,
   quadrantFor,
 } = require('../contracts/time-management');
 
-const HISTORY_SCHEMA_VERSION = 1;
+const HISTORY_SCHEMA_VERSION = 2;
 const UUID_PATTERN = '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89aAbB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$';
 const ajv = new Ajv({ allErrors: true, strict: true });
+
+const distributionSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['totalMinutes', 'totalHours', 'validTaskCount', 'invalidTasks', 'categories', 'percentages', 'diagnosis', 'recommendations'],
+  properties: {
+    totalMinutes: { type: 'number', minimum: 1 },
+    totalHours: { type: 'number', minimum: 0 },
+    validTaskCount: { type: 'integer', minimum: 0 },
+    invalidTasks: {
+      type: 'array',
+      maxItems: TASK_LIMIT,
+      items: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['taskId', 'name', 'est'],
+        properties: {
+          taskId: { type: 'string', pattern: UUID_PATTERN },
+          name: { type: 'string', minLength: 1, maxLength: TEXT_LIMITS.taskName },
+          est: { type: 'string', maxLength: TEXT_LIMITS.est },
+        },
+      },
+    },
+    categories: {
+      type: 'array',
+      minItems: 4,
+      maxItems: 4,
+      items: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['key', 'minutes', 'hours', 'percent', 'target', 'status'],
+        properties: {
+          key: { enum: CATEGORY_KEYS },
+          minutes: { type: 'number', minimum: 0 },
+          hours: { type: 'number', minimum: 0 },
+          percent: { type: 'number', minimum: 0, maximum: 100 },
+          target: {
+            type: 'object',
+            additionalProperties: false,
+            required: ['min', 'max', 'label'],
+            properties: {
+              min: { type: 'number', minimum: 0, maximum: 100 },
+              max: { type: 'number', minimum: 0, maximum: 100 },
+              label: { type: 'string', minLength: 1, maxLength: 20 },
+            },
+          },
+          status: { enum: ['ok', 'under', 'over'] },
+        },
+      },
+    },
+    percentages: {
+      type: 'object',
+      additionalProperties: false,
+      required: CATEGORY_KEYS,
+      properties: Object.fromEntries(CATEGORY_KEYS.map((key) => [key, { type: 'number', minimum: 0, maximum: 100 }])),
+    },
+    diagnosis: {
+      type: 'array',
+      minItems: 1,
+      maxItems: 10,
+      items: { type: 'string', minLength: 1, maxLength: 4000 },
+    },
+    recommendations: {
+      type: 'array',
+      minItems: 1,
+      maxItems: 10,
+      items: { type: 'string', minLength: 1, maxLength: 4000 },
+    },
+  },
+};
+
+const validateDistribution = ajv.compile(distributionSchema);
 
 const snapshotSchema = {
   type: 'object',
@@ -48,6 +124,7 @@ const snapshotSchema = {
           'source',
           'due',
           'est',
+          'owner',
           'acceptanceCriteria',
           'nextAction',
           'status',
@@ -61,6 +138,7 @@ const snapshotSchema = {
           source: { enum: SOURCES },
           due: { type: 'string', minLength: 1, maxLength: TEXT_LIMITS.due },
           est: { type: 'string', maxLength: TEXT_LIMITS.est },
+          owner: { type: 'string', minLength: 1, maxLength: TEXT_LIMITS.owner },
           acceptanceCriteria: {
             type: 'array',
             maxItems: 5,
@@ -76,6 +154,7 @@ const snapshotSchema = {
         },
       },
     },
+    distribution: distributionSchema,
     matrix: {
       type: 'object',
       additionalProperties: false,
@@ -163,6 +242,10 @@ const QUADRANT_RULES = Object.freeze({
   第四象限: Object.freeze({ priority: 4, action: '减少做' }),
 });
 
+const SUPPORTED_READ_VERSIONS = Object.freeze(new Set([1, 2]));
+const PERCENT_TOLERANCE = 0.1;
+const MINUTES_TOLERANCE = 1;
+
 function inputError() {
   return Object.assign(new Error('历史快照格式不正确。'), {
     code: 'INPUT_INVALID',
@@ -188,7 +271,75 @@ function containsTaskIdLeak(text, tasks) {
   ));
 }
 
-function assertSemantics(snapshot) {
+function containsModelArtifacts(texts) {
+  const patterns = [
+    /{/,
+    /}/,
+    /"model"/i,
+    /"prompt"/i,
+    /"content"/i,
+    /"role"/i,
+    /"messages"/i,
+    /api[_-]?key/i,
+    /sk-[a-zA-Z0-9]{20,}/,
+    /"error"/i,
+    /stacktrace/i,
+    /"choices"/i,
+    /"usage"/i,
+  ];
+  return texts.some((text) => {
+    if (typeof text !== 'string') return false;
+    return patterns.some((pattern) => pattern.test(text));
+  });
+}
+
+function assertDistributionSemantics(distribution, tasks) {
+  if (!validateDistribution(distribution)) throw inputError();
+
+  const taskIds = new Set(tasks.map((task) => task.id));
+  const invalidIds = new Set();
+  for (const item of distribution.invalidTasks) {
+    if (!taskIds.has(item.taskId)) throw inputError();
+    if (invalidIds.has(item.taskId)) throw inputError();
+    invalidIds.add(item.taskId);
+  }
+
+  if (distribution.validTaskCount + distribution.invalidTasks.length !== tasks.length) {
+    throw inputError();
+  }
+
+  const categoryKeys = new Set();
+  const categorySum = distribution.categories.reduce((sum, item) => {
+    if (categoryKeys.has(item.key)) throw inputError();
+    categoryKeys.add(item.key);
+    return sum + item.minutes;
+  }, 0);
+  if (categoryKeys.size !== 4 || !CATEGORY_KEYS.every((key) => categoryKeys.has(key))) {
+    throw inputError();
+  }
+
+  if (Math.abs(categorySum - distribution.totalMinutes) > MINUTES_TOLERANCE) {
+    throw inputError();
+  }
+
+  const percentSum = Object.values(distribution.percentages).reduce((sum, value) => sum + value, 0);
+  if (Math.abs(percentSum - 100) > PERCENT_TOLERANCE) throw inputError();
+
+  for (const key of CATEGORY_KEYS) {
+    if (typeof distribution.percentages[key] !== 'number') throw inputError();
+  }
+
+  for (const item of distribution.categories) {
+    const expectedPercent = distribution.percentages[item.key];
+    if (Math.abs(item.percent - expectedPercent) > PERCENT_TOLERANCE) throw inputError();
+    if (item.target.min < 0 || item.target.max > 100 || item.target.min > item.target.max) throw inputError();
+  }
+
+  if (containsModelArtifacts(distribution.diagnosis)) throw inputError();
+  if (containsModelArtifacts(distribution.recommendations)) throw inputError();
+}
+
+function assertSemantics(snapshot, schemaVersion = HISTORY_SCHEMA_VERSION) {
   if (!snapshot.title.trim()) throw inputError();
   const tasksById = new Map();
   for (const task of snapshot.tasks) {
@@ -253,29 +404,62 @@ function assertSemantics(snapshot) {
     ...snapshot.report.adjustments,
   ];
   if (visibleText.some((text) => containsTaskIdLeak(text, snapshot.tasks))) throw inputError();
+
+  if (schemaVersion === 2) {
+    if (!snapshot.distribution) throw inputError();
+    assertDistributionSemantics(snapshot.distribution, snapshot.tasks);
+  }
 }
 
-function validateHistorySnapshot(value) {
+function validateHistorySnapshot(value, { dueMode = 'read', schemaVersion = HISTORY_SCHEMA_VERSION } = {}) {
+  if (!['read', 'write'].includes(dueMode)) throw inputError();
+  if (!SUPPORTED_READ_VERSIONS.has(schemaVersion)) throw inputError();
   const normalized = Array.isArray(value?.tasks)
-    ? { ...value, tasks: value.tasks.map(normalizeOptionalDue) }
+    ? {
+      ...value,
+      tasks: value.tasks.map((task) => {
+        const withOwner = normalizeOptionalOwner(normalizeOptionalDue(task));
+        return dueMode === 'write' ? normalizeDueForWrite(withOwner) : withOwner;
+      }),
+    }
     : value;
   if (!validateShape(normalized)) throw inputError();
-  assertSemantics(normalized);
+  assertSemantics(normalized, schemaVersion);
   return JSON.parse(JSON.stringify(normalized));
 }
 
 function decodeStoredSnapshot(record) {
   try {
-    if (!record || record.schemaVersion !== HISTORY_SCHEMA_VERSION) throw dataError();
-    return validateHistorySnapshot({
+    if (!record || !SUPPORTED_READ_VERSIONS.has(record.schemaVersion)) throw dataError();
+    const base = {
       clientRunId: record.clientRunId,
       title: record.title,
       goals: JSON.parse(record.goalsJson),
       tasks: JSON.parse(record.tasksJson),
       matrix: JSON.parse(record.matrixJson),
       report: JSON.parse(record.reportJson),
-    });
-  } catch {
+    };
+
+    if (record.schemaVersion === 1) {
+      const validated = validateHistorySnapshot(base, { schemaVersion: 1 });
+      return { ...validated, distribution: null };
+    }
+
+    let distribution = null;
+    if (typeof record.distributionJson === 'string') {
+      distribution = JSON.parse(record.distributionJson);
+    }
+    if (!distribution) throw dataError();
+
+    const validated = validateHistorySnapshot(
+      { ...base, distribution },
+      { schemaVersion: 2 },
+    );
+    return validated;
+  } catch (error) {
+    if (error?.code === 'INPUT_INVALID' || error?.code === 'HISTORY_DATA_INVALID') {
+      throw error;
+    }
     throw dataError();
   }
 }

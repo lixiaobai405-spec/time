@@ -9,13 +9,21 @@ const {
   TASK_STATUS,
   TEXT_LIMITS,
   URGENCY,
+  normalizeOptionalDue,
+  normalizeOptionalOwner,
 } = require('../contracts/time-management');
 const { buildReportPriorityContext } = require('../policies/report-priority');
 const {
   buildReportScheduleContext,
   hasScheduleConflict,
+  stabilizeScheduleConflicts,
 } = require('../policies/report-schedule');
 const { loadStepPrompt } = require('../prompts/load-step-prompt');
+const {
+  REPORT_OUTPUT_REASON,
+  reportOutputError,
+  retryFeedbackFor,
+} = require('./report-output-diagnostics');
 
 const ajv = new Ajv({ allErrors: true, strict: true });
 const nullableImportance = { anyOf: [{ enum: IMPORTANCE }, { type: 'null' }] };
@@ -45,6 +53,7 @@ const validateRequest = ajv.compile({
           urgency: nullableUrgency,
           due: { type: 'string', maxLength: TEXT_LIMITS.due },
           est: { type: 'string', maxLength: TEXT_LIMITS.est },
+          owner: { type: 'string', maxLength: TEXT_LIMITS.owner },
           acceptanceCriteria: {
             type: 'array',
             maxItems: 5,
@@ -179,10 +188,6 @@ function publicError(code, message, status) {
   return Object.assign(new Error(message), { code, status, expose: true });
 }
 
-function outputError() {
-  return publicError('MODEL_OUTPUT_INVALID', 'AI 返回格式异常，请重试。', 502);
-}
-
 function inputError() {
   return publicError('INPUT_INVALID', '输入内容不符合要求。', 400);
 }
@@ -237,10 +242,12 @@ function assertProtectedGuidance(report, tasks, priorityContext) {
   for (const taskId of priorityContext.protectedTaskIds) {
     const task = taskById.get(taskId);
     const related = visibleTextForTask(report, task);
-    if (related.some(text => PROHIBITED_DELAY.test(text))) throw outputError();
+    if (related.some(text => PROHIBITED_DELAY.test(text))) {
+      throw reportOutputError(REPORT_OUTPUT_REASON.REPORT_PROTECTED_TASK_DELAYED);
+    }
     if (priorityContext.actionByTaskId[taskId] === '立即授权'
         && !related.some(text => DELEGATION_ACTION.test(text))) {
-      throw outputError();
+      throw reportOutputError(REPORT_OUTPUT_REASON.REPORT_DELEGATION_MISSING);
     }
   }
 
@@ -249,7 +256,9 @@ function assertProtectedGuidance(report, tasks, priorityContext) {
     const scheduled = report.adjustments.some(text => (
       text.includes(task.name) && EXPLICIT_SCHEDULE.test(text)
     ));
-    if (!scheduled) throw outputError();
+    if (!scheduled) {
+      throw reportOutputError(REPORT_OUTPUT_REASON.REPORT_REMAINING_PROTECTED_UNSCHEDULED);
+    }
   }
 }
 
@@ -258,14 +267,14 @@ function assertReportSemantics(report, tasks, goals, priorityContext) {
   const orderIds = report.order.map(item => item.taskId);
   if (new Set(orderIds).size !== orderIds.length
       || orderIds.some(taskId => !taskIds.has(taskId))) {
-    throw outputError();
+    throw reportOutputError(REPORT_OUTPUT_REASON.REPORT_ORDER_REFERENCE_INVALID);
   }
 
   if (orderIds.length !== priorityContext.recommendedTaskIds.length
       || orderIds.some((taskId, index) => (
         taskId !== priorityContext.recommendedTaskIds[index]
       ))) {
-    throw outputError();
+    throw reportOutputError(REPORT_OUTPUT_REASON.REPORT_ORDER_PRIORITY_MISMATCH);
   }
 
   const visibleText = [
@@ -273,16 +282,20 @@ function assertReportSemantics(report, tasks, goals, priorityContext) {
     ...report.energyRules,
     ...report.adjustments,
   ];
-  if (visibleText.some(text => containsTaskIdLeak(text, tasks))) throw outputError();
+  if (visibleText.some(text => containsTaskIdLeak(text, tasks))) {
+    throw reportOutputError(REPORT_OUTPUT_REASON.REPORT_TASK_ID_LEAK);
+  }
 
   if (goals.后天.trim() && !hasLongTermMeasure(report.adjustments)) {
-    throw outputError();
+    throw reportOutputError(REPORT_OUTPUT_REASON.REPORT_LONG_TERM_MEASURE_MISSING);
   }
   assertProtectedGuidance(report, tasks, priorityContext);
 }
 
 function normalizeModelError(error) {
-  if (error.code === 'MODEL_OUTPUT_INVALID') return outputError();
+  if (error.code === 'MODEL_OUTPUT_INVALID') {
+    return reportOutputError(error.diagnosticCode || 'MODEL_JSON_INVALID');
+  }
   if (error.code === 'MODEL_TIMEOUT') {
     return publicError('MODEL_TIMEOUT', 'AI 响应超时，请重试。', 504);
   }
@@ -293,7 +306,15 @@ function normalizeModelError(error) {
 }
 
 async function generateReport({ tasks, matrix, goals, distribution, modelClient, requestBody, now }) {
-  const input = requestBody || { tasks, matrix, goals, ...(distribution ? { distribution } : {}) };
+  const rawInput = requestBody || { tasks, matrix, goals, ...(distribution ? { distribution } : {}) };
+  const input = Array.isArray(rawInput?.tasks)
+    ? {
+      ...rawInput,
+      tasks: rawInput.tasks.map(task => (
+        normalizeOptionalOwner(normalizeOptionalDue(task))
+      )),
+    }
+    : rawInput;
   if (!validateRequest(input)) throw inputError();
   assertInputSemantics(input.tasks, input.matrix);
   const priorityContext = buildReportPriorityContext({
@@ -308,27 +329,56 @@ async function generateReport({ tasks, matrix, goals, distribution, modelClient,
     timeZone: 'Asia/Shanghai',
   });
 
-  const request = {
-    system: loadStepPrompt('generate-report'),
-    user: JSON.stringify({ ...input, priorityContext, scheduleContext }),
-    temperature: 0.5,
-    maxAttempts: 1,
-  };
+  const modelInput = { ...input, priorityContext, scheduleContext };
+  let retryFeedback;
 
   for (let attempt = 1; attempt <= 2; attempt += 1) {
+    const request = {
+      system: loadStepPrompt('generate-report'),
+      user: JSON.stringify(retryFeedback
+        ? { ...modelInput, retryFeedback }
+        : modelInput),
+      temperature: 0.5,
+      maxAttempts: 1,
+    };
+
     try {
       const report = await modelClient.completeJson(request);
-      if (!validateResponse(report)) throw outputError();
+      if (!validateResponse(report)) {
+        throw reportOutputError(REPORT_OUTPUT_REASON.REPORT_SCHEMA_INVALID);
+      }
       assertReportSemantics(report, input.tasks, input.goals, priorityContext);
-      if (hasScheduleConflict(report, scheduleContext)) throw outputError();
-      return report;
+      if (!hasScheduleConflict(report, scheduleContext)) return report;
+
+      if (attempt < 2) {
+        throw reportOutputError(REPORT_OUTPUT_REASON.REPORT_SCHEDULE_CONFLICT);
+      }
+
+      const stabilized = stabilizeScheduleConflicts(report, scheduleContext);
+      if (!validateResponse(stabilized)) {
+        throw reportOutputError(REPORT_OUTPUT_REASON.REPORT_SCHEMA_INVALID);
+      }
+      assertReportSemantics(
+        stabilized,
+        input.tasks,
+        input.goals,
+        priorityContext,
+      );
+      if (hasScheduleConflict(stabilized, scheduleContext)) {
+        throw reportOutputError(REPORT_OUTPUT_REASON.REPORT_SCHEDULE_CONFLICT);
+      }
+      return stabilized;
     } catch (error) {
       const normalized = normalizeModelError(error);
-      if (normalized.code === 'MODEL_OUTPUT_INVALID' && attempt < 2) continue;
+      normalized.modelAttempts = attempt;
+      if (normalized.code === 'MODEL_OUTPUT_INVALID' && attempt < 2) {
+        retryFeedback = retryFeedbackFor(normalized.diagnosticCode);
+        continue;
+      }
       throw normalized;
     }
   }
-  throw outputError();
+  throw reportOutputError(REPORT_OUTPUT_REASON.REPORT_SCHEMA_INVALID);
 }
 
 module.exports = { containsTaskIdLeak, generateReport };
