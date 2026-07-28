@@ -42,6 +42,9 @@ function stringCell(reference, value, style = 2) {
 }
 
 function numberCell(reference, value, style = 3) {
+  if (value == null || String(value).trim() === '') {
+    return `<c r="${reference}" s="${style}"/>`;
+  }
   const number = Number(value);
   if (!Number.isFinite(number)) return `<c r="${reference}" s="${style}"/>`;
   return `<c r="${reference}" s="${style}"><v>${number}</v></c>`;

@@ -81,6 +81,9 @@ function createApp({ modelClient, authBoundary, logger, now = Date.now } = {}) {
         durationMs: Date.now() - startedAt,
       };
       if (response.locals.modelOutputDiagnostic) {
+        if (response.locals.modelOutputDiagnostic.stage) {
+          entry.modelOutputStage = response.locals.modelOutputDiagnostic.stage;
+        }
         entry.modelOutputReason = response.locals.modelOutputDiagnostic.reason;
         entry.modelAttempts = response.locals.modelOutputDiagnostic.attempts;
       }
@@ -115,6 +118,13 @@ function createApp({ modelClient, authBoundary, logger, now = Date.now } = {}) {
         now,
       }));
     } catch (error) {
+      if (error?.code === 'MODEL_OUTPUT_INVALID') {
+        response.locals.modelOutputDiagnostic = {
+          stage: error.stage,
+          reason: error.failedRules?.[0] || error.diagnosticCode || 'MODEL_JSON_INVALID',
+          attempts: error.modelAttempts || 2,
+        };
+      }
       next(error);
     }
   });

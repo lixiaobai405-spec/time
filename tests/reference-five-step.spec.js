@@ -441,6 +441,33 @@ test('每日跟踪可导出真实 XLSX 文件', async ({ page }) => {
   await expect(page.locator('#toast')).toContainText('每日跟踪_2026-07-23.xlsx');
 });
 
+test('Excel 导出对缺失预估工时保留空单元格而不是写入 0', async ({ page }) => {
+  await page.goto('/');
+  const bytes = await page.evaluate(async () => {
+    const { buildDailyTrackingWorkbook } = await import('/excel-export.js');
+    return Array.from(buildDailyTrackingWorkbook({
+      trackingDate: '2026-07-23',
+      rows: [{
+        status: '未完成',
+        task: '待评估工时的任务',
+        category: '今天',
+        due: '待确认',
+        estimatedHours: null,
+        owner: '待确认',
+        priority: '重要且紧急',
+        completedAt: '',
+      }],
+    }));
+  });
+
+  const sheetXml = extractStoredZipEntry(
+    Buffer.from(bytes),
+    'xl/worksheets/sheet1.xml',
+  ).toString('utf8');
+  expect(sheetXml).toContain('<c r="E2" s="3"/>');
+  expect(sheetXml).not.toContain('<c r="E2" s="3"><v>0</v></c>');
+});
+
 test('AI 拆解确认和手动新增可编辑日期与责任人并提交日级 due', async ({ page }) => {
   let smartPayload = null;
 

@@ -96,11 +96,15 @@ function createModelClient({
     const formats = responseFormats(responseSchema, responseSchemaName);
     let response;
     for (let index = 0; index < formats.length; index += 1) {
+      const responseFormat = formats[index];
+      const requestSystem = responseSchema && responseFormat.type === 'json_object'
+        ? `${system}\n\n输出必须严格符合以下 JSON Schema；字段名、嵌套结构、必填字段和枚举值不得改写或省略：\n<response_json_schema>${JSON.stringify(responseSchema)}</response_json_schema>`
+        : system;
       response = await fetchOnce({
-        system,
+        system: requestSystem,
         user,
         temperature,
-        responseFormat: formats[index],
+        responseFormat,
       });
       if (response?.ok === true) break;
       const canFallback = index === 0
