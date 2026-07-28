@@ -112,6 +112,37 @@ test('不支持 JSON Schema 的兼容供应商回退到 json_object', async () =
   assert.deepEqual(JSON.parse(calls[1].options.body).response_format, { type: 'json_object' });
 });
 
+test('回退到 json_object 时把响应 Schema 提供给模型', async () => {
+  const { createModelClient } = require('../../server/model/model-client');
+  const calls = [];
+  const schema = {
+    type: 'object',
+    additionalProperties: false,
+    required: ['value'],
+    properties: { value: { type: 'string' } },
+  };
+  const client = createModelClient(clientOptions(async (url, options) => {
+    calls.push({ url, options });
+    if (calls.length === 1) return responseWith('', { ok: false, status: 400 });
+    return responseWith('{"value":"fallback"}');
+  }));
+
+  await client.completeJson({
+    system: 'rules',
+    user: '{}',
+    responseSchema: schema,
+    responseSchemaName: 'test_schema_v1',
+    maxAttempts: 1,
+  });
+
+  const fallbackBody = JSON.parse(calls[1].options.body);
+  const schemaBlock = fallbackBody.messages[0].content.match(
+    /<response_json_schema>([\s\S]+)<\/response_json_schema>/,
+  );
+  assert.ok(schemaBlock, 'fallback system prompt must contain the response JSON Schema');
+  assert.deepEqual(JSON.parse(schemaBlock[1]), schema);
+});
+
 test('第一次返回合法 JSON 时只请求一次', async () => {
   const { createModelClient } = require('../../server/model/model-client');
   let calls = 0;

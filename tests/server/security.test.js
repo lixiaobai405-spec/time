@@ -598,6 +598,57 @@ test('新解析诊断码在日志中以固定枚举出现且不泄漏 marker', a
   }
 });
 
+test('任务拆解格式失败日志包含阶段和固定规则码但不泄漏模型原文', async () => {
+  const entries = [];
+  const marker = 'PRIVATE-DECOMPOSITION-OUTPUT';
+  const modelClient = {
+    completeJson: async () => ({
+      evidence: [{ marker }],
+      coachingAnalysis: {},
+    }),
+  };
+  const app = createApp({
+    authBoundary: createTestAuthBoundary(),
+    modelClient,
+    logger: entry => entries.push(entry),
+  });
+  const server = await listen(app);
+
+  try {
+    const response = await fetch(
+      `http://127.0.0.1:${server.address().port}/api/time-management/tasks/decompose`,
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          entries: {
+            昨天: '',
+            今天: '今天整理项目进度清单',
+            明天: '',
+            后天: '',
+          },
+        }),
+      },
+    );
+    const body = await response.json();
+    assert.equal(response.status, 502);
+    assert.equal(body.error.code, 'MODEL_OUTPUT_INVALID');
+    assert.doesNotMatch(JSON.stringify(body), new RegExp(marker));
+
+    await new Promise(resolve => setImmediate(resolve));
+    const logEntry = entries.find(
+      entry => entry.path === '/api/time-management/tasks/decompose',
+    );
+    assert.ok(logEntry);
+    assert.equal(logEntry.modelOutputStage, 'coach-analysis');
+    assert.equal(logEntry.modelOutputReason, 'JSON_SCHEMA_INVALID');
+    assert.equal(logEntry.modelAttempts, 2);
+    assert.doesNotMatch(JSON.stringify(logEntry), new RegExp(marker));
+  } finally {
+    await close(server);
+  }
+});
+
 test('报告 JSON 语法子类日志不包含原始解析错误', async () => {
   const entries = [];
   const marker = 'PRIVATE-JSON-PARSE-ERROR-MARKER';
