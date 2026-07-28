@@ -62,6 +62,7 @@ export const state = {
   maxStep: 1,
   entries: emptyEntries(),
   intake: null,
+  decomposition: null,
   tasks: [],
   smart: null,
   smartChecked: false,
@@ -97,6 +98,7 @@ export function taskSnapshot() {
 
 export function invalidateAfterEntries() {
   state.intake = null;
+  state.decomposition = null;
   state.tasks = [];
   state.smart = null;
   state.smartChecked = false;
@@ -133,6 +135,7 @@ export function resetWorkflow({ keepEntries = false } = {}) {
   state.maxStep = 1;
   if (!keepEntries) state.entries = emptyEntries();
   state.intake = null;
+  state.decomposition = null;
   state.tasks = [];
   state.smart = null;
   state.smartChecked = false;

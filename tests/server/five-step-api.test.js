@@ -22,6 +22,58 @@ const entries = {
   后天: '',
 };
 
+function claim(text, evidenceIds = []) {
+  return { text, evidenceIds };
+}
+
+function coachOutput() {
+  const supported = claim('当前需要完成时间管理新版接口联调。', ['E1']);
+  const unknown = claim('证据不足：当前输入未提供该维度信息。');
+  return {
+    evidence: [{
+      id: 'E1',
+      dimension: '今天',
+      quote: entries.今天,
+      observation: '完成时间管理新版接口联调',
+      kind: 'work',
+      status: 'planned',
+      owner: '待确认',
+      due: '待确认',
+    }],
+    coachingAnalysis: {
+      yesterday_analysis: {
+        key_problem: unknown,
+        gap: unknown,
+        root_cause: unknown,
+        management_insight: unknown,
+      },
+      today_focus: {
+        key_work: supported,
+        priority_reason: supported,
+        manager_action: supported,
+        possible_delegation: unknown,
+      },
+      tomorrow_optimization: {
+        management_improvement: unknown,
+        system_building: unknown,
+        capability_upgrade: unknown,
+      },
+      future_direction: {
+        long_term_goal: unknown,
+        organization_capability: unknown,
+        future_focus: unknown,
+      },
+      connection_analysis: {
+        problem_to_action: unknown,
+        action_to_optimization: unknown,
+        optimization_to_future: unknown,
+      },
+      coaching_suggestions: [],
+      overall_insight: supported,
+    },
+  };
+}
+
 function directTasks(taskOverridesArray) {
   return {
     tasks: taskOverridesArray.map((overrides) => ({
@@ -35,6 +87,7 @@ function directTasks(taskOverridesArray) {
       acceptanceCriteria: [],
       nextAction: '',
       status: 'pending',
+      evidenceIds: ['E1'],
       ...overrides,
     })),
   };
@@ -53,9 +106,11 @@ test('新版五步接口要求登录和会话 CSRF', async (t) => {
 test('四栏校验、任务拆解、SMART 和时间分布通过正式 API 串联', async (t) => {
   let modelCalls = 0;
   const client = await authenticatedClient(t, {
-    completeJson: async () => {
+    completeJson: async ({ responseSchemaName }) => {
       modelCalls += 1;
-      return directTasks([{}]);
+      return responseSchemaName === 'time_coach_analysis_v1'
+        ? coachOutput()
+        : directTasks([{}]);
     },
   });
   const request = (path, body) => client.request(path, {
@@ -73,13 +128,16 @@ test('四栏校验、任务拆解、SMART 和时间分布通过正式 API 串联
   const decomposeResponse = await request('/api/time-management/tasks/decompose', { entries });
   assert.equal(decomposeResponse.status, 200);
   const decomposed = await decomposeResponse.json();
-  assert.equal(modelCalls, 1);
+  assert.equal(modelCalls, 2);
   assert.equal(decomposed.tasks.length, 1);
   assert.equal(decomposed.tasks[0].name, '完成时间管理新版接口联调');
-  // 响应键为 intake、tasks、smart；不存在 warnings 和 analysisVersion
-  assert.deepEqual(Object.keys(decomposed).sort(), ['intake', 'smart', 'tasks']);
-  assert.equal('warnings' in decomposed, false);
-  assert.equal('analysisVersion' in decomposed, false);
+  assert.deepEqual(
+    Object.keys(decomposed).sort(),
+    ['decomposition', 'intake', 'smart', 'tasks'],
+  );
+  assert.equal(decomposed.decomposition.pipelineVersion, 'coach-decompose-v1');
+  assert.equal(decomposed.decomposition.stages.length, 2);
+  assert.equal(decomposed.decomposition.taskEvidence[0].taskId, decomposed.tasks[0].id);
   assert.equal(decomposed.smart.overall, 'pass');
 
   const smartResponse = await request('/api/time-management/tasks/smart-check', {
@@ -99,7 +157,9 @@ test('四栏校验、任务拆解、SMART 和时间分布通过正式 API 串联
 
 test('零任务返回 422 NO_ACTIONABLE_TASKS', async (t) => {
   const client = await authenticatedClient(t, {
-    completeJson: async () => directTasks([]),
+    completeJson: async ({ responseSchemaName }) => (
+      responseSchemaName === 'time_coach_analysis_v1' ? coachOutput() : directTasks([])
+    ),
   });
   const response = await client.request('/api/time-management/tasks/decompose', {
     method: 'POST',

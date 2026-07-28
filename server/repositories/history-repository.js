@@ -46,6 +46,7 @@ function mapDetail(row) {
     matrixJson: row.matrix_json,
     reportJson: row.report_json,
     distributionJson: row.distribution_json,
+    decompositionJson: row.decomposition_json,
     schemaVersion: row.schema_version,
   });
   return {
@@ -59,7 +60,7 @@ function mapDetail(row) {
 
 const DETAIL_COLUMNS = `
   id, client_run_id, title, goals_json, tasks_json, matrix_json, report_json,
-  distribution_json, schema_version, created_at, updated_at
+  distribution_json, decomposition_json, schema_version, created_at, updated_at
 `;
 
 function createHistoryRepository({
@@ -79,8 +80,8 @@ function createHistoryRepository({
         const inserted = await transaction.run(
           `INSERT INTO time_management_runs (
             id, user_id, client_run_id, title, goals_json, tasks_json, matrix_json,
-            report_json, distribution_json, schema_version, created_at, updated_at
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            report_json, distribution_json, decomposition_json, schema_version, created_at, updated_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
           ON CONFLICT(user_id, client_run_id) DO NOTHING`,
           [
             id,
@@ -92,6 +93,7 @@ function createHistoryRepository({
             JSON.stringify(value.matrix),
             JSON.stringify(value.report),
             JSON.stringify(value.distribution),
+            value.decomposition == null ? null : JSON.stringify(value.decomposition),
             HISTORY_SCHEMA_VERSION,
             timestamp,
             timestamp,

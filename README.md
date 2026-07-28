@@ -4,8 +4,8 @@
 
 ## 当前能力
 
-- “昨天—今天—明天—后天”四栏整段输入；服务端先校验行数和输入边界，再调用模型拆成稳定 UUID 任务。
-- 任务提取由模型直接返回结构化任务列表（`tasks`），一次合法输出仅调用模型一次。已完成事实不生成任务，责任人只能从原文明确责任主体提取，缺失时使用”待确认”。截止日期仅保存到日级（`YYYY-MM-DD`）。
+- “昨天—今天—明天—后天”四栏整段输入；服务端先校验行数和输入边界，再执行“证据化教练诊断 → 基于证据生成任务”两阶段流水线，最后生成稳定 UUID 任务。
+- 正式拆解入口使用严格 JSON Schema、证据 ID、提示词版本和 SHA256；每条任务都映射到原文证据。昨天未完成证据必须生成 `复盘` 来源任务，已完成事实不得生成任务；责任人和截止时间只能来自原文明示内容，缺失时使用”待确认”。
 - AI 拆解后由用户编辑任务名称、类别、截止日期、预估工时、责任人和轻重缓急；截止日期仅保存到日级（`YYYY-MM-DD`），责任人仅从原文明示内容提取，缺失时显示”待确认”。服务端执行逐字段 SMART 门禁，任务具体、工时可解析且轻重缓急完整即可继续。工作台显示只读的今日任务卡片，展示完成状态、任务名称、截止日期和责任人，不触发自动保存。
 - 时间分布诊断是正式后端节点：只解析明确的小时/分钟工时，按分钟汇总四类占比，以最大余数法保证显示合计为 100.0%，并返回未参与计算的任务。
 - 支持手动新增、编辑和删除任务；任务变化会使时间分布、矩阵和报告失效，必须按新数据重新计算。
@@ -15,9 +15,9 @@
 - 用户名密码注册、登录、退出和 7 天 SQLite Session；登录成功后会换发新 Session。
 - 恢复码是唯一自助找回方式，注册、重置或轮换成功后只展示一次。用户同时丢失密码和恢复码后无法自助找回账号。
 - 已完成的报告以稳定 `clientRunId` 幂等保存，支持游标分页、只读详情和二次确认删除；用户数据严格隔离。
-- 新写入历史（Schema 2）同时保存第三步时间分布诊断快照；历史详情按"事务填写 → 任务清单 → 时间分布诊断 → 轻重缓急矩阵 → 优化报告"顺序展示。Schema 1 旧历史详情返回 `distribution: null` 并显示"该历史版本未保存时间分布诊断"，不会触发重新计算。
+- 新写入历史（Schema 2）同时保存第三步时间分布诊断快照，并在可空 `decomposition_json` 中保存两阶段提示词版本、哈希、中间 JSON 和任务—证据映射；历史详情提供折叠审计视图。Schema 1 旧历史仍返回 `distribution: null`，旧 Schema 2 历史没有拆解轨迹时继续正常读取。
 
-`prompts/system.md` 是五步运行提示词与确定性节点说明的真源；`server/contracts/time-management.js`、各工作流的 Ajv Schema 和自动化测试共同约束运行数据。
+旧兼容节点继续从 `prompts/system.md` 加载提示词；正式拆解流水线从 `prompts/decomposition/*.md` 加载独立版本化提示词。整体设计、职责边界和依据见 `knowledge/PROMPT_DECOMPOSITION_PIPELINE.md`。
 
 ## 环境要求
 
@@ -63,7 +63,7 @@ npm.cmd run dev
 
 访问 `http://127.0.0.1:4174/`。不要把真实 key 写入 `.env.example`、源码、测试或文档。
 
-应用启动时会按版本在事务中运行 migration（迁移）：migration 001 创建认证与历史表，002 大小写用户名，003 每日跟踪，004 为 `time_management_runs` 新增可空 `distribution_json TEXT`。也可在启动前显式执行：
+应用启动时会按版本在事务中运行 migration（迁移）：migration 001 创建认证与历史表，002 大小写用户名，003 每日跟踪，004 新增可空 `distribution_json TEXT`，005 新增可空 `decomposition_json TEXT`。也可在启动前显式执行：
 
 ```powershell
 $env:DATABASE_PATH = '.\data\time-management.sqlite'
@@ -114,7 +114,7 @@ Copy-Item .env.example .env
 | 节点与接口 | 请求核心字段 | 响应核心字段 |
 |---|---|---|
 | 1. `/api/time-management/intake/check` | `entries` 四栏字符串 | `lineCounts`、`warnings`、`totalLines` |
-| 2. `/api/time-management/tasks/decompose` | 已校验的 `entries` | `intake`、标准化 `tasks`、初始 `smart` |
+| 2. `/api/time-management/tasks/decompose` | 已校验的 `entries` | `intake`、标准化 `tasks`、初始 `smart`、可审计 `decomposition` |
 | 2. `/api/time-management/tasks/smart-check` | 用户确认后的 `tasks` | 逐任务 `results`、`overall`、`summary` |
 | 3. `/api/time-management/distribution/diagnose` | SMART 通过的 `tasks` | `categories`、`percentages`、`diagnosis`、`recommendations` |
 | 4. `/api/time-management/matrix/classify` | 当前 `tasks` | `classifications`、`quadrants`、`note` |
@@ -149,7 +149,19 @@ npm.cmd run test:server
 npm.cmd run test:e2e
 ```
 
-自然语言质量仍按 `tests/prompt-cases.md` 的“人工/模型评测”流程执行，并记录模型名、日期、通过项和失败样例。
+拆解流水线已有固定模拟评测集 `tests/evals/decomposition-cases.jsonl`。离线黄金回放不会访问外部模型，可直接执行：
+
+```powershell
+npm.cmd run eval:decomposition
+```
+
+配置真实模型后，可将同一批虚构输入发送给当前模型并计算任务精确率、召回率、证据状态准确率、昨天遗留覆盖率以及责任人/期限幻觉：
+
+```powershell
+npm.cmd run eval:decomposition:live
+```
+
+可用 `--case=D001` 只运行指定案例。`live` 模式会产生真实供应商请求；离线模式不会访问外部 API。自然语言质量仍应结合 `tests/prompt-cases.md` 的人工评测流程，记录模型名、提示词哈希、日期、通过项和失败样例。
 
 ## 数据与范围边界
 
@@ -159,7 +171,7 @@ npm.cmd run test:e2e
 
 当前版本不包含邮箱、SMTP、短信、社交登录、管理员后台、团队权限、草稿恢复、教练助手依赖或外部平台集成。真实模型的供应商数据用途、保留期限与删除机制需在生产接入前另行确认。
 
-`due` 和 `owner` 作为可选兼容字段继续保存在任务和历史 JSON 中；缺失、空白或 `null` 会标准化为"待确认"；新写入的 `due` 仅接受 `YYYY-MM-DD` 或"待确认"，`owner` 仅从原文明示内容提取。本次无需数据库迁移。
+`due` 和 `owner` 作为可选兼容字段继续保存在任务和历史 JSON 中；缺失、空白或 `null` 会标准化为"待确认"；新写入的 `due` 仅接受 `YYYY-MM-DD` 或"待确认"，`owner` 仅从原文明示内容提取。拆解轨迹通过 migration 005 写入可空 `decomposition_json`，不会要求重写旧历史。
 
 ## 目录
 
@@ -168,8 +180,11 @@ frontend/                         # 参考稿视觉、五步状态树、每日�
 server/                           # Express、认证/历史、SQLite、模型网关与五步工作流
 scripts/start-dev.js              # 可选加载本地 .env 的开发启动器
 scripts/                          # migration 与 SQLite 一致性备份 CLI
-prompts/system.md                 # 五步提示词与确定性诊断说明
-tests/server/                     # Node 单元、API、安全与验收契约测试
+prompts/system.md                 # 旧兼容节点与矩阵/报告提示词
+prompts/decomposition/            # 正式两阶段拆解提示词
+tests/server/                     # Node 单元、API、安全、评测器与验收契约测试
+tests/evals/decomposition-cases.jsonl # 拆解流水线固定模拟业务样本
+server/evals/                     # 模拟/真实模型评测指标计算器
 tests/reference-auth-history.spec.js # 新版认证、历史、退出与移动端回归
 tests/reference-five-step.spec.js    # 新版五步、导航与响应式回归
 tests/frontend.spec.js           # 旧四步界面历史回归资料，不在当前 Playwright testMatch 中
@@ -177,6 +192,7 @@ tests/auth-history.spec.js       # 旧四步账号界面历史回归资料，不
 tests/prompt-cases.md        # 自动化边界与人工/模型质量评测
 docs/acceptance/             # 甲方验收清单
 docs/adversarial-review.md   # 对抗审查复核
+knowledge/PROMPT_DECOMPOSITION_PIPELINE.md # 拆解流水线、证据链和工程依据
 ```
 
 新版五步与参考界面验收见 `docs/acceptance/reference-five-step-v2.md`；旧四步业务验收和账号历史验收仍分别保存在 `docs/acceptance/time-management-v1.md`、`docs/acceptance/account-auth-history-v1.md`，剩余风险见 `docs/adversarial-review.md`。

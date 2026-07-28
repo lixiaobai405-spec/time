@@ -1,6 +1,13 @@
 const Ajv = require('ajv');
 
 const {
+  COACH_RESPONSE_SCHEMA,
+  TASK_RESPONSE_SCHEMA,
+  validateCoachResponse,
+  validateTaskResponse,
+  visitClaims,
+} = require('../workflows/decomposition-contracts');
+const {
   CATEGORY_KEYS,
   CLASSIFICATION_SOURCE,
   DISTRIBUTION_TARGETS,
@@ -94,6 +101,59 @@ const distributionSchema = {
 
 const validateDistribution = ajv.compile(distributionSchema);
 
+const decompositionSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['pipelineVersion', 'businessDate', 'stages', 'taskEvidence'],
+  properties: {
+    pipelineVersion: { const: 'coach-decompose-v1' },
+    businessDate: { type: 'string', pattern: '^\\d{4}-\\d{2}-\\d{2}$' },
+    stages: {
+      type: 'array',
+      minItems: 2,
+      maxItems: 2,
+      items: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['name', 'prompt', 'output'],
+        properties: {
+          name: { enum: ['coach-analysis', 'task-generation'] },
+          prompt: {
+            type: 'object',
+            additionalProperties: false,
+            required: ['id', 'version', 'sha256'],
+            properties: {
+              id: { type: 'string', minLength: 1, maxLength: 100 },
+              version: { type: 'string', minLength: 1, maxLength: 40 },
+              sha256: { type: 'string', pattern: '^[0-9a-f]{64}$' },
+            },
+          },
+          output: { anyOf: [COACH_RESPONSE_SCHEMA, TASK_RESPONSE_SCHEMA] },
+        },
+      },
+    },
+    taskEvidence: {
+      type: 'array',
+      maxItems: TASK_LIMIT,
+      items: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['taskId', 'evidenceIds'],
+        properties: {
+          taskId: { type: 'string', pattern: UUID_PATTERN },
+          evidenceIds: {
+            type: 'array',
+            minItems: 1,
+            maxItems: 20,
+            uniqueItems: true,
+            items: { type: 'string', pattern: '^E[1-9][0-9]{0,2}$' },
+          },
+        },
+      },
+    },
+  },
+};
+
 const snapshotSchema = {
   type: 'object',
   additionalProperties: false,
@@ -110,6 +170,7 @@ const snapshotSchema = {
         maxLength: TEXT_LIMITS.goal,
       }])),
     },
+    decomposition: { anyOf: [decompositionSchema, { type: 'null' }] },
     tasks: {
       type: 'array',
       maxItems: TASK_LIMIT,
@@ -339,6 +400,91 @@ function assertDistributionSemantics(distribution, tasks) {
   if (containsModelArtifacts(distribution.recommendations)) throw inputError();
 }
 
+function assertDecompositionSemantics(decomposition, tasks, goals) {
+  if (decomposition == null) return;
+  const stageByName = new Map();
+  for (const stage of decomposition.stages) {
+    if (stageByName.has(stage.name)) throw inputError();
+    stageByName.set(stage.name, stage);
+  }
+  const coachStage = stageByName.get('coach-analysis');
+  const taskStage = stageByName.get('task-generation');
+  if (
+    stageByName.size !== 2
+    || !coachStage
+    || !taskStage
+    || coachStage.prompt.id !== 'decomposition.coach-analysis'
+    || taskStage.prompt.id !== 'decomposition.task-generation'
+    || !validateCoachResponse(coachStage.output)
+    || !validateTaskResponse(taskStage.output)
+  ) {
+    throw inputError();
+  }
+
+  const evidenceById = new Map();
+  for (const evidence of coachStage.output.evidence) {
+    if (
+      evidenceById.has(evidence.id)
+      || !String(goals[evidence.dimension] || '').includes(evidence.quote)
+      || (evidence.owner !== '待确认'
+        && !String(goals[evidence.dimension] || '').includes(evidence.owner))
+      || (evidence.due !== '待确认'
+        && !String(goals[evidence.dimension] || '').includes(evidence.due))
+    ) {
+      throw inputError();
+    }
+    evidenceById.set(evidence.id, evidence);
+  }
+  visitClaims(coachStage.output.coachingAnalysis, (claim) => {
+    if (
+      new Set(claim.evidenceIds).size !== claim.evidenceIds.length
+      || claim.evidenceIds.some(id => !evidenceById.has(id))
+      || (claim.evidenceIds.length === 0 && !claim.text.startsWith('证据不足'))
+    ) {
+      throw inputError();
+    }
+  });
+
+  if (decomposition.taskEvidence.length !== taskStage.output.tasks.length) {
+    throw inputError();
+  }
+  const sourceForDimension = {
+    昨天: '复盘',
+    今天: '今天',
+    明天: '短期目标',
+    后天: '中长期',
+  };
+  const linkedTaskIds = new Set();
+  for (let index = 0; index < taskStage.output.tasks.length; index += 1) {
+    const link = decomposition.taskEvidence[index];
+    const candidate = taskStage.output.tasks[index];
+    const primary = evidenceById.get(candidate.evidenceIds[0]);
+    const sourceMatches = primary?.dimension === '今天'
+      ? ['今天', '临时'].includes(candidate.source)
+      : candidate.source === sourceForDimension[primary?.dimension];
+    if (
+      linkedTaskIds.has(link.taskId)
+      || candidate.status !== 'pending'
+      || candidate.evidenceIds.length === 0
+      || new Set(candidate.evidenceIds).size !== candidate.evidenceIds.length
+      || candidate.evidenceIds.some(id => !evidenceById.has(id))
+      || JSON.stringify(link.evidenceIds) !== JSON.stringify(candidate.evidenceIds)
+      || !sourceMatches
+      || ['completed', 'not_actionable'].includes(primary?.status)
+      || (candidate.owner !== '待确认' && candidate.owner !== primary?.owner)
+      || (candidate.due !== '待确认' && candidate.due !== primary?.due)
+    ) {
+      throw inputError();
+    }
+    linkedTaskIds.add(link.taskId);
+  }
+
+  // Final tasks may differ after user review. Generated IDs can be edited,
+  // deleted, or joined by manual tasks, while the original trace remains intact.
+  const finalTaskIds = new Set(tasks.map(task => task.id));
+  if (finalTaskIds.size !== tasks.length) throw inputError();
+}
+
 function assertSemantics(snapshot, schemaVersion = HISTORY_SCHEMA_VERSION) {
   if (!snapshot.title.trim()) throw inputError();
   const tasksById = new Map();
@@ -408,6 +554,7 @@ function assertSemantics(snapshot, schemaVersion = HISTORY_SCHEMA_VERSION) {
   if (schemaVersion === 2) {
     if (!snapshot.distribution) throw inputError();
     assertDistributionSemantics(snapshot.distribution, snapshot.tasks);
+    assertDecompositionSemantics(snapshot.decomposition, snapshot.tasks, snapshot.goals);
   }
 }
 
@@ -451,11 +598,11 @@ function decodeStoredSnapshot(record) {
     }
     if (!distribution) throw dataError();
 
-    const validated = validateHistorySnapshot(
-      { ...base, distribution },
-      { schemaVersion: 2 },
-    );
-    return validated;
+    const candidate = { ...base, distribution };
+    if (typeof record.decompositionJson === 'string') {
+      candidate.decomposition = JSON.parse(record.decompositionJson);
+    }
+    return validateHistorySnapshot(candidate, { schemaVersion: 2 });
   } catch (error) {
     if (error?.code === 'INPUT_INVALID' || error?.code === 'HISTORY_DATA_INVALID') {
       throw error;

@@ -52,6 +52,66 @@ test('第一次非 JSON、第二次合法时总共请求两次', async () => {
   assert.equal(calls[0].options.headers.authorization, 'Bearer fake-key');
 });
 
+test('Structured Outputs 使用严格 JSON Schema 请求', async () => {
+  const { createModelClient } = require('../../server/model/model-client');
+  const calls = [];
+  const client = createModelClient(clientOptions(async (url, options) => {
+    calls.push({ url, options });
+    return responseWith('{"value":"ok"}');
+  }));
+  const schema = {
+    type: 'object',
+    additionalProperties: false,
+    required: ['value'],
+    properties: { value: { type: 'string' } },
+  };
+
+  assert.deepEqual(await client.completeJson({
+    system: 'rules',
+    user: '{}',
+    responseSchema: schema,
+    responseSchemaName: 'test_schema_v1',
+    maxAttempts: 1,
+  }), { value: 'ok' });
+
+  const body = JSON.parse(calls[0].options.body);
+  assert.deepEqual(body.response_format, {
+    type: 'json_schema',
+    json_schema: {
+      name: 'test_schema_v1',
+      strict: true,
+      schema,
+    },
+  });
+});
+
+test('不支持 JSON Schema 的兼容供应商回退到 json_object', async () => {
+  const { createModelClient } = require('../../server/model/model-client');
+  const calls = [];
+  const client = createModelClient(clientOptions(async (url, options) => {
+    calls.push({ url, options });
+    if (calls.length === 1) return responseWith('', { ok: false, status: 400 });
+    return responseWith('{"value":"fallback"}');
+  }));
+
+  const result = await client.completeJson({
+    system: 'rules',
+    user: '{}',
+    responseSchema: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['value'],
+      properties: { value: { type: 'string' } },
+    },
+    responseSchemaName: 'test_schema_v1',
+    maxAttempts: 1,
+  });
+
+  assert.deepEqual(result, { value: 'fallback' });
+  assert.equal(calls.length, 2);
+  assert.deepEqual(JSON.parse(calls[1].options.body).response_format, { type: 'json_object' });
+});
+
 test('第一次返回合法 JSON 时只请求一次', async () => {
   const { createModelClient } = require('../../server/model/model-client');
   let calls = 0;

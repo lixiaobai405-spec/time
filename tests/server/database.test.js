@@ -36,7 +36,7 @@ test('openDatabase enables required pragmas and applies all migrations once', as
   assert.deepEqual(
     (await fixture.database.all('SELECT version FROM schema_migrations ORDER BY version'))
       .map((row) => row.version),
-    [1, 2, 3, 4],
+    [1, 2, 3, 4, 5],
   );
 
   for (const table of ['users', 'sessions', 'time_management_runs', 'daily_tracking_days']) {
@@ -51,7 +51,7 @@ test('openDatabase enables required pragmas and applies all migrations once', as
   const reopened = await openDatabase({ filename: fixture.filename });
   assert.equal(
     (await reopened.get('SELECT COUNT(*) AS count FROM schema_migrations')).count,
-    4,
+    5,
   );
   await reopened.close();
 });
@@ -120,7 +120,7 @@ test('migration 2 preserves the original case of existing usernames', async (t) 
     assert.deepEqual(
       (await migrated.all('SELECT version FROM schema_migrations ORDER BY version'))
         .map((row) => row.version),
-      [1, 2, 3, 4],
+      [1, 2, 3, 4, 5],
     );
   } finally {
     await migrated.close();
@@ -201,7 +201,7 @@ test('upgrading from migrations 001–003 to 004 preserves old data and leaves d
 
     const versions = (await migrated.all('SELECT version FROM schema_migrations ORDER BY version'))
       .map((r) => r.version);
-    assert.deepEqual(versions, [1, 2, 3, 4]);
+    assert.deepEqual(versions, [1, 2, 3, 4, 5]);
 
     // Reopen again — migration 004 must not re-execute
     await migrated.close();
@@ -209,7 +209,7 @@ test('upgrading from migrations 001–003 to 004 preserves old data and leaves d
     try {
       assert.equal(
         (await reopened.get('SELECT COUNT(*) AS count FROM schema_migrations')).count,
-        4,
+        5,
       );
     } finally {
       await reopened.close();

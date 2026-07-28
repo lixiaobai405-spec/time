@@ -32,7 +32,22 @@ function createModelClient({
 
   const endpoint = `${String(modelApiBaseUrl).replace(/\/+$/, '')}/chat/completions`;
 
-  async function requestOnce({ system, user, temperature }) {
+  function responseFormats(responseSchema, responseSchemaName) {
+    if (!responseSchema) return [{ type: 'json_object' }];
+    const strict = {
+      type: 'json_schema',
+      json_schema: {
+        name: responseSchemaName || 'structured_response',
+        strict: true,
+        schema: responseSchema,
+      },
+    };
+    // OpenAI-compatible providers vary in Structured Outputs support. Try the
+    // strict contract first, then fall back only for schema-capability 4xx errors.
+    return [strict, { type: 'json_object' }];
+  }
+
+  async function fetchOnce({ system, user, temperature, responseFormat }) {
     const controller = new AbortController();
     let timer;
     const timeout = new Promise((_, reject) => {
@@ -42,9 +57,8 @@ function createModelClient({
       }, modelTimeoutMs);
     });
 
-    let response;
     try {
-      response = await Promise.race([
+      return await Promise.race([
         Promise.resolve(fetchImpl(endpoint, {
           method: 'POST',
           headers: {
@@ -54,7 +68,7 @@ function createModelClient({
           body: JSON.stringify({
             model: modelName,
             temperature,
-            response_format: { type: 'json_object' },
+            response_format: responseFormat,
             messages: [
               { role: 'system', content: system },
               { role: 'user', content: user },
@@ -69,6 +83,30 @@ function createModelClient({
       throw modelError('MODEL_UPSTREAM_ERROR', 'model request failed');
     } finally {
       clearTimeout(timer);
+    }
+  }
+
+  async function requestOnce({
+    system,
+    user,
+    temperature,
+    responseSchema,
+    responseSchemaName,
+  }) {
+    const formats = responseFormats(responseSchema, responseSchemaName);
+    let response;
+    for (let index = 0; index < formats.length; index += 1) {
+      response = await fetchOnce({
+        system,
+        user,
+        temperature,
+        responseFormat: formats[index],
+      });
+      if (response?.ok === true) break;
+      const canFallback = index === 0
+        && formats.length > 1
+        && [400, 404, 422].includes(response?.status);
+      if (!canFallback) throw modelError('MODEL_UPSTREAM_ERROR', 'model request failed');
     }
 
     if (!response || response.ok !== true) {
@@ -91,11 +129,24 @@ function createModelClient({
     });
   }
 
-  async function completeJson({ system, user, temperature = 0.2, maxAttempts = 2 }) {
+  async function completeJson({
+    system,
+    user,
+    temperature = 0.2,
+    maxAttempts = 2,
+    responseSchema,
+    responseSchemaName,
+  }) {
     const attempts = normalizeMaxAttempts(maxAttempts);
     for (let attempt = 1; attempt <= attempts; attempt += 1) {
       try {
-        return await requestOnce({ system, user, temperature });
+        return await requestOnce({
+          system,
+          user,
+          temperature,
+          responseSchema,
+          responseSchemaName,
+        });
       } catch (error) {
         if (error.code !== 'MODEL_OUTPUT_INVALID' || attempt === attempts) throw error;
       }

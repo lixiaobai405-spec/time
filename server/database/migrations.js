@@ -2,8 +2,15 @@ const migration001 = require('./migrations/001-auth-history');
 const migration002 = require('./migrations/002-case-sensitive-usernames');
 const migration003 = require('./migrations/003-daily-tracking');
 const migration004 = require('./migrations/004-history-distribution');
+const migration005 = require('./migrations/005-history-decomposition');
 
-const MIGRATIONS = Object.freeze([migration001, migration002, migration003, migration004]);
+const MIGRATIONS = Object.freeze([
+  migration001,
+  migration002,
+  migration003,
+  migration004,
+  migration005,
+]);
 
 function validateMigrations(migrations) {
   const versions = new Set();

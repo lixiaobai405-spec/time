@@ -6,6 +6,8 @@
     "dev": "node scripts/start-dev.js",
     "migrate": "node scripts/migrate.js",
     "backup:database": "node scripts/backup-database.js",
+    "eval:decomposition": "node scripts/evaluate-decomposition.js --mode=replay --fail-on-regression",
+    "eval:decomposition:live": "node scripts/evaluate-decomposition.js --mode=live",
     "test": "npm run test:server && npm run test:e2e",
     "test:server": "node --test",
     "test:e2e": "playwright test"

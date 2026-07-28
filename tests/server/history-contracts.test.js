@@ -11,6 +11,7 @@ const {
   encodeHistoryCursor,
   normalizeHistoryLimit,
 } = require('../../server/history/cursor');
+const { decompositionFixture } = require('../helpers/decomposition-fixture');
 const {
   DISTRIBUTION_FIXTURE,
   TASK_ONE_ID,
@@ -37,6 +38,8 @@ function stored(snapshot, schemaVersion = 1) {
     reportJson: JSON.stringify(snapshot.report),
     distributionJson: schemaVersion >= 2 && snapshot.distribution
       ? JSON.stringify(snapshot.distribution) : null,
+    decompositionJson: schemaVersion >= 2 && snapshot.decomposition
+      ? JSON.stringify(snapshot.decomposition) : null,
     schemaVersion,
   };
 }
@@ -46,6 +49,34 @@ test('a complete version-2 history snapshot preserves the formal workflow contra
   assert.equal(HISTORY_SCHEMA_VERSION, 2);
   assert.deepEqual(validateHistorySnapshot(snapshot), snapshot);
   assert.deepEqual(decodeStoredSnapshot(stored(snapshot, 2)), snapshot);
+});
+
+test('version-2 history round-trips decomposition intermediate JSON', () => {
+  const base = historySnapshot();
+  const snapshot = {
+    ...base,
+    decomposition: decompositionFixture(base),
+  };
+  const validated = validateHistorySnapshot(snapshot);
+  assert.deepEqual(validated.decomposition, snapshot.decomposition);
+  assert.deepEqual(decodeStoredSnapshot(stored(snapshot, 2)), snapshot);
+});
+
+test('manual task edits keep the original decomposition trace auditable', () => {
+  const base = historySnapshot();
+  const snapshot = {
+    ...base,
+    decomposition: decompositionFixture(base),
+    tasks: base.tasks.map((task, index) => (
+      index === 0 ? { ...task, name: '人工修订后的方案' } : task
+    )),
+  };
+  const validated = validateHistorySnapshot(snapshot);
+  assert.equal(validated.tasks[0].name, '人工修订后的方案');
+  assert.equal(
+    validated.decomposition.stages[1].output.tasks[0].name,
+    '提交方案',
+  );
 });
 
 test('Schema 1 stored records decode with distribution: null', () => {

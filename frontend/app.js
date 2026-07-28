@@ -6,6 +6,7 @@ import {
   putJson,
   setCsrfToken,
 } from './api.js';
+import { downloadDailyTrackingWorkbook } from './excel-export.js';
 import {
   CATEGORY_KEYS,
   createUuid,
@@ -587,11 +588,37 @@ function renderDaily() {
   const failureAction = dailyFailureRequiresReload()
     ? '<button class="btn btn-ghost btn-sm" data-action="reload-daily">重新加载今天</button>'
     : '<button class="btn btn-ghost btn-sm" data-action="retry-daily-save">重试</button>';
-  app().innerHTML = `<div class="phead"><div class="ptitle">每日跟踪</div><div id="daily-save-status" class="daily-save-status ${escapeHtml(statusClass)}" role="status" aria-live="polite">${escapeHtml(dailySaveText())}${state.daily.saveStatus === 'failed' ? ` ${failureAction}` : ''}</div></div>
+  app().innerHTML = `<div class="phead"><div class="ptitle">每日跟踪</div><div class="daily-head-actions"><button class="btn btn-ghost btn-sm" data-action="export-daily-excel" ${list.length ? '' : 'disabled'}>导出 Excel</button><div id="daily-save-status" class="daily-save-status ${escapeHtml(statusClass)}" role="status" aria-live="polite">${escapeHtml(dailySaveText())}${state.daily.saveStatus === 'failed' ? ` ${failureAction}` : ''}</div></div></div>
     <div class="pdesc">已汇总今天生成的 ${summary.historyCount} 条记录，共 ${summary.taskCount} 项任务。无论从哪条历史进入，这里始终是 ${escapeHtml(state.daily.trackingDate || TODAY)} 的账号清单。</div>
     <div class="panelbox"><div class="pb-h"><span class="n">✓</span>今日登记 · ${escapeHtml(state.daily.trackingDate || TODAY)}</div><div class="pb-d">已完成 ${doneCount} / ${list.length} 项。修改、完成或删除后将自动保存。</div>
       <div class="tgrid"><div class="trow hd g-daily"><div></div><div>任务</div><div>类别</div><div>截止日期</div><div>预估时长（小时）</div><div>责任人</div><div>轻重缓急</div><div>完成时间</div><div></div></div>${list.length ? list.map(dailyTaskRow).join('') : '<div class="history-empty">今天还没有生成任何历史任务，请先完成五步梳理流程。</div>'}</div>
     </div>`;
+}
+
+function exportDailyToExcel() {
+  if (!state.daily.loaded || !state.daily.tasks.length) {
+    toast('当前没有可导出的每日跟踪任务');
+    return;
+  }
+  const rows = state.daily.tasks.map((task) => {
+    const track = dailyTracked(task.id);
+    const priority = PRIORITIES[priorityForTask(task)]?.label || '未选';
+    return {
+      status: track.done ? '已完成' : '未完成',
+      task: task.name,
+      category: categoryForTask(task),
+      due: displayDue(task.due),
+      estimatedHours: parseEstimatedHours(task.est),
+      owner: task.owner || '待确认',
+      priority,
+      completedAt: track.doneAt ? track.doneAt.replace('T', ' ') : '',
+    };
+  });
+  const filename = downloadDailyTrackingWorkbook({
+    trackingDate: state.daily.trackingDate || TODAY,
+    rows,
+  });
+  toast(`已导出 ${filename}`);
 }
 
 function formatTimestamp(value) {
@@ -626,12 +653,25 @@ function historyDistributionSection(distribution) {
   return `<section class="history-section"><h2>时间分布诊断</h2>${distributionResultMarkup(distribution)}</section>`;
 }
 
+function historyDecompositionSection(decomposition) {
+  if (!decomposition) {
+    return '<section class="history-section"><h2>拆解审计</h2><div class="history-empty">该历史版本未保存拆解中间产物。</div></section>';
+  }
+  const coachStage = decomposition.stages?.find(stage => stage.name === 'coach-analysis');
+  const taskStage = decomposition.stages?.find(stage => stage.name === 'task-generation');
+  const evidenceCount = coachStage?.output?.evidence?.length || 0;
+  const candidateCount = taskStage?.output?.tasks?.length || 0;
+  return `<section class="history-section"><h2>拆解审计</h2><p>流水线：${escapeHtml(decomposition.pipelineVersion)} · 业务日期：${escapeHtml(decomposition.businessDate)} · 证据 ${evidenceCount} 条 · 候选任务 ${candidateCount} 条</p>
+    <details class="history-audit"><summary>查看中间产物 JSON</summary><pre>${escapeHtml(JSON.stringify(decomposition, null, 2))}</pre></details></section>`;
+}
+
 function renderHistoryDetail() {
   const item = state.historyDetail;
   if (!item) return renderHistory();
   const taskById = new Map(item.tasks.map(task => [task.id, task]));
   app().innerHTML = `<div class="phead"><button class="btn btn-ghost btn-sm" data-action="history-back">返回</button><div class="ptitle">${escapeHtml(item.title)}</div></div><div class="pdesc">生成时间：${escapeHtml(formatTimestamp(item.createdAt))} · 只读账号历史</div>
     <div class="history-detail-content"><section class="history-section"><h2>事务填写</h2><div class="history-goals">${Object.entries(item.goals).map(([key, value]) => `<div><strong>${escapeHtml(key)}</strong><p>${escapeHtml(value || '未填写')}</p></div>`).join('')}</div></section>
+      ${historyDecompositionSection(item.decomposition)}
       <section class="history-section"><h2>任务清单</h2><div class="history-tasks">${item.tasks.map(task => `<article><h3>${escapeHtml(task.name)}</h3><p>${escapeHtml(categoryForTask(task))} · ${escapeHtml(task.importance || '待确认')}/${escapeHtml(task.urgency || '待确认')} · ${escapeHtml(task.est || '')} · 截止：${escapeHtml(displayDue(task.due))} · 责任人：${escapeHtml(task.owner || '待确认')}</p></article>`).join('')}</div></section>
       ${historyDistributionSection(item.distribution)}
       <section class="history-section"><h2>轻重缓急矩阵</h2><div class="history-quadrants">${item.matrix.quadrants.map(quadrant => `<div><strong>${escapeHtml(quadrant.name)} · ${quadrant.energyPercent}%</strong><p>${quadrant.taskIds.map(id => escapeHtml(taskById.get(id)?.name || '')).filter(Boolean).join('、') || '暂无任务'}</p></div>`).join('')}</div></section>
@@ -939,7 +979,7 @@ async function decomposeTasks() {
   if (state.pending) return;
   const id = ++operationId;
   state.pending = 'decompose';
-  renderProcessing('正在拆解为结构化任务', '四栏输入先经服务端校验，再交给模型拆解', ['校验四栏输入', '拆分独立可执行任务', '识别工时与轻重缓急', '生成初始轻重缓急']);
+  renderProcessing('正在进行证据化拆解', '先生成可追溯诊断中间产物，再据此生成任务并由服务端校验', ['校验四栏输入', '提取原文证据并形成教练诊断', '根据证据拆分独立任务', '核验证据覆盖、状态与任务来源']);
   try {
     const intake = await postJson('/api/time-management/intake/check', { entries: state.entries });
     if (!isCurrent(id)) return;
@@ -947,6 +987,7 @@ async function decomposeTasks() {
     if (!isCurrent(id)) return;
     state.pending = null;
     state.intake = intake;
+    state.decomposition = result.decomposition;
     state.tasks = result.tasks.map(normalizeTaskForUi);
     state.smart = result.smart;
     state.smartChecked = false;
@@ -1212,6 +1253,7 @@ function currentHistorySnapshot() {
     clientRunId: state.clientRunId,
     title: currentHistoryTitle(),
     goals: state.entries,
+    decomposition: state.decomposition,
     tasks: state.tasks,
     distribution: state.distribution,
     matrix: state.matrix,
@@ -1526,6 +1568,7 @@ document.addEventListener('click', event => {
   else if (action === 'retry-daily-save') saveDaily();
   else if (action === 'reload-daily') reloadDaily();
   else if (action === 'open-daily') navigate('daily');
+  else if (action === 'export-daily-excel') exportDailyToExcel();
   else if (action === 'copy-report') copyText(document.querySelector('.panel-body')?.innerText.trim(), '已复制报告');
   else if (action === 'history-retry') saveCurrentHistory();
   else if (action === 'history-more') loadHistory({ append: true });

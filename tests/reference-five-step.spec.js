@@ -1,4 +1,26 @@
+const fs = require('node:fs/promises');
 const { test, expect } = require('@playwright/test');
+
+function extractStoredZipEntry(buffer, targetName) {
+  let offset = 0;
+  while (offset + 30 <= buffer.length) {
+    const signature = buffer.readUInt32LE(offset);
+    if (signature !== 0x04034B50) break;
+    const method = buffer.readUInt16LE(offset + 8);
+    const compressedSize = buffer.readUInt32LE(offset + 18);
+    const nameLength = buffer.readUInt16LE(offset + 26);
+    const extraLength = buffer.readUInt16LE(offset + 28);
+    const nameStart = offset + 30;
+    const dataStart = nameStart + nameLength + extraLength;
+    const name = buffer.subarray(nameStart, nameStart + nameLength).toString('utf8');
+    if (name === targetName) {
+      if (method !== 0) throw new Error(`Unexpected compression method for ${targetName}`);
+      return buffer.subarray(dataStart, dataStart + compressedSize);
+    }
+    offset = dataStart + compressedSize;
+  }
+  throw new Error(`ZIP entry not found: ${targetName}`);
+}
 
 const TASKS = [
   {
@@ -389,6 +411,34 @@ test('工作台与历史只读展示日期责任人且每日跟踪保持可编�
   await page.locator('.tnav').filter({ hasText: /^工作台$/ }).click();
   await expect(page.locator('.ptitle')).toHaveText('工作台');
   await expect(page.locator('.hcard')).toHaveCount(4);
+});
+
+test('每日跟踪可导出真实 XLSX 文件', async ({ page }) => {
+  await page.goto('/');
+  await page.locator('.tnav').filter({ hasText: /^每日跟踪$/ }).click();
+  await expect(page.locator('.ptitle')).toHaveText('每日跟踪');
+  await expect(page.getByRole('button', { name: '导出 Excel' })).toBeEnabled();
+
+  await page.locator('[data-action="toggle-daily-done"]').first().click();
+  const downloadPromise = page.waitForEvent('download');
+  await page.getByRole('button', { name: '导出 Excel' }).click();
+  const download = await downloadPromise;
+
+  expect(download.suggestedFilename()).toBe('每日跟踪_2026-07-23.xlsx');
+  const downloadedPath = await download.path();
+  const workbook = await fs.readFile(downloadedPath);
+  expect(workbook.subarray(0, 4).toString('hex')).toBe('504b0304');
+
+  const contentTypes = extractStoredZipEntry(workbook, '[Content_Types].xml').toString('utf8');
+  const workbookXml = extractStoredZipEntry(workbook, 'xl/workbook.xml').toString('utf8');
+  const sheetXml = extractStoredZipEntry(workbook, 'xl/worksheets/sheet1.xml').toString('utf8');
+  expect(contentTypes).toContain('spreadsheetml.sheet.main+xml');
+  expect(workbookXml).toContain('name="每日跟踪"');
+  expect(sheetXml).toContain('预估时长（小时）');
+  expect(sheetXml).toContain('补交上周未完成的月报');
+  expect(sheetXml).toContain('已完成');
+  expect(sheetXml).toContain('<v>1</v>');
+  await expect(page.locator('#toast')).toContainText('每日跟踪_2026-07-23.xlsx');
 });
 
 test('AI 拆解确认和手动新增可编辑日期与责任人并提交日级 due', async ({ page }) => {
