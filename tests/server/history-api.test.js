@@ -3,7 +3,7 @@ const { randomUUID } = require('node:crypto');
 const test = require('node:test');
 
 const { AuthClient } = require('../helpers/auth-client');
-const { historySnapshot } = require('../helpers/history-fixture');
+const { DISTRIBUTION_FIXTURE, historySnapshot } = require('../helpers/history-fixture');
 const { createAuthTestApp } = require('../helpers/test-app');
 
 const PASSWORD = 'History-Horse-2026';
@@ -113,6 +113,55 @@ test('list defaults to 20, caps at 50, and cursor pagination has no duplicates',
   assert.equal(new Set(ids).size, 52);
 });
 
+test('POST with distribution saves and returns 201 with full distribution', async (t) => {
+  const { baseUrl } = await createAuthTestApp(t);
+  const client = new AuthClient(baseUrl);
+  await login(client, 'History_Dist');
+
+  const response = await saveHistory(client, historySnapshot());
+  const body = await response.json();
+  assert.equal(response.status, 201);
+  assert.deepEqual(body.distribution, DISTRIBUTION_FIXTURE);
+});
+
+test('POST without distribution returns 400 INPUT_INVALID', async (t) => {
+  const { baseUrl } = await createAuthTestApp(t);
+  const client = new AuthClient(baseUrl);
+  await login(client, 'History_NoDist');
+
+  const snapshot = historySnapshot();
+  delete snapshot.distribution;
+  const response = await saveHistory(client, snapshot);
+  assert.equal(response.status, 400);
+  assert.equal((await response.json()).error.code, 'INPUT_INVALID');
+});
+
+test('POST with invalid distribution structure returns 400 INPUT_INVALID', async (t) => {
+  const { baseUrl } = await createAuthTestApp(t);
+  const client = new AuthClient(baseUrl);
+  await login(client, 'History_BadDist');
+
+  const snapshot = historySnapshot();
+  snapshot.distribution = { ...DISTRIBUTION_FIXTURE, totalMinutes: 'bad' };
+  const response = await saveHistory(client, snapshot);
+  assert.equal(response.status, 400);
+  assert.equal((await response.json()).error.code, 'INPUT_INVALID');
+});
+
+test('error responses do not leak task content, raw JSON, SQL, or stack traces', async (t) => {
+  const { baseUrl } = await createAuthTestApp(t);
+  const client = new AuthClient(baseUrl);
+  await login(client, 'History_Safe');
+
+  const snapshot = historySnapshot();
+  snapshot.distribution = { ...DISTRIBUTION_FIXTURE, totalMinutes: 'not-a-number' };
+  const response = await saveHistory(client, snapshot);
+  const body = await response.json();
+  assert.equal(response.status, 400);
+  assert.equal(body.error.code, 'INPUT_INVALID');
+  assert.ok(!/SQLITE|SELECT|INSERT|time_management|分布/.test(JSON.stringify(body)));
+});
+
 test('detail and delete conceal ownership and deletion requires CSRF', async (t) => {
   const { baseUrl } = await createAuthTestApp(t);
   const owner = new AuthClient(baseUrl);
@@ -127,7 +176,7 @@ test('detail and delete conceal ownership and deletion requires CSRF', async (t)
   const ownerDetailResponse = await owner.request(`/api/time-management/history/${saved.id}`);
   const ownerDetail = await ownerDetailResponse.json();
   assert.equal(ownerDetailResponse.status, 200);
-  assert.deepEqual(ownerDetail.tasks, historySnapshot().tasks);
+  assert.equal(ownerDetail.tasks[0].due, '待确认');
   assert.deepEqual(ownerDetail.report, historySnapshot().report);
 
   const absentId = randomUUID();

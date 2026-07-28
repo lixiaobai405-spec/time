@@ -2,10 +2,14 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 
 function responseWith(content, options = {}) {
+  const choice = {
+    message: { content },
+    finish_reason: options.finishReason ?? 'stop',
+  };
   return {
     ok: options.ok !== false,
     status: options.status || 200,
-    json: async () => ({ choices: [{ message: { content } }] }),
+    json: async () => ({ choices: [choice] }),
   };
 }
 
@@ -146,4 +150,244 @@ test('提示词加载器只返回指定步骤的唯一代码块', () => {
     () => loadStepPrompt('unknown-step'),
     error => error.code === 'PROMPT_INVALID',
   );
+});
+
+test('上游 HTTP body 不是可解析 JSON 时返回 MODEL_RESPONSE_ENVELOPE_INVALID', async () => {
+  const { createModelClient } = require('../../server/model/model-client');
+  let calls = 0;
+  const marker = 'SENSITIVE-ENVELOPE-CONTENT';
+  const client = createModelClient(clientOptions(async () => {
+    calls += 1;
+    return {
+      ok: true,
+      status: 200,
+      json: async () => { throw new SyntaxError(marker); },
+    };
+  }));
+
+  await assert.rejects(
+    client.completeJson({ system: 'rules', user: '{}', maxAttempts: 1 }),
+    error => error.code === 'MODEL_OUTPUT_INVALID'
+      && error.diagnosticCode === 'MODEL_RESPONSE_ENVELOPE_INVALID'
+      && !String(error.message).includes(marker),
+  );
+  assert.equal(calls, 1);
+});
+
+test('choices[0].message.content 不是合法 JSON 时返回细分诊断码', async () => {
+  const { createModelClient } = require('../../server/model/model-client');
+  let calls = 0;
+  const marker = 'SENSITIVE-CONTENT-MARKER';
+  const client = createModelClient(clientOptions(async () => {
+    calls += 1;
+    return responseWith(`{${marker}}`);
+  }));
+
+  await assert.rejects(
+    client.completeJson({ system: 'rules', user: '{}', maxAttempts: 1 }),
+    error => error.code === 'MODEL_OUTPUT_INVALID'
+      && error.diagnosticCode === 'MODEL_JSON_PROPERTY_NAME_INVALID'
+      && !String(error.message).includes(marker),
+  );
+  assert.equal(calls, 1);
+});
+
+test('正文超过 64 KiB 时返回 MODEL_OUTPUT_TOO_LARGE', async () => {
+  const { createModelClient } = require('../../server/model/model-client');
+  let calls = 0;
+  const oversized = JSON.stringify({ text: 'x'.repeat(65 * 1024) });
+  const client = createModelClient(clientOptions(async () => {
+    calls += 1;
+    return responseWith(oversized);
+  }));
+
+  await assert.rejects(
+    client.completeJson({ system: 'rules', user: '{}', maxAttempts: 1 }),
+    error => error.code === 'MODEL_OUTPUT_INVALID'
+      && error.diagnosticCode === 'MODEL_OUTPUT_TOO_LARGE',
+  );
+  assert.equal(calls, 1);
+});
+
+test('模型客户端错误消息和序列化不包含模型原文', async () => {
+  const { createModelClient } = require('../../server/model/model-client');
+  const marker = 'PRIVATE-MODEL-OUTPUT-12345';
+  const client = createModelClient(clientOptions(async () => {
+    return responseWith(marker);
+  }));
+
+  try {
+    await client.completeJson({ system: 'rules', user: '{}', maxAttempts: 1 });
+    assert.fail('should have thrown');
+  } catch (error) {
+    assert.equal(error.code, 'MODEL_OUTPUT_INVALID');
+    assert.doesNotMatch(error.message, new RegExp(marker));
+    assert.doesNotMatch(JSON.stringify(error), new RegExp(marker));
+  }
+});
+
+test('非法模型正文按固定无敏感信息原因分类', async t => {
+  const { createModelClient } = require('../../server/model/model-client');
+  const cases = [
+    {
+      name: 'missing content',
+      content: undefined,
+      finishReason: 'stop',
+      expected: 'MODEL_CONTENT_MISSING',
+    },
+    {
+      name: 'empty content',
+      content: ' \r\n\t ',
+      finishReason: 'stop',
+      expected: 'MODEL_CONTENT_EMPTY',
+    },
+    {
+      name: 'length truncation',
+      content: '{"order":[',
+      finishReason: 'length',
+      expected: 'MODEL_JSON_TRUNCATED',
+    },
+    {
+      name: 'content filter',
+      content: '',
+      finishReason: 'content_filter',
+      expected: 'MODEL_CONTENT_FILTERED',
+    },
+    {
+      name: 'markdown fence',
+      content: '```json\n{"order":[]}\n```',
+      finishReason: 'stop',
+      expected: 'MODEL_JSON_CODE_FENCE',
+    },
+    {
+      name: 'extra text',
+      content: '以下是结果：\n{"order":[]}',
+      finishReason: 'stop',
+      expected: 'MODEL_JSON_EXTRA_TEXT',
+    },
+    {
+      name: 'json syntax',
+      content: '{"order":[,]}',
+      finishReason: 'stop',
+      expected: 'MODEL_JSON_SYNTAX_INVALID',
+    },
+  ];
+
+  for (const item of cases) {
+    await t.test(item.name, async () => {
+      const client = createModelClient(clientOptions(async () => (
+        responseWith(item.content, { finishReason: item.finishReason })
+      )));
+      await assert.rejects(
+        client.completeJson({ system: 'rules', user: '{}', maxAttempts: 1 }),
+        error => error.code === 'MODEL_OUTPUT_INVALID'
+          && error.diagnosticCode === item.expected
+          && !Object.hasOwn(error, 'content')
+          && !Object.hasOwn(error, 'payload')
+          && !Object.hasOwn(error, 'finishReason'),
+      );
+    });
+  }
+});
+
+test('未知 finish_reason 不进入错误或序列化日志元数据', async () => {
+  const { createModelClient } = require('../../server/model/model-client');
+  const marker = 'PRIVATE-PROVIDER-FINISH-REASON';
+  const client = createModelClient(clientOptions(async () => (
+    responseWith('not-json', { finishReason: marker })
+  )));
+
+  try {
+    await client.completeJson({ system: 'rules', user: '{}', maxAttempts: 1 });
+    assert.fail('should have thrown');
+  } catch (error) {
+    assert.equal(error.diagnosticCode, 'MODEL_JSON_EXTRA_TEXT');
+    assert.doesNotMatch(error.message, new RegExp(marker));
+    assert.doesNotMatch(JSON.stringify(error), new RegExp(marker));
+  }
+});
+
+test('Node 20 JSON.parse 语法错误映射为固定子类', async t => {
+  const { createModelClient } = require('../../server/model/model-client');
+  const rawNewline = `{"value":"line 1${String.fromCharCode(10)}line 2"}`;
+  const cases = [
+    {
+      name: 'raw control character',
+      content: rawNewline,
+      expected: 'MODEL_JSON_CONTROL_CHARACTER_INVALID',
+    },
+    {
+      name: 'bad escape',
+      content: '{"value":"\\q"}',
+      expected: 'MODEL_JSON_ESCAPE_INVALID',
+    },
+    {
+      name: 'trailing comma',
+      content: '{"value":1,}',
+      expected: 'MODEL_JSON_PROPERTY_NAME_INVALID',
+    },
+    {
+      name: 'unquoted property',
+      content: '{value:1}',
+      expected: 'MODEL_JSON_PROPERTY_NAME_INVALID',
+    },
+    {
+      name: 'missing object comma',
+      content: '{"a":1 "b":2}',
+      expected: 'MODEL_JSON_SEPARATOR_INVALID',
+    },
+    {
+      name: 'bad array separator',
+      content: '{"items":[1 2]}',
+      expected: 'MODEL_JSON_SEPARATOR_INVALID',
+    },
+    {
+      name: 'multiple objects',
+      content: '{"a":1}{"b":2}',
+      expected: 'MODEL_JSON_TRAILING_CONTENT',
+    },
+    {
+      name: 'unterminated string',
+      content: '{"value":"text}',
+      expected: 'MODEL_JSON_UNTERMINATED_STRING',
+    },
+    {
+      name: 'fallback syntax',
+      content: '{"value":NaN}',
+      expected: 'MODEL_JSON_SYNTAX_INVALID',
+    },
+  ];
+
+  for (const item of cases) {
+    await t.test(item.name, async () => {
+      const client = createModelClient(clientOptions(async () => (
+        responseWith(item.content, { finishReason: 'stop' })
+      )));
+      await assert.rejects(
+        client.completeJson({ system: 'rules', user: '{}', maxAttempts: 1 }),
+        error => error.code === 'MODEL_OUTPUT_INVALID'
+          && error.diagnosticCode === item.expected
+          && !Object.hasOwn(error, 'parseError')
+          && !Object.hasOwn(error, 'position')
+          && !Object.hasOwn(error, 'content'),
+      );
+    });
+  }
+});
+
+test('JSON.parse 原始错误位置和正文 marker 不进入错误对象', async () => {
+  const { createModelClient } = require('../../server/model/model-client');
+  const marker = 'PRIVATE-JSON-SYNTAX-MARKER';
+  const content = `{"value":"${marker}${String.fromCharCode(10)}next"}`;
+  const client = createModelClient(clientOptions(async () => responseWith(content)));
+
+  try {
+    await client.completeJson({ system: 'rules', user: '{}', maxAttempts: 1 });
+    assert.fail('should have thrown');
+  } catch (error) {
+    assert.equal(error.diagnosticCode, 'MODEL_JSON_CONTROL_CHARACTER_INVALID');
+    assert.equal(error.message, 'model output is invalid');
+    assert.doesNotMatch(JSON.stringify(error), new RegExp(marker));
+    assert.doesNotMatch(JSON.stringify(error), /position|control character/i);
+  }
 });

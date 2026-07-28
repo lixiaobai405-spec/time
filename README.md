@@ -1,19 +1,21 @@
 # 时间管理助手（time）
 
-面向管理者的时间管理助手。新版以参考前端为业务基准，用户登录后依次完成“事务填写 → AI 拆解确认 → 时间分布诊断 → 优先级排序 → 优化报告”；报告生成成功后会自动保存到当前账号的历史。
+面向管理者的时间管理助手。新版以参考前端为业务基准，用户登录后依次完成”事务填写 → AI 拆解确认 → 时间分布诊断 → 优先级排序 → 优化报告”；报告生成成功后会自动保存到当前账号的历史，并包含当次第三步时间分布诊断快照。
 
 ## 当前能力
 
 - “昨天—今天—明天—后天”四栏整段输入；服务端先校验行数和输入边界，再调用模型拆成稳定 UUID 任务。
-- AI 拆解后由用户编辑任务名称、类别、截止时间、预估工时和轻重缓急；服务端执行逐字段 SMART 门禁，缺项未清零时不能进入诊断。
+- 任务提取由模型直接返回结构化任务列表（`tasks`），一次合法输出仅调用模型一次。已完成事实不生成任务，责任人只能从原文明确责任主体提取，缺失时使用”待确认”。截止日期仅保存到日级（`YYYY-MM-DD`）。
+- AI 拆解后由用户编辑任务名称、类别、截止日期、预估工时、责任人和轻重缓急；截止日期仅保存到日级（`YYYY-MM-DD`），责任人仅从原文明示内容提取，缺失时显示”待确认”。服务端执行逐字段 SMART 门禁，任务具体、工时可解析且轻重缓急完整即可继续。工作台显示只读的今日任务卡片，展示完成状态、任务名称、截止日期和责任人，不触发自动保存。
 - 时间分布诊断是正式后端节点：只解析明确的小时/分钟工时，按分钟汇总四类占比，以最大余数法保证显示合计为 100.0%，并返回未参与计算的任务。
 - 支持手动新增、编辑和删除任务；任务变化会使时间分布、矩阵和报告失效，必须按新数据重新计算。
 - 重要/紧急矩阵只有“高”映射为“是”，任务按稳定 `taskId` 守恒，精力比例由服务端固定为 55/25/15/5。
 - 优化报告同时读取当前任务、时间分布诊断和四象限结果；只按当前 `taskId` 引用任务，叙述字段通过安全 Markdown 渲染。
-- 工作台、每日跟踪和历史记录复刻参考稿的信息架构；每日完成状态与本次会话历史不持久化，账号报告历史仍按用户写入 SQLite。
+- 工作台、每日跟踪和历史记录复刻参考稿的信息架构；每日清单按账号和上海业务日期持久化，未勾选且未删除的任务跨日保留；工作台只读，不因 GET 自动写库；已完成报告历史继续按账号持久化。
 - 用户名密码注册、登录、退出和 7 天 SQLite Session；登录成功后会换发新 Session。
 - 恢复码是唯一自助找回方式，注册、重置或轮换成功后只展示一次。用户同时丢失密码和恢复码后无法自助找回账号。
 - 已完成的报告以稳定 `clientRunId` 幂等保存，支持游标分页、只读详情和二次确认删除；用户数据严格隔离。
+- 新写入历史（Schema 2）同时保存第三步时间分布诊断快照；历史详情按"事务填写 → 任务清单 → 时间分布诊断 → 轻重缓急矩阵 → 优化报告"顺序展示。Schema 1 旧历史详情返回 `distribution: null` 并显示"该历史版本未保存时间分布诊断"，不会触发重新计算。
 
 `prompts/system.md` 是五步运行提示词与确定性节点说明的真源；`server/contracts/time-management.js`、各工作流的 Ajv Schema 和自动化测试共同约束运行数据。
 
@@ -61,7 +63,7 @@ npm.cmd run dev
 
 访问 `http://127.0.0.1:4174/`。不要把真实 key 写入 `.env.example`、源码、测试或文档。
 
-应用启动时会按版本在事务中运行 migration（迁移）；也可在启动前显式执行：
+应用启动时会按版本在事务中运行 migration（迁移）：migration 001 创建认证与历史表，002 大小写用户名，003 每日跟踪，004 为 `time_management_runs` 新增可空 `distribution_json TEXT`。也可在启动前显式执行：
 
 ```powershell
 $env:DATABASE_PATH = '.\data\time-management.sqlite'
@@ -112,7 +114,7 @@ Copy-Item .env.example .env
 | 节点与接口 | 请求核心字段 | 响应核心字段 |
 |---|---|---|
 | 1. `/api/time-management/intake/check` | `entries` 四栏字符串 | `lineCounts`、`warnings`、`totalLines` |
-| 2. `/api/time-management/tasks/decompose` | 已校验的 `entries` | 标准化 `tasks`、初始 `smart` |
+| 2. `/api/time-management/tasks/decompose` | 已校验的 `entries` | `intake`、标准化 `tasks`、初始 `smart` |
 | 2. `/api/time-management/tasks/smart-check` | 用户确认后的 `tasks` | 逐任务 `results`、`overall`、`summary` |
 | 3. `/api/time-management/distribution/diagnose` | SMART 通过的 `tasks` | `categories`、`percentages`、`diagnosis`、`recommendations` |
 | 4. `/api/time-management/matrix/classify` | 当前 `tasks` | `classifications`、`quadrants`、`note` |
@@ -124,12 +126,12 @@ Copy-Item .env.example .env
 
 | 方法与接口 | 用途 |
 |---|---|
-| `POST /api/time-management/history` | 以 `(user_id, client_run_id)` 幂等保存已完成快照 |
+| `POST /api/time-management/history` | 以 `(user_id, client_run_id)` 幂等保存已完成快照（新请求必须包含 `distribution`） |
 | `GET /api/time-management/history` | 默认 20、最大 50 条的游标分页列表 |
 | `GET /api/time-management/history/:id` | 读取当前用户的只读详情 |
 | `DELETE /api/time-management/history/:id` | 删除当前用户指定历史 |
 
-API 响应包含安全头和 `X-Request-Id`；请求日志只记录 requestId、路径、状态和耗时，不记录用户名、凭据、Cookie、目标或历史正文。
+API 响应包含安全头和 `X-Request-Id`；请求日志只记录 requestId、路径、状态和耗时，不记录用户名、凭据、Cookie、目标或历史正文。报告格式最终失败时额外记录固定规则码和尝试次数，仍不记录用户正文、模型原文或凭据。
 
 ## 测试
 
@@ -153,9 +155,11 @@ npm.cmd run test:e2e
 
 用户、密码哈希、恢复码哈希、Session 哈希和已完成历史保存在 SQLite。密码、恢复码和原始 Session ID 不明文落库；`user_id` 只来自服务端验证后的 Session。
 
-当前五步草稿、任务编辑、完成勾选和本次会话每日记录仍只存在浏览器内存：刷新页面不会恢复；只有成功生成的优化报告会进入账号历史。页面继续提醒不要填写客户隐私、密码或商业秘密。
+五步未提交草稿仍只在浏览器内存；每日任务编辑、勾选和删除写入 SQLite 的账号日快照；勾选是既有任务完成状态的唯一来源。页面继续提醒不要填写客户隐私、密码或商业秘密。
 
 当前版本不包含邮箱、SMTP、短信、社交登录、管理员后台、团队权限、草稿恢复、教练助手依赖或外部平台集成。真实模型的供应商数据用途、保留期限与删除机制需在生产接入前另行确认。
+
+`due` 和 `owner` 作为可选兼容字段继续保存在任务和历史 JSON 中；缺失、空白或 `null` 会标准化为"待确认"；新写入的 `due` 仅接受 `YYYY-MM-DD` 或"待确认"，`owner` 仅从原文明示内容提取。本次无需数据库迁移。
 
 ## 目录
 

@@ -7,6 +7,7 @@ const { checkGoals } = require('../../server/workflows/check-goals');
 const { classifyMatrix } = require('../../server/workflows/classify-matrix');
 const { extractTasks } = require('../../server/workflows/extract-tasks');
 const { generateReport } = require('../../server/workflows/generate-report');
+const { loadStepPrompt } = require('../../server/prompts/load-step-prompt');
 
 const KEYS = ['昨天', '今天', '明天', '后天'];
 
@@ -14,7 +15,7 @@ function model(outputs) {
   const calls = [];
   return {
     calls,
-    completeJson: async input => {
+    completeJson: async (input) => {
       calls.push(input);
       return outputs[Math.min(calls.length - 1, outputs.length - 1)];
     },
@@ -24,7 +25,7 @@ function model(outputs) {
 function review(overrides = {}) {
   const statuses = overrides.statuses || {};
   return {
-    fields: KEYS.map(key => ({
+    fields: KEYS.map((key) => ({
       key,
       status: statuses[key] || 'ok',
       issue: statuses[key] === 'warn' ? overrides.issue : '',
@@ -34,10 +35,28 @@ function review(overrides = {}) {
   };
 }
 
+function directTasks(taskOverridesArray) {
+  return {
+    tasks: taskOverridesArray.map((overrides) => ({
+      name: '提交方案',
+      importance: '中',
+      urgency: '高',
+      source: '今天',
+      due: '待确认',
+      est: '约1h',
+      owner: '待确认',
+      acceptanceCriteria: [],
+      nextAction: '',
+      status: 'pending',
+      ...overrides,
+    })),
+  };
+}
+
 test('空输入通过假模型返回四个字段级 warn', async () => {
-  const goals = Object.fromEntries(KEYS.map(key => [key, '']));
+  const goals = Object.fromEntries(KEYS.map((key) => [key, '']));
   const output = {
-    fields: KEYS.map(key => ({
+    fields: KEYS.map((key) => ({
       key,
       status: 'warn',
       issue: '示范，请按实际修改:尚未填写',
@@ -46,7 +65,7 @@ test('空输入通过假模型返回四个字段级 warn', async () => {
     overall: 'need_fix',
   };
   const result = await checkGoals({ goals, modelClient: model([output]) });
-  assert.equal(result.fields.filter(item => item.status === 'warn').length, 4);
+  assert.equal(result.fields.filter((item) => item.status === 'warn').length, 4);
   assert.equal(result.overall, 'need_fix');
   assert.equal('questions' in result, false);
 });
@@ -64,33 +83,33 @@ test('PDCA 缺环和 SMART 缺指标时保留模型的字段级判定', async ()
     suggestion: '补充差距原因并写明指标和截止时间',
   });
   const result = await checkGoals({ goals, modelClient: model([output]) });
-  assert.equal(result.fields.find(item => item.key === '昨天').status, 'warn');
-  assert.equal(result.fields.find(item => item.key === '明天').status, 'warn');
+  assert.equal(result.fields.find((item) => item.key === '昨天').status, 'warn');
+  assert.equal(result.fields.find((item) => item.key === '明天').status, 'warn');
   assert.equal(result.overall, 'need_fix');
 });
 
 test('并列事项拆为稳定 ID 不同的两条任务', async () => {
   const goals = { 昨天: '', 今天: '① 校对方案 ② 跟进投诉', 明天: '', 后天: '' };
-  const output = {
-    tasks: [
-      { name: '校对方案', importance: '中', urgency: '高', source: '今天', due: '待确认', est: '约 1h', status: 'pending' },
-      { name: '跟进投诉', importance: '高', urgency: '高', source: '今天', due: '待确认', est: '约 1h', status: 'pending' },
-    ],
-  };
+  const output = directTasks([
+    { name: '校对方案' },
+    { name: '跟进投诉', importance: '高' },
+  ]);
   const result = await extractTasks({ goals, modelClient: model([output]) });
-  assert.deepEqual(result.tasks.map(item => item.name), ['校对方案', '跟进投诉']);
+  assert.deepEqual(result.tasks.map((item) => item.name), ['校对方案', '跟进投诉']);
   assert.notEqual(result.tasks[0].id, result.tasks[1].id);
 });
 
 test('空维度伪造的任务在两次假模型输出后被拒绝', async () => {
   const goals = { 昨天: '', 今天: '提交方案', 明天: '', 后天: '' };
-  const invalid = {
-    tasks: [{ name: '虚构短期任务', importance: '高', urgency: '低', source: '短期目标', due: '待确认', est: '约 1h', status: 'pending' }],
-  };
+  const invalid = directTasks([{
+    name: '虚构短期任务',
+    source: '短期目标',
+    acceptanceCriteria: ['虚构'],
+  }]);
   const modelClient = model([invalid, invalid]);
   await assert.rejects(
     extractTasks({ goals, modelClient }),
-    error => error.code === 'MODEL_OUTPUT_INVALID',
+    (error) => error.code === 'MODEL_OUTPUT_INVALID',
   );
   assert.equal(modelClient.calls.length, 2);
 });
@@ -110,7 +129,7 @@ test('单任务矩阵不重复且其他象限为空', async () => {
       note: '',
     }]),
   });
-  assert.deepEqual(result.quadrants.map(item => item.taskIds), [['task-one'], [], [], []]);
+  assert.deepEqual(result.quadrants.map((item) => item.taskIds), [['task-one'], [], [], []]);
 });
 
 test('五条第一象限任务由服务端补充过载提示', async () => {
@@ -124,7 +143,7 @@ test('五条第一象限任务由服务端补充过载提示', async () => {
   const result = await classifyMatrix({
     tasks,
     modelClient: model([{
-      classifications: tasks.map(item => ({
+      classifications: tasks.map((item) => ({
         taskId: item.id,
         importance: '高',
         urgency: '高',
@@ -147,7 +166,7 @@ test('报告不得引用当前列表之外的任务', async () => {
   const modelClient = model([invalid, invalid]);
   await assert.rejects(
     generateReport({ tasks, matrix, goals, modelClient }),
-    error => error.code === 'MODEL_OUTPUT_INVALID',
+    (error) => error.code === 'MODEL_OUTPUT_INVALID',
   );
   assert.equal(modelClient.calls.length, 2);
 });
@@ -225,6 +244,69 @@ test('任务提取提示词定义重要性证据和紧急度分层且不强制�
   assert.match(source, /今天或已逾期.*高.*未来\s*7\s*天内.*中.*超过\s*7\s*天.*低/s);
   assert.match(source, /待确认.*没有明确紧急信号.*低/s);
   assert.match(source, /允许任意象限为空.*不得.*填满.*平均分配/s);
+});
+
+test('步骤 2 只要求顶层 tasks，不含 evidence 术语', () => {
+  const prompt = loadStepPrompt('extract-tasks');
+  // 必须包含 tasks 和任务字段
+  assert.match(prompt, /"tasks"|"tasks"|tasks/);
+  assert.match(prompt, /name/);
+  assert.match(prompt, /importance/);
+  assert.match(prompt, /urgency/);
+  assert.match(prompt, /source/);
+  assert.match(prompt, /due/);
+  assert.match(prompt, /est/);
+  assert.match(prompt, /owner/);
+  // 不得包含 evidence 术语
+  for (const term of [
+    'claims',
+    'candidateTasks',
+    'claimId',
+    'goalKey',
+    'disposition',
+    'ownerRelation',
+    'dueEvidence',
+    'UTF-16',
+    'ambiguous',
+    'retryFeedback',
+  ]) {
+    assert.doesNotMatch(prompt, new RegExp(term));
+  }
+});
+
+test('步骤 2 明确 owner 不能推断、已完成事实不能生成待办', () => {
+  const prompt = loadStepPrompt('extract-tasks');
+  assert.match(prompt, /不得.*推断.*责任人/);
+  assert.match(prompt, /已完成.*不得.*生成/);
+  assert.match(prompt, /待确认/);
+});
+
+test('loadStepPrompt review-task-claims 返回 PROMPT_INVALID', () => {
+  assert.throws(
+    () => loadStepPrompt('review-task-claims'),
+    (error) => error.code === 'PROMPT_INVALID',
+  );
+});
+
+test('报告提示词包含重试纠错规则', () => {
+  const source = readFileSync(
+    path.join(__dirname, '..', '..', 'prompts', 'system.md'),
+    'utf8',
+  );
+  assert.match(source, /retryFeedback/);
+  assert.match(source, /failedRule/);
+  assert.match(source, /correction/);
+  assert.match(source, /上一轮输出被服务端规则拒绝/);
+  assert.match(source, /优先按.*correction.*修正/);
+  assert.match(source, /不得回显/);
+});
+
+test('报告提示词重试规则仅在输入存在 retryFeedback 时生效', () => {
+  const source = readFileSync(
+    path.join(__dirname, '..', '..', 'prompts', 'system.md'),
+    'utf8',
+  );
+  assert.match(source, /若输入包含 retryFeedback/);
 });
 
 test('人工提示词用例覆盖重要性证据、紧急度分层和空象限', () => {

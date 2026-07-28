@@ -124,8 +124,11 @@ test('a valid session, same-origin request, and CSRF preserve all four workflow 
             importance: '高',
             urgency: '高',
             source: '今天',
-            due: '今天18:00',
+            due: '2026-07-27',
             est: '约1h',
+            owner: '待确认',
+            acceptanceCriteria: [],
+            nextAction: '',
             status: 'pending',
           }],
         };
@@ -167,7 +170,10 @@ test('a valid session, same-origin request, and CSRF preserve all four workflow 
   });
   assert.equal(extractResponse.status, 200);
   const extracted = await extractResponse.json();
-  assert.deepEqual(Object.keys(extracted), ['tasks']);
+  assert.deepEqual(
+    Object.keys(extracted).sort(),
+    ['tasks'].sort(),
+  );
   assert.equal(extracted.tasks.length, 1);
   assert.equal(extracted.tasks[0].name, '提交方案');
   assert.equal(extracted.tasks[0].classificationSource, 'ai-extraction');

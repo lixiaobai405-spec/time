@@ -19,6 +19,10 @@ backups/
 *.db-shm
 *.db-journal
 coverage/
+docs/
+task-spec.md
+tests/manual-test-input-template.md
+tmp/
 *.log
 npm-debug.log*
 .DS_Store

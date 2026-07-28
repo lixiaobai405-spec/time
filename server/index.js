@@ -9,6 +9,7 @@ async function main() {
   const app = createApp({
     modelClient: createModelClient(config),
     authBoundary: runtime.authBoundary,
+    logger: entry => process.stdout.write(`${JSON.stringify(entry)}\n`),
   });
 
   const server = app.listen(config.port, '127.0.0.1', () => {

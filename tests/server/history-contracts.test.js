@@ -12,6 +12,7 @@ const {
   normalizeHistoryLimit,
 } = require('../../server/history/cursor');
 const {
+  DISTRIBUTION_FIXTURE,
   TASK_ONE_ID,
   TASK_TWO_ID,
   historySnapshot,
@@ -34,15 +35,64 @@ function stored(snapshot, schemaVersion = 1) {
     tasksJson: JSON.stringify(snapshot.tasks),
     matrixJson: JSON.stringify(snapshot.matrix),
     reportJson: JSON.stringify(snapshot.report),
+    distributionJson: schemaVersion >= 2 && snapshot.distribution
+      ? JSON.stringify(snapshot.distribution) : null,
     schemaVersion,
   };
 }
 
-test('a complete version-1 history snapshot preserves the formal workflow contract', () => {
+test('a complete version-2 history snapshot preserves the formal workflow contract including distribution', () => {
   const snapshot = historySnapshot();
-  assert.equal(HISTORY_SCHEMA_VERSION, 1);
+  assert.equal(HISTORY_SCHEMA_VERSION, 2);
   assert.deepEqual(validateHistorySnapshot(snapshot), snapshot);
-  assert.deepEqual(decodeStoredSnapshot(stored(snapshot)), snapshot);
+  assert.deepEqual(decodeStoredSnapshot(stored(snapshot, 2)), snapshot);
+});
+
+test('Schema 1 stored records decode with distribution: null', () => {
+  const snapshot = historySnapshot();
+  const v1 = stored(snapshot, 1);
+  const decoded = decodeStoredSnapshot(v1);
+  assert.equal(decoded.distribution, null);
+  assert.equal(decoded.title, snapshot.title);
+  assert.equal(decoded.tasks.length, snapshot.tasks.length);
+});
+
+test('Schema 2 snapshot missing distribution returns INPUT_INVALID', () => {
+  const snapshot = historySnapshot();
+  delete snapshot.distribution;
+  inputInvalid(() => validateHistorySnapshot(snapshot));
+});
+
+test('history snapshots normalize missing, blank, and null due values', () => {
+  const missing = historySnapshot();
+  delete missing.tasks[0].due;
+  assert.equal(validateHistorySnapshot(missing).tasks[0].due, '待确认');
+
+  const blank = historySnapshot();
+  blank.tasks[0].due = '   ';
+  assert.equal(validateHistorySnapshot(blank).tasks[0].due, '待确认');
+
+  const nullable = historySnapshot();
+  nullable.tasks[0].due = null;
+  assert.equal(validateHistorySnapshot(nullable).tasks[0].due, '待确认');
+});
+
+test('history snapshots normalize missing, blank, and null owner values', () => {
+  const missing = historySnapshot();
+  delete missing.tasks[0].owner;
+  assert.equal(validateHistorySnapshot(missing).tasks[0].owner, '待确认');
+
+  const blank = historySnapshot();
+  blank.tasks[0].owner = '   ';
+  assert.equal(validateHistorySnapshot(blank).tasks[0].owner, '待确认');
+
+  const nullable = historySnapshot();
+  nullable.tasks[0].owner = null;
+  assert.equal(validateHistorySnapshot(nullable).tasks[0].owner, '待确认');
+
+  const explicit = historySnapshot();
+  explicit.tasks[0].owner = '张三';
+  assert.equal(validateHistorySnapshot(explicit).tasks[0].owner, '张三');
 });
 
 test('history input rejects identity injection, unknown fields, bad UUIDs, and incomplete shapes', () => {
@@ -105,14 +155,133 @@ test('reports reference only current tasks and never expose UUID text or eight-c
 
 test('stored snapshots reject unknown schema versions and damaged JSON without partial data', () => {
   assert.throws(
-    () => decodeStoredSnapshot(stored(historySnapshot(), 2)),
+    () => decodeStoredSnapshot(stored(historySnapshot(), 3)),
     (error) => error.code === 'HISTORY_DATA_INVALID' && error.status === 500,
   );
-  const damaged = stored(historySnapshot());
+  const damaged = stored(historySnapshot(), 2);
   damaged.tasksJson = '{damaged';
   assert.throws(
     () => decodeStoredSnapshot(damaged),
     (error) => error.code === 'HISTORY_DATA_INVALID' && error.status === 500,
+  );
+});
+
+test('Schema 2 with NULL distribution_json returns HISTORY_DATA_INVALID', () => {
+  const valid = stored(historySnapshot(), 2);
+  valid.distributionJson = null;
+  assert.throws(
+    () => decodeStoredSnapshot(valid),
+    (error) => error.code === 'HISTORY_DATA_INVALID' && error.status === 500,
+  );
+});
+
+test('Schema 2 with damaged distribution_json returns safe HISTORY_DATA_INVALID', () => {
+  const valid = stored(historySnapshot(), 2);
+  valid.distributionJson = '{corrupt';
+  assert.throws(
+    () => decodeStoredSnapshot(valid),
+    (error) => error.code === 'HISTORY_DATA_INVALID'
+      && error.status === 500
+      && !error.message.includes('{corrupt'),
+  );
+});
+
+test('distribution with extra field returns INPUT_INVALID', () => {
+  const snapshot = historySnapshot();
+  snapshot.distribution = { ...DISTRIBUTION_FIXTURE, secret: 'leaked' };
+  inputInvalid(() => validateHistorySnapshot(snapshot));
+});
+
+test('distribution with fifth category returns INPUT_INVALID', () => {
+  const snapshot = historySnapshot();
+  snapshot.distribution = {
+    ...DISTRIBUTION_FIXTURE,
+    categories: [...DISTRIBUTION_FIXTURE.categories, { key: '额外', minutes: 10, hours: 0.2, percent: 5, target: { min: 0, max: 10, label: '?' }, status: 'ok' }],
+  };
+  inputInvalid(() => validateHistorySnapshot(snapshot));
+});
+
+test('distribution with duplicate category keys returns INPUT_INVALID', () => {
+  const snapshot = historySnapshot();
+  snapshot.distribution = {
+    ...DISTRIBUTION_FIXTURE,
+    categories: [
+      { key: '昨天', minutes: 0, hours: 0, percent: 0, target: { min: 0, max: 2, label: '→0%' }, status: 'ok' },
+      { key: '昨天', minutes: 90, hours: 1.5, percent: 100, target: { min: 70, max: 80, label: '70–80%' }, status: 'over' },
+    ],
+  };
+  inputInvalid(() => validateHistorySnapshot(snapshot));
+});
+
+test('distribution with unknown task ID in invalidTasks returns INPUT_INVALID', () => {
+  const snapshot = historySnapshot();
+  snapshot.distribution = {
+    ...DISTRIBUTION_FIXTURE,
+    invalidTasks: [{ taskId: '33333333-3333-4333-8333-333333333333', name: '幽灵任务', est: '?' }],
+  };
+  inputInvalid(() => validateHistorySnapshot(snapshot));
+});
+
+test('distribution with duplicate invalidTasks returns INPUT_INVALID', () => {
+  const snapshot = historySnapshot();
+  snapshot.distribution = {
+    ...DISTRIBUTION_FIXTURE,
+    invalidTasks: [
+      { taskId: TASK_ONE_ID, name: '重复', est: '?' },
+      { taskId: TASK_ONE_ID, name: '重复', est: '?' },
+    ],
+  };
+  inputInvalid(() => validateHistorySnapshot(snapshot));
+});
+
+test('distribution with totalMinutes not matching category sum returns INPUT_INVALID', () => {
+  const snapshot = historySnapshot();
+  snapshot.distribution = { ...DISTRIBUTION_FIXTURE, totalMinutes: 999 };
+  inputInvalid(() => validateHistorySnapshot(snapshot));
+});
+
+test('distribution with validTaskCount not matching task count minus invalidTasks returns INPUT_INVALID', () => {
+  const snapshot = historySnapshot();
+  snapshot.distribution = { ...DISTRIBUTION_FIXTURE, validTaskCount: 99 };
+  inputInvalid(() => validateHistorySnapshot(snapshot));
+});
+
+test('distribution with wrong category percent returns INPUT_INVALID', () => {
+  const snapshot = historySnapshot();
+  const bad = JSON.parse(JSON.stringify(DISTRIBUTION_FIXTURE));
+  bad.categories[0].percent = 50;
+  inputInvalid(() => validateHistorySnapshot({ ...snapshot, distribution: bad }));
+});
+
+test('distribution with percentages not summing to 100 returns INPUT_INVALID', () => {
+  const snapshot = historySnapshot();
+  const bad = JSON.parse(JSON.stringify(DISTRIBUTION_FIXTURE));
+  bad.percentages = { 昨天: 30, 今天: 30, 明天: 30, 后天: 30 };
+  inputInvalid(() => validateHistorySnapshot({ ...snapshot, distribution: bad }));
+});
+
+test('distribution error messages do not leak raw JSON, SQL, table names or db paths', () => {
+  const snapshot = historySnapshot();
+  snapshot.distribution = { ...DISTRIBUTION_FIXTURE, totalMinutes: -1 };
+  assert.throws(
+    () => validateHistorySnapshot(snapshot),
+    (error) => error.code === 'INPUT_INVALID'
+      && error.status === 400
+      && !/SQLITE|SELECT|time_management/i.test(error.message),
+  );
+});
+
+test('history legacy reads preserve timestamps while write mode stores date-only due', () => {
+  const snapshot = historySnapshot();
+  snapshot.tasks[0].due = '2026-07-20 18:00';
+
+  assert.equal(
+    validateHistorySnapshot(snapshot).tasks[0].due,
+    '2026-07-20 18:00',
+  );
+  assert.equal(
+    validateHistorySnapshot(snapshot, { dueMode: 'write' }).tasks[0].due,
+    '2026-07-20',
   );
 });
 

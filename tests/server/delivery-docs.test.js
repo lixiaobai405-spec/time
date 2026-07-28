@@ -46,7 +46,7 @@ test('README documents authenticated SQLite history and operator commands', () =
   assert.match(source, /恢复码.*只展示一次/s);
   assert.match(source, /丢失密码和恢复码.*无法.*找回/s);
   assert.match(source, /报告.*自动保存.*历史/s);
-  assert.match(source, /草稿.*只存在浏览器内存/s);
+  assert.match(source, /草稿.*浏览器内存/s);
   assert.match(source, /不包含.*外部平台集成/s);
   assert.doesNotMatch(source, /不包含账号/);
   assert.doesNotMatch(source, /项目不建立数据库/);
@@ -138,7 +138,7 @@ test('security documentation fixes the log and browser-memory privacy boundary',
   const review = read('docs/adversarial-review.md');
   assert.match(readme, /请求日志只记录 requestId、路径、状态和耗时/);
   assert.match(readme, /不记录用户名、凭据、Cookie、目标或历史正文/);
-  assert.match(readme, /五步草稿、任务编辑、完成勾选和本次会话每日记录仍只存在浏览器内存/);
+  assert.match(readme, /五步未提交草稿仍只在浏览器内存/);
   assert.match(review, /不记录用户名、密码、恢复码、Cookie、Session token、目标正文或历史正文/);
 });
 

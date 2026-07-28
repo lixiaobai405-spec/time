@@ -3,6 +3,7 @@ import {
   deleteJson,
   getJson,
   postJson,
+  putJson,
   setCsrfToken,
 } from './api.js';
 import {
@@ -34,6 +35,13 @@ const CATS = Object.freeze({
   },
 });
 
+const PLACEHOLDERS = Object.freeze({
+  昨天: '记录尚未完成或被拖延的事项，例如未解决问题、延期任务、临时救火事项；',
+  今天: '记录今天计划完成的主要工作事项，请填写具体任务；',
+  明天: '记录未来1-4周需要投入时间建设和改善的事项，例如流程优化、机制建设、团队培养、能力提升；',
+  后天: '记录未来规划和提前布局事项，例如战略思考、重要项目准备、能力储备。',
+});
+
 const SOURCE_TO_CATEGORY = Object.freeze({
   复盘: '昨天', 今天: '今天', 临时: '今天', 短期目标: '明天', 中长期: '后天',
 });
@@ -62,9 +70,16 @@ const QUADRANT_META = Object.freeze({
 const ICONS = Object.freeze({
   clock: '<svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>',
   arrow: '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg>',
+  chevronDown: '<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>',
+  chevronUp: '<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 15 6-6 6 6"/></svg>',
 });
 
 let operationId = 0;
+let dailyLoadId = 0;
+let dailyChangeVersion = 0;
+let dailySaveTimer = null;
+let dailySaveInFlight = false;
+let dailySaveQueued = false;
 const app = () => document.getElementById('app');
 const topbar = () => document.getElementById('topbar');
 const modalHost = () => document.getElementById('modalHost');
@@ -116,8 +131,122 @@ function normalizeEstimate(value) {
   return `${minutes}分钟`;
 }
 
+function dateOnlyDueValue(value) {
+  const text = String(value || '').trim();
+  if (!text || text === '待确认') return '';
+  const match = /^(\d{4}-\d{2}-\d{2})(?:[ T]\d{2}:\d{2})?$/.exec(text);
+  return match ? match[1] : '';
+}
+
+function displayDue(value) {
+  return dateOnlyDueValue(value) || '待确认';
+}
+
+function normalizeTaskForUi(task) {
+  return {
+    ...task,
+    due: displayDue(task.due),
+    owner: String(task.owner || '').trim() || '待确认',
+  };
+}
+
+let homeDailyLoadId = 0;
+
+async function loadHomeDaily() {
+  const id = ++homeDailyLoadId;
+  state.homeDaily = {
+    ...state.homeDaily,
+    loading: true,
+    error: null,
+  };
+  if (state.screen === 'home') render();
+
+  try {
+    const result = validateDailyPayload(await getJson(
+      '/api/time-management/daily-tracking/today',
+    ));
+    if (id !== homeDailyLoadId || state.screen !== 'home') return;
+    state.homeDaily = {
+      loaded: true,
+      loading: false,
+      trackingDate: result.trackingDate,
+      tasks: result.tasks.map(normalizeTaskForUi),
+      tracking: result.tracking,
+      sourceSummary: result.sourceSummary,
+      error: null,
+    };
+    render();
+  } catch (error) {
+    if (id !== homeDailyLoadId || state.screen !== 'home') return;
+    state.homeDaily = {
+      ...state.homeDaily,
+      loaded: false,
+      loading: false,
+      error,
+    };
+    render();
+  }
+}
+
+function toggleHomeDaily() {
+  if (!state.homeDaily.tasks.length) return;
+  state.homeDailyExpanded = !state.homeDailyExpanded;
+  render();
+}
+
+function renderHomeDailyCard() {
+  const daily = state.homeDaily;
+  if (daily.loading) {
+    return '<section class="home-daily-card"><div class="pb-h">今日任务</div><div class="history-loading">正在加载今日任务…</div></section>';
+  }
+  if (daily.error) {
+    return `<section class="home-daily-card"><div class="pb-h">今日任务</div>
+      <div class="history-error">今日任务加载失败。</div>
+      <button class="btn btn-ghost btn-sm" data-action="reload-home-daily">重试</button></section>`;
+  }
+  if (!daily.tasks.length) {
+    return `<section class="home-daily-card"><div class="pb-h">今日任务</div>
+      <div class="history-empty">今天还没有任务，请先完成梳理流程。</div>
+      <button class="btn btn-ghost btn-sm" data-nav="daily">进入每日跟踪</button></section>`;
+  }
+
+  const expanded = state.homeDailyExpanded;
+  const rows = expanded
+    ? daily.tasks.map((task) => {
+      const done = Boolean(daily.tracking[task.id]?.done);
+      return `<article class="home-daily-task ${done ? 'done' : ''}">
+        <span class="home-daily-status">${done ? '已完成' : '未完成'}</span>
+        <strong>${escapeHtml(task.name)}</strong>
+        <span>截止：${escapeHtml(displayDue(task.due))}</span>
+        <span>责任人：${escapeHtml(task.owner || '待确认')}</span>
+      </article>`;
+    }).join('')
+    : '';
+  const toggleLabel = expanded ? '收起今日任务列表' : '展开今日任务列表';
+
+  return `<section class="home-daily-card">
+    <div class="home-daily-head"><div><div class="pb-h">今日任务 · ${escapeHtml(daily.trackingDate)}</div>
+      <div class="pb-d">共 ${daily.tasks.length} 项，已完成 ${daily.tasks.filter(task => daily.tracking[task.id]?.done).length} 项。</div></div>
+      <div class="home-daily-actions">
+        <button class="btn btn-ghost btn-sm" data-nav="daily">进入每日跟踪</button>
+        <button type="button" class="btn btn-ghost btn-sm home-daily-toggle"
+          data-action="toggle-home-daily"
+          aria-expanded="${expanded ? 'true' : 'false'}"
+          aria-controls="home-daily-task-list"
+          aria-label="${toggleLabel}">
+          ${expanded ? ICONS.chevronUp : ICONS.chevronDown}
+        </button>
+      </div></div>
+    <div id="home-daily-task-list" class="home-daily-list" ${expanded ? '' : 'hidden'}>${rows}</div>
+  </section>`;
+}
+
 function tracked(taskId) {
   return state.tracking[taskId] || { done: false, doneAt: '' };
+}
+
+function dailyTracked(taskId) {
+  return state.daily.tracking[taskId] || { done: false, doneAt: '' };
 }
 
 function toast(message) {
@@ -183,7 +312,7 @@ function renderLogin() {
   app().innerHTML = `<div class="login-wrap"><section class="login-card">
     <div class="brand-mark" style="width:44px;height:44px;border-radius:12px">${ICONS.clock}</div>
     <div class="login-h">${register ? '注册账号' : '登录'}</div>
-    <div class="login-sub">登录后可保存报告历史；事务草稿和每日跟踪只保留在当前页面会话。</div>
+    <div class="login-sub">登录后可按账号保存报告历史和当天的每日跟踪清单。</div>
     <div class="tabs"><button class="tab ${register ? '' : 'on'}" data-action="auth-login-tab">登录</button><button class="tab ${register ? 'on' : ''}" data-action="auth-register-tab">注册</button></div>
     <form data-auth-form="${register ? 'register' : 'login'}">
       ${authField('用户名', 'username', 'text', 'username', '请输入用户名')}
@@ -250,14 +379,9 @@ function distributionStatus(category, percent) {
 function renderHome() {
   const distribution = state.distribution || previewDistribution();
   const percentages = distribution.percentages || {};
-  const due = state.tasks.filter(task => {
-    const track = tracked(task.id);
-    return !track.done && /^\d{4}-\d{2}-\d{2}$/.test(task.due) && task.due <= TODAY;
-  });
   const totalHours = distribution.totalHours ?? previewDistribution().totalHours;
   app().innerHTML = `<div class="phead"><div class="ptitle">工作台</div></div>
     <div class="pdesc">${escapeHtml(state.user.username)}，今天是 ${TODAY}。当前 ${state.tasks.length} 条任务，预估投入 ${totalHours || 0} 小时。</div>
-    ${due.length ? `<div class="remind"><div class="ic">!</div><div><b>到期提醒 · ${due.length} 项已到期或逾期未完成</b><div class="list">${due.map(task => `${escapeHtml(task.name)}（截止 ${escapeHtml(task.due)}）`).join(' · ')}</div></div></div>` : ''}
     <div class="hgrid">${CATEGORY_KEYS.map(key => {
       const percent = Number(percentages[key] || 0);
       const status = distributionStatus(key, percent);
@@ -265,7 +389,8 @@ function renderHome() {
     }).join('')}</div>
     <div class="panelbox"><div class="pb-h"><span class="n">→</span>接下来做什么</div><div class="pb-d">${state.tasks.length ? '可继续梳理，或进入每日跟踪登记完成情况。' : '还没有任务，先去梳理流程整段填写四类事务。'}</div>
       <div style="display:flex;gap:10px;flex-wrap:wrap"><button class="btn btn-primary" data-action="open-workspace">${state.tasks.length ? '继续梳理' : '开始梳理'} ${ICONS.arrow}</button><button class="btn btn-ghost" data-nav="daily">每日跟踪</button><button class="btn btn-ghost" data-nav="history">历史记录</button></div>
-    </div>`;
+    </div>
+    ${renderHomeDailyCard()}`;
 }
 
 function panelHead(kicker, title, description) {
@@ -284,7 +409,7 @@ function stepOneBody() {
         const warning = state.intake?.warnings?.find(item => item.key === key);
         return `<div class="col"><div class="col-h"><span class="col-badge" style="background:${category.color}">${category.badge}</span><span class="col-t">${category.short}</span><span class="col-target" style="color:${category.color}">${category.target}</span></div>
           <div class="col-d">${category.description}</div>
-          <textarea id="entry-${key}" data-entry="${key}" placeholder="每行写一件事，可顺带写明日期、耗时和轻重缓急">${escapeHtml(state.entries[key])}</textarea>
+          <textarea id="entry-${key}" data-entry="${key}" placeholder="${escapeHtml(PLACEHOLDERS[key] || '')}">${escapeHtml(state.entries[key])}</textarea>
           ${key === '昨天' ? '<div class="col-note">首次使用手填遗留事项；每日跟踪结束后，未完成任务会滚入该类。</div>' : ''}
           ${warning ? `<div class="field-fb warn">${escapeHtml(warning.message)}</div>` : ''}
         </div>`;
@@ -304,11 +429,13 @@ function taskEditRow(task) {
   const category = categoryForTask(task);
   const hours = parseEstimatedHours(task.est);
   const priority = priorityForTask(task);
+  const dueValue = dateOnlyDueValue(task.due);
   return `<div class="trow g-edit ${fields.size ? 'miss' : ''}" data-task-row="${escapeHtml(task.id)}">
     <div><span class="mobile-label">任务</span><input data-task-id="${escapeHtml(task.id)}" data-task-field="name" value="${escapeHtml(task.name)}" class="${fields.has('name') ? 'miss' : ''}" aria-label="任务描述"></div>
     <div><span class="mobile-label">类别</span><select data-task-id="${escapeHtml(task.id)}" data-task-field="category" aria-label="所属类别">${CATEGORY_KEYS.map(key => `<option value="${key}" ${category === key ? 'selected' : ''}>${key}</option>`).join('')}</select></div>
-    <div><span class="mobile-label">截止时间</span><input data-task-id="${escapeHtml(task.id)}" data-task-field="due" value="${escapeHtml(task.due === '待确认' ? '' : task.due)}" placeholder="YYYY-MM-DD" class="${fields.has('due') ? 'miss' : ''}" aria-label="截止时间"></div>
-    <div><span class="mobile-label">预估时长</span><input type="number" step="0.25" min="0" data-task-id="${escapeHtml(task.id)}" data-task-field="est" value="${Number.isFinite(hours) ? hours : ''}" placeholder="小时" class="${fields.has('est') ? 'miss' : ''}" aria-label="预估时长"></div>
+    <div><span class="mobile-label">截止日期</span><input type="date" data-task-id="${escapeHtml(task.id)}" data-task-field="due" value="${escapeHtml(dueValue)}" aria-label="截止日期"></div>
+    <div><span class="mobile-label">预估时长（小时）</span><input type="number" step="0.25" min="0" data-task-id="${escapeHtml(task.id)}" data-task-field="est" value="${Number.isFinite(hours) ? hours : ''}" placeholder="小时" class="${fields.has('est') ? 'miss' : ''}" aria-label="预估时长（小时）"></div>
+    <div><span class="mobile-label">责任人</span><input data-task-id="${escapeHtml(task.id)}" data-task-field="owner" value="${escapeHtml(task.owner === '待确认' ? '' : task.owner)}" placeholder="待确认" aria-label="责任人"></div>
     <div><span class="mobile-label">轻重缓急</span><select data-task-id="${escapeHtml(task.id)}" data-task-field="priority" class="${fields.has('priority') ? 'miss' : ''}" aria-label="轻重缓急"><option value="">未选</option>${Object.entries(PRIORITIES).map(([key, value]) => `<option value="${key}" ${priority === key ? 'selected' : ''}>${value.label}</option>`).join('')}</select></div>
     <button class="del" data-action="delete-task" data-task-id="${escapeHtml(task.id)}" aria-label="删除任务">×</button>
   </div>`;
@@ -317,10 +444,10 @@ function taskEditRow(task) {
 function stepTwoBody() {
   const needFix = state.smart?.summary?.needFix || 0;
   return `${panelHead('节点 ② · AI动作 + 你确认', 'AI 拆解确认', 'AI 已把四栏文字拆成结构化任务。补齐标红字段，并由后端执行正式 SMART 校验。')}
-    <div class="panel-body"><div class="aibar"><span class="sp">AI</span><div style="flex:1">任务需具体、有截止时间、可解析工时和明确轻重缓急；后端不替你虚构缺失条件。</div>
+    <div class="panel-body"><div class="aibar"><span class="sp">AI</span><div style="flex:1">任务需具体、具有可解析工时和明确轻重缓急；后端不替你虚构缺失条件。</div>
       <button class="btn btn-ghost btn-sm" data-action="smart-check" ${state.pending ? 'disabled' : ''}>${state.pending === 'smart' ? '<span class="mini-spin"></span>校验中…' : 'SMART 校验'}</button>
       <button class="btn btn-ghost btn-sm" data-action="open-add-task">+ 手动添加任务</button></div>
-      <div class="tgrid"><div class="trow hd g-edit"><div>任务</div><div>类别</div><div>截止时间</div><div>预估时长</div><div>轻重缓急</div><div></div></div>
+      <div class="tgrid"><div class="trow hd g-edit"><div>任务</div><div>类别</div><div>截止日期</div><div>预估时长（小时）</div><div>责任人</div><div>轻重缓急</div><div></div></div>
         ${state.tasks.length ? state.tasks.map(taskEditRow).join('') : '<div class="trow"><div style="color:var(--muted);font-size:12px">暂无任务，请返回上一步重新填写。</div></div>'}
       </div>
       ${state.smartChecked ? `<div style="margin-top:12px;font-size:12.5px;color:${needFix ? 'var(--warn)' : 'var(--ok)'};font-weight:700">${needFix ? `还有 ${needFix} 条任务需要补全` : '全部任务通过 SMART 校验'}</div>` : ''}
@@ -328,24 +455,27 @@ function stepTwoBody() {
     ${panelFoot(`<span class="foot-hint">共 ${state.tasks.length} 条任务${state.smartChecked ? '' : ' · 请先执行 SMART 校验'}</span><button class="btn btn-ghost" data-action="back-step">上一步</button><button class="btn btn-primary" data-action="diagnose" ${state.pending ? 'disabled' : ''}>时间分布诊断 ${ICONS.arrow}</button>`)}`;
 }
 
+function distributionResultMarkup(distribution) {
+  return `${distribution.categories.map(item => {
+    const category = CATS[item.key];
+    const target = item.key === '昨天'
+      ? '<div class="tgt-mark" style="left:2%"></div>'
+      : item.key === '后天'
+        ? '<div class="tgt-mark" style="left:5%"></div>'
+        : `<div class="tgt-band" style="left:${item.target.min}%;width:${item.target.max - item.target.min}%"></div>`;
+    const label = item.status === 'ok' ? '达标' : item.status === 'over' ? '偏高' : '投入不足';
+    return `<div class="distrow"><div class="dist-label">${category.title}<span>目标 ${category.target}</span></div><div class="bar-wrap">${target}<div class="bar" style="width:${Math.max(item.percent, 3)}%;background:${category.color}">${item.percent}%</div></div><div class="dist-num" style="color:${item.status === 'ok' ? 'var(--ok)' : 'var(--warn)'}">${label}<small style="color:var(--muted)">${item.hours}h / 共 ${distribution.totalHours}h</small></div></div>`;
+  }).join('')}
+    <div class="legend">虚线或绿色区间为模型目标；占比由服务端按分钟计算，显示总和稳定为 100.0%。</div>
+    ${distribution.invalidTasks.length ? `<div class="diagnosis" style="background:var(--warn-bg);border-color:var(--warn-line);color:var(--warn)"><b>未参与计算：</b>${distribution.invalidTasks.map(item => escapeHtml(item.name)).join('、')}</div>` : ''}
+    <div class="diagnosis"><div><b>诊断结论：</b>${distribution.diagnosis.map(escapeHtml).join(' ')}</div><div style="margin-top:7px"><b>改进方向：</b>${distribution.recommendations.map(escapeHtml).join(' ')}</div></div>`;
+}
+
 function stepThreeBody() {
   const distribution = state.distribution;
   if (!distribution) return `${panelHead('节点 ③ · 服务端动作', '时间分布诊断', '诊断结果尚未生成。')}<div class="panel-body"></div>`;
   return `${panelHead('节点 ③ · 服务端动作', '时间分布诊断', '后端按可解析预估工时汇总四类事务占比，并与目标结构比较。')}
-    <div class="panel-body">${distribution.categories.map(item => {
-      const category = CATS[item.key];
-      const target = item.key === '昨天'
-        ? '<div class="tgt-mark" style="left:2%"></div>'
-        : item.key === '后天'
-          ? '<div class="tgt-mark" style="left:5%"></div>'
-          : `<div class="tgt-band" style="left:${item.target.min}%;width:${item.target.max - item.target.min}%"></div>`;
-      const label = item.status === 'ok' ? '达标' : item.status === 'over' ? '偏高' : '投入不足';
-      return `<div class="distrow"><div class="dist-label">${category.title}<span>目标 ${category.target}</span></div><div class="bar-wrap">${target}<div class="bar" style="width:${Math.max(item.percent, 3)}%;background:${category.color}">${item.percent}%</div></div><div class="dist-num" style="color:${item.status === 'ok' ? 'var(--ok)' : 'var(--warn)'}">${label}<small style="color:var(--muted)">${item.hours}h / 共 ${distribution.totalHours}h</small></div></div>`;
-    }).join('')}
-      <div class="legend">虚线或绿色区间为模型目标；占比由服务端按分钟计算，显示总和稳定为 100.0%。</div>
-      ${distribution.invalidTasks.length ? `<div class="diagnosis" style="background:var(--warn-bg);border-color:var(--warn-line);color:var(--warn)"><b>未参与计算：</b>${distribution.invalidTasks.map(item => escapeHtml(item.name)).join('、')}</div>` : ''}
-      <div class="diagnosis"><div><b>诊断结论：</b>${distribution.diagnosis.map(escapeHtml).join(' ')}</div><div style="margin-top:7px"><b>改进方向：</b>${distribution.recommendations.map(escapeHtml).join(' ')}</div></div>
-    </div>
+    <div class="panel-body">${distributionResultMarkup(distribution)}</div>
     ${panelFoot('<span class="foot-hint">诊断基线：昨天→0% · 今天70–80% · 明天10–20% · 后天5%</span><button class="btn btn-ghost" data-action="back-step">上一步</button><button class="btn btn-primary" data-action="classify">优先级排序 ' + ICONS.arrow + '</button>')}`;
 }
 
@@ -356,7 +486,7 @@ function quadrantBox(name) {
   const ids = quadrant?.taskIds || [];
   return `<div class="quad ${QUADRANT_CLASSES[name]}">${quadrant ? `<div class="energy">${quadrant.energyPercent}%</div>` : ''}<div class="quad-h">${title}</div><div class="quad-m">${meta}</div>${ids.length ? ids.map(id => {
     const task = taskById.get(id);
-    return `<div class="qt">${escapeHtml(task?.name || '')}<small> · ${escapeHtml(categoryForTask(task))}${task?.due ? ` · 截止${escapeHtml(task.due)}` : ''}</small></div>`;
+    return `<div class="qt">${escapeHtml(task?.name || '')}<small> · ${escapeHtml(categoryForTask(task))}</small></div>`;
   }).join('') : '<div class="qt" style="opacity:.6">暂无</div>'}</div>`;
 }
 
@@ -405,31 +535,62 @@ function renderWorkspace() {
 }
 
 function dailyTaskRow(task) {
-  const track = tracked(task.id);
+  const track = dailyTracked(task.id);
   const category = categoryForTask(task);
   const hours = parseEstimatedHours(task.est);
   const priority = priorityForTask(task);
-  return `<div class="trow g-daily ${track.done ? 'doneRow' : ''}">
-    <button class="chk ${track.done ? 'on' : ''}" data-action="toggle-done" data-task-id="${escapeHtml(task.id)}" aria-label="${track.done ? '取消完成' : '标记完成'}">${track.done ? '✓' : ''}</button>
-    <div><span class="mobile-label">任务</span><input class="tname ${track.done ? 'done' : ''}" data-task-id="${escapeHtml(task.id)}" data-task-field="name" value="${escapeHtml(task.name)}"></div>
-    <div><span class="mobile-label">类别</span><select data-task-id="${escapeHtml(task.id)}" data-task-field="category">${CATEGORY_KEYS.map(key => `<option value="${key}" ${category === key ? 'selected' : ''}>${key}</option>`).join('')}</select></div>
-    <div><span class="mobile-label">截止时间</span><input data-task-id="${escapeHtml(task.id)}" data-task-field="due" value="${escapeHtml(task.due === '待确认' ? '' : task.due)}" placeholder="YYYY-MM-DD"></div>
-    <div><span class="mobile-label">时长</span><input type="number" step="0.25" min="0" data-task-id="${escapeHtml(task.id)}" data-task-field="est" value="${Number.isFinite(hours) ? hours : ''}"></div>
-    <div><span class="mobile-label">轻重缓急</span><select data-task-id="${escapeHtml(task.id)}" data-task-field="priority"><option value="">未选</option>${Object.entries(PRIORITIES).map(([key, item]) => `<option value="${key}" ${priority === key ? 'selected' : ''}>${item.label}</option>`).join('')}</select></div>
-    <div><span class="mobile-label">完成时间</span><input type="datetime-local" data-track-time="${escapeHtml(task.id)}" value="${escapeHtml(track.doneAt)}" ${track.done ? '' : 'disabled'}></div>
-    <button class="del" data-action="delete-task" data-task-id="${escapeHtml(task.id)}" aria-label="删除任务">×</button>
+  const dueValue = dateOnlyDueValue(task.due);
+  return `<div class="trow g-daily ${track.done ? 'doneRow' : ''}" data-daily-task-id="${escapeHtml(task.id)}">
+    <button class="chk ${track.done ? 'on' : ''}" data-action="toggle-daily-done" data-task-id="${escapeHtml(task.id)}" aria-label="${track.done ? '取消完成' : '标记完成'}">${track.done ? '✓' : ''}</button>
+    <div><span class="mobile-label">任务</span><input class="tname ${track.done ? 'done' : ''}" data-daily-task-id="${escapeHtml(task.id)}" data-daily-task-field="name" value="${escapeHtml(task.name)}"></div>
+    <div><span class="mobile-label">类别</span><select data-daily-task-id="${escapeHtml(task.id)}" data-daily-task-field="category">${CATEGORY_KEYS.map(key => `<option value="${key}" ${category === key ? 'selected' : ''}>${key}</option>`).join('')}</select></div>
+    <div><span class="mobile-label">截止日期</span><input type="date" data-daily-task-id="${escapeHtml(task.id)}" data-daily-task-field="due" value="${escapeHtml(dueValue)}" aria-label="截止日期"></div>
+    <div><span class="mobile-label">预估时长（小时）</span><input type="number" step="0.25" min="0" data-daily-task-id="${escapeHtml(task.id)}" data-daily-task-field="est" value="${Number.isFinite(hours) ? hours : ''}" aria-label="预估时长（小时）"></div>
+    <div><span class="mobile-label">责任人</span><input data-daily-task-id="${escapeHtml(task.id)}" data-daily-task-field="owner" value="${escapeHtml(task.owner === '待确认' ? '' : task.owner)}" placeholder="待确认" aria-label="责任人"></div>
+    <div><span class="mobile-label">轻重缓急</span><select data-daily-task-id="${escapeHtml(task.id)}" data-daily-task-field="priority"><option value="">未选</option>${Object.entries(PRIORITIES).map(([key, item]) => `<option value="${key}" ${priority === key ? 'selected' : ''}>${item.label}</option>`).join('')}</select></div>
+    <div><span class="mobile-label">完成时间</span><input type="datetime-local" data-daily-track-time="${escapeHtml(task.id)}" value="${escapeHtml(track.doneAt)}" ${track.done ? '' : 'disabled'}></div>
+    <button class="del" data-action="delete-daily-task" data-task-id="${escapeHtml(task.id)}" aria-label="删除任务">×</button>
   </div>`;
 }
 
+function dailySaveText() {
+  if (state.daily.saveStatus === 'saving') return '正在保存…';
+  if (state.daily.saveStatus === 'saved') return '已自动保存';
+  if (state.daily.saveStatus === 'dirty') return '有未保存更改';
+  if (state.daily.saveStatus === 'failed') {
+    return state.daily.error?.message || '保存失败，请重试';
+  }
+  return state.daily.loaded ? '已加载今日清单' : '';
+}
+
+function dailyFailureRequiresReload() {
+  return ['DAILY_TRACKING_CONFLICT', 'DAILY_TRACKING_DATE_CHANGED']
+    .includes(state.daily.error?.code);
+}
+
 function renderDaily() {
-  const list = state.tasks.filter(task => ['昨天', '今天'].includes(categoryForTask(task)));
-  const doneCount = list.filter(task => tracked(task.id).done).length;
-  const undoneToday = list.filter(task => categoryForTask(task) === '今天' && !tracked(task.id).done).length;
-  app().innerHTML = `<div class="phead"><div class="ptitle">每日跟踪</div></div><div class="pdesc">登记完成情况并记录实际完成时间；这些记录只保留在当前页面会话。</div>
-    <div class="panelbox"><div class="pb-h"><span class="n">✓</span>今日登记 · ${TODAY}</div><div class="pb-d">已完成 ${doneCount} / ${list.length} 项。勾选后自动填入本地完成时间，可手动修正。</div>
-      <div style="margin-bottom:12px"><button class="btn btn-ghost btn-sm" data-action="open-add-task" data-default-category="今天">+ 手动添加任务</button></div>
-      <div class="tgrid"><div class="trow hd g-daily"><div></div><div>任务</div><div>类别</div><div>截止时间</div><div>时长</div><div>轻重缓急</div><div>完成时间</div><div></div></div>${list.length ? list.map(dailyTaskRow).join('') : '<div class="trow"><div style="color:var(--muted);font-size:12px">暂无“今天/昨天”类任务。</div></div>'}</div>
-      <div class="roll-box"><b>滚动规则：</b>今日未完成 ${undoneToday} 项。结束当日后，已完成项进入本次会话历史；未完成的“今天”任务滚入“昨天”。<div style="margin-top:11px"><button class="btn btn-primary btn-sm" data-action="rollover">结束当日并滚动</button></div></div>
+  if (state.daily.loading && !state.daily.loaded) {
+    app().innerHTML = `<div class="phead"><div class="ptitle">每日跟踪</div></div>
+      <div class="history-loading">正在加载今天的每日清单…</div>`;
+    return;
+  }
+  if (state.daily.error && !state.daily.loaded) {
+    app().innerHTML = `<div class="phead"><div class="ptitle">每日跟踪</div></div>
+      <div class="history-error">${escapeHtml(state.daily.error.message || '每日跟踪加载失败')}</div>
+      <button class="btn btn-ghost btn-sm" data-action="reload-daily">重新加载</button>`;
+    return;
+  }
+  const list = state.daily.tasks;
+  const doneCount = list.filter(task => dailyTracked(task.id).done).length;
+  const summary = state.daily.sourceSummary;
+  const statusClass = state.daily.saveStatus === 'failed' ? 'failed' : state.daily.saveStatus;
+  const failureAction = dailyFailureRequiresReload()
+    ? '<button class="btn btn-ghost btn-sm" data-action="reload-daily">重新加载今天</button>'
+    : '<button class="btn btn-ghost btn-sm" data-action="retry-daily-save">重试</button>';
+  app().innerHTML = `<div class="phead"><div class="ptitle">每日跟踪</div><div id="daily-save-status" class="daily-save-status ${escapeHtml(statusClass)}" role="status" aria-live="polite">${escapeHtml(dailySaveText())}${state.daily.saveStatus === 'failed' ? ` ${failureAction}` : ''}</div></div>
+    <div class="pdesc">已汇总今天生成的 ${summary.historyCount} 条记录，共 ${summary.taskCount} 项任务。无论从哪条历史进入，这里始终是 ${escapeHtml(state.daily.trackingDate || TODAY)} 的账号清单。</div>
+    <div class="panelbox"><div class="pb-h"><span class="n">✓</span>今日登记 · ${escapeHtml(state.daily.trackingDate || TODAY)}</div><div class="pb-d">已完成 ${doneCount} / ${list.length} 项。修改、完成或删除后将自动保存。</div>
+      <div class="tgrid"><div class="trow hd g-daily"><div></div><div>任务</div><div>类别</div><div>截止日期</div><div>预估时长（小时）</div><div>责任人</div><div>轻重缓急</div><div>完成时间</div><div></div></div>${list.length ? list.map(dailyTaskRow).join('') : '<div class="history-empty">今天还没有生成任何历史任务，请先完成五步梳理流程。</div>'}</div>
     </div>`;
 }
 
@@ -458,16 +619,24 @@ function renderHistory() {
     </div>`;
 }
 
+function historyDistributionSection(distribution) {
+  if (!distribution) {
+    return '<section class="history-section"><h2>时间分布诊断</h2><div class="history-empty">该历史版本未保存时间分布诊断</div></section>';
+  }
+  return `<section class="history-section"><h2>时间分布诊断</h2>${distributionResultMarkup(distribution)}</section>`;
+}
+
 function renderHistoryDetail() {
   const item = state.historyDetail;
   if (!item) return renderHistory();
   const taskById = new Map(item.tasks.map(task => [task.id, task]));
   app().innerHTML = `<div class="phead"><button class="btn btn-ghost btn-sm" data-action="history-back">返回</button><div class="ptitle">${escapeHtml(item.title)}</div></div><div class="pdesc">生成时间：${escapeHtml(formatTimestamp(item.createdAt))} · 只读账号历史</div>
     <div class="history-detail-content"><section class="history-section"><h2>事务填写</h2><div class="history-goals">${Object.entries(item.goals).map(([key, value]) => `<div><strong>${escapeHtml(key)}</strong><p>${escapeHtml(value || '未填写')}</p></div>`).join('')}</div></section>
-      <section class="history-section"><h2>任务清单</h2><div class="history-tasks">${item.tasks.map(task => `<article><h3>${escapeHtml(task.name)}</h3><p>${escapeHtml(categoryForTask(task))} · ${escapeHtml(task.importance || '待确认')}/${escapeHtml(task.urgency || '待确认')} · 截止 ${escapeHtml(task.due || '待确认')} · ${escapeHtml(task.est || '')}</p></article>`).join('')}</div></section>
+      <section class="history-section"><h2>任务清单</h2><div class="history-tasks">${item.tasks.map(task => `<article><h3>${escapeHtml(task.name)}</h3><p>${escapeHtml(categoryForTask(task))} · ${escapeHtml(task.importance || '待确认')}/${escapeHtml(task.urgency || '待确认')} · ${escapeHtml(task.est || '')} · 截止：${escapeHtml(displayDue(task.due))} · 责任人：${escapeHtml(task.owner || '待确认')}</p></article>`).join('')}</div></section>
+      ${historyDistributionSection(item.distribution)}
       <section class="history-section"><h2>轻重缓急矩阵</h2><div class="history-quadrants">${item.matrix.quadrants.map(quadrant => `<div><strong>${escapeHtml(quadrant.name)} · ${quadrant.energyPercent}%</strong><p>${quadrant.taskIds.map(id => escapeHtml(taskById.get(id)?.name || '')).filter(Boolean).join('、') || '暂无任务'}</p></div>`).join('')}</div></section>
       <section class="history-section"><h2>优化报告</h2><div id="history-report-markdown" class="markdown-body"></div></section>
-    </div><div class="history-actions" style="justify-content:flex-end;margin-top:14px"><button class="btn btn-ghost btn-sm" data-action="history-copy">复制历史报告</button><button class="btn btn-danger btn-sm" data-action="history-delete" data-history-id="${escapeHtml(item.id)}">删除历史</button></div>`;
+    </div><div class="history-actions" style="justify-content:flex-end;margin-top:14px"><button class="btn btn-primary btn-sm" data-action="open-daily">进入每日跟踪</button><button class="btn btn-ghost btn-sm" data-action="history-copy">复制历史报告</button><button class="btn btn-danger btn-sm" data-action="history-delete" data-history-id="${escapeHtml(item.id)}">删除历史</button></div>`;
   hydrateHistoryReport();
 }
 
@@ -479,8 +648,9 @@ function renderModal() {
   if (state.modal.type === 'add-task') {
     modalHost().innerHTML = `<div class="mask" data-modal-mask><section class="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title"><h3 id="modal-title">手动添加任务</h3><div class="sub">补充 AI 未拆解到的事项，保存后需要重新执行后续节点。</div>
       <div class="field"><label class="fl" for="m-name">任务描述 <span class="req">*</span></label><input id="m-name" placeholder="动词 + 对象 + 结果"></div>
-      <div class="grid2"><div class="field"><label class="fl" for="m-due">截止时间 <span class="req">*</span></label><input id="m-due" type="date"></div><div class="field"><label class="fl" for="m-est">预估时长（小时） <span class="req">*</span></label><input id="m-est" type="number" step="0.25" min="0.25"></div></div>
+      <div class="grid2"><div class="field"><label class="fl" for="m-est">预估时长（小时） <span class="req">*</span></label><input id="m-est" type="number" step="0.25" min="0.25"></div><div class="field"><label class="fl" for="m-due">截止日期</label><input id="m-due" type="date"></div></div>
       <div class="grid2"><div class="field"><label class="fl" for="m-priority">轻重缓急 <span class="req">*</span></label><select id="m-priority"><option value="">请选择</option>${Object.entries(PRIORITIES).map(([key, item]) => `<option value="${key}">${item.label}</option>`).join('')}</select></div><div class="field"><label class="fl" for="m-category">所属类别</label><select id="m-category">${CATEGORY_KEYS.map(key => `<option value="${key}" ${key === state.modal.category ? 'selected' : ''}>${key}</option>`).join('')}</select></div></div>
+      <div class="field"><label class="fl" for="m-owner">责任人</label><input id="m-owner" placeholder="待确认"></div>
       <div class="err hidden" id="m-error">请填写全部必填项。</div><div class="mact"><button class="btn btn-primary btn-sm" data-action="save-task">添加</button><button class="btn btn-ghost btn-sm" data-action="close-modal">取消</button></div>
     </section></div>`;
   }
@@ -503,6 +673,225 @@ function render() {
 function renderAtTop() {
   render();
   window.scrollTo({ top: 0, left: 0, behavior: 'auto' });
+}
+
+function validateDailyPayload(payload) {
+  if (
+    !payload
+    || typeof payload.trackingDate !== 'string'
+    || !Array.isArray(payload.tasks)
+    || !payload.tracking
+    || typeof payload.tracking !== 'object'
+    || !Array.isArray(payload.removedTaskIds)
+    || !Number.isInteger(payload.revision)
+    || !payload.sourceSummary
+  ) {
+    throw new Error('每日跟踪返回结构异常，请重试。');
+  }
+  return payload;
+}
+
+function applyDailyPayload(payload, saveStatus = 'idle') {
+  const value = validateDailyPayload(payload);
+  state.daily = {
+    loaded: true,
+    loading: false,
+    trackingDate: value.trackingDate,
+    tasks: value.tasks.map(normalizeTaskForUi),
+    tracking: value.tracking,
+    removedTaskIds: value.removedTaskIds,
+    revision: value.revision,
+    updatedAt: value.updatedAt || null,
+    sourceSummary: value.sourceSummary,
+    saveStatus,
+    error: null,
+  };
+}
+
+function updateDailySaveStatus() {
+  const element = document.getElementById('daily-save-status');
+  if (!element) return;
+  element.className = `daily-save-status ${state.daily.saveStatus}`;
+  element.textContent = dailySaveText();
+  if (state.daily.saveStatus === 'failed') {
+    const button = document.createElement('button');
+    button.className = 'btn btn-ghost btn-sm';
+    button.dataset.action = dailyFailureRequiresReload()
+      ? 'reload-daily'
+      : 'retry-daily-save';
+    button.textContent = dailyFailureRequiresReload() ? '重新加载今天' : '重试';
+    element.append(' ', button);
+  }
+}
+
+function hasUnsafeDailyChanges() {
+  return state.daily.loaded
+    && ['dirty', 'saving', 'failed'].includes(state.daily.saveStatus);
+}
+
+function confirmDailyLeave(nextScreen) {
+  if (
+    state.screen !== 'daily'
+    || nextScreen === 'daily'
+    || !hasUnsafeDailyChanges()
+  ) {
+    return true;
+  }
+  return window.confirm('每日跟踪仍有未保存更改，确定离开吗？');
+}
+
+function dailySnapshot() {
+  return {
+    trackingDate: state.daily.trackingDate,
+    tasks: state.daily.tasks,
+    tracking: state.daily.tracking,
+    removedTaskIds: state.daily.removedTaskIds,
+    revision: state.daily.revision,
+  };
+}
+
+function scheduleDailySave(delay = 800) {
+  clearTimeout(dailySaveTimer);
+  state.daily.saveStatus = 'dirty';
+  updateDailySaveStatus();
+  if (dailySaveInFlight) {
+    dailySaveQueued = true;
+    return;
+  }
+  dailySaveTimer = setTimeout(() => saveDaily(), delay);
+}
+
+async function saveDaily() {
+  clearTimeout(dailySaveTimer);
+  dailySaveTimer = null;
+  if (!state.daily.loaded || !state.daily.trackingDate) return;
+  if (dailySaveInFlight) {
+    dailySaveQueued = true;
+    return;
+  }
+  dailySaveInFlight = true;
+  dailySaveQueued = false;
+  const version = dailyChangeVersion;
+  const snapshot = JSON.parse(JSON.stringify(dailySnapshot()));
+  state.daily.saveStatus = 'saving';
+  updateDailySaveStatus();
+  try {
+    const result = validateDailyPayload(await putJson(
+      '/api/time-management/daily-tracking/today',
+      snapshot,
+    ));
+    if (version === dailyChangeVersion) {
+      applyDailyPayload(result, 'saved');
+      if (state.screen === 'daily') render();
+    } else {
+      state.daily.revision = result.revision;
+      state.daily.updatedAt = result.updatedAt || null;
+      state.daily.saveStatus = 'dirty';
+      updateDailySaveStatus();
+      dailySaveQueued = true;
+    }
+  } catch (error) {
+    state.daily.saveStatus = 'failed';
+    state.daily.error = error;
+    updateDailySaveStatus();
+    toast(error.message || '每日跟踪保存失败，请重试。');
+  } finally {
+    dailySaveInFlight = false;
+    if (dailySaveQueued && state.daily.saveStatus !== 'failed') {
+      dailySaveQueued = false;
+      scheduleDailySave(0);
+    }
+  }
+}
+
+async function loadDaily() {
+  const id = ++dailyLoadId;
+  clearTimeout(dailySaveTimer);
+  state.daily.loading = true;
+  state.daily.error = null;
+  state.daily.saveStatus = 'idle';
+  render();
+  try {
+    const result = validateDailyPayload(await getJson(
+      '/api/time-management/daily-tracking/today',
+    ));
+    if (id !== dailyLoadId || state.screen !== 'daily') return;
+    dailyChangeVersion = 0;
+    applyDailyPayload(result);
+    render();
+    if (result.hasUnpersistedMerge) scheduleDailySave(0);
+  } catch (error) {
+    if (id !== dailyLoadId || state.screen !== 'daily') return;
+    state.daily.loading = false;
+    state.daily.loaded = false;
+    state.daily.error = error;
+    state.daily.saveStatus = 'failed';
+    render();
+  }
+}
+
+function reloadDaily() {
+  if (
+    hasUnsafeDailyChanges()
+    && !window.confirm('重新加载将放弃当前未保存更改，确定继续吗？')
+  ) {
+    return;
+  }
+  state.daily.saveStatus = 'idle';
+  state.daily.error = null;
+  loadDaily();
+}
+
+function updateDailyTask(taskId, field, value) {
+  const task = state.daily.tasks.find(item => item.id === taskId);
+  if (!task) return;
+  if (field === 'name') task.name = value;
+  else if (field === 'category') task.source = CATS[value]?.source || '今天';
+  else if (field === 'due') task.due = value || '待确认';
+  else if (field === 'est') task.est = normalizeEstimate(value);
+  else if (field === 'owner') task.owner = value.trim() || '待确认';
+  else if (field === 'priority') {
+    const priority = PRIORITIES[value];
+    task.importance = priority?.importance ?? null;
+    task.urgency = priority?.urgency ?? null;
+    task.classificationSource = priority ? 'manual' : 'unclassified';
+  }
+  dailyChangeVersion += 1;
+  scheduleDailySave();
+}
+
+function toggleDailyDone(taskId) {
+  const current = dailyTracked(taskId);
+  state.daily.tracking[taskId] = current.done
+    ? { done: false, doneAt: '' }
+    : { done: true, doneAt: current.doneAt || localDateTimeValue() };
+  dailyChangeVersion += 1;
+  render();
+  scheduleDailySave();
+}
+
+function updateDailyDoneAt(taskId, value) {
+  if (!state.daily.tasks.some(task => task.id === taskId)) return;
+  state.daily.tracking[taskId] = { done: true, doneAt: value };
+  dailyChangeVersion += 1;
+  scheduleDailySave();
+}
+
+function deleteDailyTask(taskId) {
+  const task = state.daily.tasks.find(item => item.id === taskId);
+  if (!task || !window.confirm(`确定从今日清单删除“${task.name}”吗？`)) return;
+  state.daily.tasks = state.daily.tasks.filter(item => item.id !== taskId);
+  delete state.daily.tracking[taskId];
+  if (!state.daily.removedTaskIds.includes(taskId)) {
+    state.daily.removedTaskIds.push(taskId);
+  }
+  state.daily.sourceSummary = {
+    ...state.daily.sourceSummary,
+    taskCount: state.daily.tasks.length,
+  };
+  dailyChangeVersion += 1;
+  render();
+  scheduleDailySave();
 }
 
 function hydrateReport() {
@@ -550,7 +939,7 @@ async function decomposeTasks() {
   if (state.pending) return;
   const id = ++operationId;
   state.pending = 'decompose';
-  renderProcessing('正在拆解为结构化任务', '四栏输入先经服务端校验，再交给模型拆解', ['校验四栏输入', '拆分独立可执行任务', '识别截止时间与工时', '生成初始轻重缓急']);
+  renderProcessing('正在拆解为结构化任务', '四栏输入先经服务端校验，再交给模型拆解', ['校验四栏输入', '拆分独立可执行任务', '识别工时与轻重缓急', '生成初始轻重缓急']);
   try {
     const intake = await postJson('/api/time-management/intake/check', { entries: state.entries });
     if (!isCurrent(id)) return;
@@ -558,7 +947,7 @@ async function decomposeTasks() {
     if (!isCurrent(id)) return;
     state.pending = null;
     state.intake = intake;
-    state.tasks = result.tasks;
+    state.tasks = result.tasks.map(normalizeTaskForUi);
     state.smart = result.smart;
     state.smartChecked = false;
     state.distribution = null;
@@ -706,8 +1095,9 @@ function updateTask(taskId, field, value) {
   if (!task) return;
   if (field === 'name') task.name = value.trim();
   else if (field === 'category') task.source = CATS[value]?.source || '今天';
-  else if (field === 'due') task.due = value.trim() || '待确认';
+  else if (field === 'due') task.due = value || '待确认';
   else if (field === 'est') task.est = normalizeEstimate(value);
+  else if (field === 'owner') task.owner = value.trim() || '待确认';
   else if (field === 'priority') {
     const priority = PRIORITIES[value];
     task.importance = priority?.importance ?? null;
@@ -741,18 +1131,21 @@ function closeModal() {
 
 function saveTask() {
   const name = document.getElementById('m-name')?.value.trim();
-  const due = document.getElementById('m-due')?.value;
   const estValue = document.getElementById('m-est')?.value;
+  const dueValue = document.getElementById('m-due')?.value;
   const priorityKey = document.getElementById('m-priority')?.value;
   const category = document.getElementById('m-category')?.value;
+  const ownerValue = document.getElementById('m-owner')?.value.trim();
   const priority = PRIORITIES[priorityKey];
-  if (!name || !due || !normalizeEstimate(estValue) || !priority) {
+  if (!name || !normalizeEstimate(estValue) || !priority) {
     document.getElementById('m-error')?.classList.remove('hidden');
     return;
   }
   state.tasks.push({
-    id: createUuid(), name, source: CATS[category]?.source || '今天', due,
+    id: createUuid(), name, source: CATS[category]?.source || '今天',
+    due: dueValue || '待确认',
     est: normalizeEstimate(estValue), importance: priority.importance, urgency: priority.urgency,
+    owner: ownerValue || '待确认',
     acceptanceCriteria: [], nextAction: '', status: 'pending', classificationSource: 'manual',
   });
   invalidateAfterTasks();
@@ -772,34 +1165,42 @@ function toggleDone(taskId) {
   toast(state.tracking[taskId].done ? '已记录完成时间' : '已取消完成');
 }
 
-function rolloverDay() {
-  if (state.rolledDates[TODAY]) return toast('今天已经执行过滚动');
-  const list = state.tasks.filter(task => ['昨天', '今天'].includes(categoryForTask(task)));
-  if (!list.length) return toast('没有可滚动任务');
-  if (!window.confirm('结束当日后，已完成项进入本次会话历史，未完成的“今天”任务滚入“昨天”。确定继续吗？')) return;
-  const done = list.filter(task => tracked(task.id).done).map(task => ({ name: task.name, at: tracked(task.id).doneAt || localDateTimeValue() }));
-  const doneIds = new Set(list.filter(task => tracked(task.id).done).map(task => task.id));
-  const distribution = state.distribution?.percentages || previewDistribution().percentages;
-  state.sessionHistory.push({ date: TODAY, distribution: { ...distribution }, done });
-  state.tasks = state.tasks.filter(task => !doneIds.has(task.id)).map(task => (
-    categoryForTask(task) === '今天' ? { ...task, source: '复盘' } : task
-  ));
-  for (const task of list) delete state.tracking[task.id];
-  state.rolledDates[TODAY] = true;
-  invalidateAfterTasks();
-  state.screen = 'daily';
-  render();
-  toast(`已归档 ${done.length} 项，其余今日任务已滚入“昨天”`);
+function copyTextFallback(text) {
+  if (typeof document.execCommand !== 'function') return false;
+  const activeElement = document.activeElement;
+  const textarea = document.createElement('textarea');
+  textarea.value = text;
+  textarea.readOnly = true;
+  textarea.dataset.copyFallback = '';
+  textarea.setAttribute('aria-hidden', 'true');
+  textarea.style.position = 'fixed';
+  textarea.style.left = '-9999px';
+  textarea.style.opacity = '0';
+  document.body.appendChild(textarea);
+  try {
+    textarea.focus();
+    textarea.select();
+    textarea.setSelectionRange(0, textarea.value.length);
+    return document.execCommand('copy');
+  } finally {
+    textarea.remove();
+    if (activeElement instanceof HTMLElement) activeElement.focus({ preventScroll: true });
+  }
 }
 
 async function copyText(text, success) {
   if (!text) return toast('没有可复制内容');
-  try {
-    await navigator.clipboard.writeText(text);
-    toast(success);
-  } catch {
-    toast('复制失败，请手动选择内容');
+  let copied = false;
+  if (typeof navigator.clipboard?.writeText === 'function') {
+    try {
+      await navigator.clipboard.writeText(text);
+      copied = true;
+    } catch {
+      copied = false;
+    }
   }
+  if (!copied) copied = copyTextFallback(text);
+  toast(copied ? success : '复制失败，请手动选择内容');
 }
 
 function currentHistoryTitle() {
@@ -812,6 +1213,7 @@ function currentHistorySnapshot() {
     title: currentHistoryTitle(),
     goals: state.entries,
     tasks: state.tasks,
+    distribution: state.distribution,
     matrix: state.matrix,
     report: state.report,
   };
@@ -822,7 +1224,7 @@ function renderCurrentHistoryStatus() {
 }
 
 async function saveCurrentHistory() {
-  if (!state.report || !state.matrix || state.historySave.status === 'saving') return;
+  if (!state.report || !state.matrix || !state.distribution || state.historySave.status === 'saving') return;
   const clientRunId = state.clientRunId;
   state.historySave = { status: 'saving', id: state.historySave.id, message: '' };
   renderCurrentHistoryStatus();
@@ -900,6 +1302,10 @@ async function deleteHistory(id) {
 }
 
 function navigate(screen) {
+  if (screen === state.screen && screen === 'daily') return;
+  if (!confirmDailyLeave(screen)) return;
+  if (screen !== 'daily') dailyLoadId += 1;
+  if (screen !== 'home') homeDailyLoadId += 1;
   cancelPending();
   state.error = null;
   if (screen === 'workspace') {
@@ -911,8 +1317,14 @@ function navigate(screen) {
     render();
     loadHistory();
     return;
+  } else if (screen === 'daily') {
+    state.screen = 'daily';
+    renderAtTop();
+    loadDaily();
+    return;
   } else state.screen = screen;
   renderAtTop();
+  if (screen === 'home') loadHomeDaily();
 }
 
 function navigateStep(step) {
@@ -947,6 +1359,7 @@ async function restoreAuth() {
     }
   }
   render();
+  if (state.user && state.screen === 'home') loadHomeDaily();
 }
 
 function authFormError(form, message) {
@@ -969,6 +1382,7 @@ async function submitLogin(form) {
     state.authError = null;
     resetState();
     render();
+    loadHomeDaily();
   } catch (error) {
     state.pending = null;
     state.authError = error;
@@ -1023,6 +1437,7 @@ async function submitRecovery(form) {
 }
 
 async function logout() {
+  if (!confirmDailyLeave('login')) return;
   if (state.pending) return;
   cancelPending();
   state.pending = 'auth';
@@ -1052,6 +1467,12 @@ document.addEventListener('submit', event => {
 });
 
 document.addEventListener('input', event => {
+  const dailyTaskId = event.target.dataset.dailyTaskId;
+  const dailyTaskField = event.target.dataset.dailyTaskField;
+  if (dailyTaskId && dailyTaskField) {
+    updateDailyTask(dailyTaskId, dailyTaskField, event.target.value);
+    return;
+  }
   const key = event.target.dataset.entry;
   if (!key) return;
   state.entries[key] = event.target.value;
@@ -1068,6 +1489,11 @@ document.addEventListener('change', event => {
   const trackingId = event.target.dataset.trackTime;
   if (trackingId) {
     state.tracking[trackingId] = { done: true, doneAt: event.target.value };
+    return;
+  }
+  const dailyTrackingId = event.target.dataset.dailyTrackTime;
+  if (dailyTrackingId) {
+    updateDailyDoneAt(dailyTrackingId, event.target.value);
   }
 });
 
@@ -1095,14 +1521,20 @@ document.addEventListener('click', event => {
   else if (action === 'save-task') saveTask();
   else if (action === 'delete-task') deleteTask(element.dataset.taskId);
   else if (action === 'toggle-done') toggleDone(element.dataset.taskId);
-  else if (action === 'rollover') rolloverDay();
+  else if (action === 'delete-daily-task') deleteDailyTask(element.dataset.taskId);
+  else if (action === 'toggle-daily-done') toggleDailyDone(element.dataset.taskId);
+  else if (action === 'retry-daily-save') saveDaily();
+  else if (action === 'reload-daily') reloadDaily();
+  else if (action === 'open-daily') navigate('daily');
   else if (action === 'copy-report') copyText(document.querySelector('.panel-body')?.innerText.trim(), '已复制报告');
   else if (action === 'history-retry') saveCurrentHistory();
   else if (action === 'history-more') loadHistory({ append: true });
   else if (action === 'history-detail') openHistoryDetail(element.dataset.historyId);
   else if (action === 'history-delete') deleteHistory(element.dataset.historyId);
-  else if (action === 'history-back') { state.historyDetail = null; state.screen = 'history'; render(); }
+  else if (action === 'history-back') { state.historyDetail = null; navigate('history'); }
   else if (action === 'history-copy') copyText(document.querySelector('.history-detail-content')?.innerText.trim(), '已复制历史报告');
+  else if (action === 'toggle-home-daily') toggleHomeDaily();
+  else if (action === 'reload-home-daily') loadHomeDaily();
   else if (action === 'auth-login-tab') { state.authMode = 'login'; state.authError = null; render(); }
   else if (action === 'auth-register-tab') { state.authMode = 'register'; state.authError = null; render(); }
   else if (action === 'show-recovery') { state.screen = 'recovery'; state.authError = null; render(); }
@@ -1118,6 +1550,12 @@ document.addEventListener('keydown', event => {
     event.preventDefault();
     navigate(state.user ? 'home' : 'login');
   }
+});
+
+window.addEventListener('beforeunload', event => {
+  if (!hasUnsafeDailyChanges()) return;
+  event.preventDefault();
+  event.returnValue = '';
 });
 
 render();

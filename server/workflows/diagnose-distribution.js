@@ -11,6 +11,8 @@ const {
   TEXT_LIMITS,
   URGENCY,
   categoryForTask,
+  normalizeOptionalDue,
+  normalizeOptionalOwner,
   parseEstimatedMinutes,
 } = require('../contracts/time-management');
 
@@ -37,6 +39,7 @@ const validateRequest = ajv.compile({
           source: { enum: SOURCES },
           due: { type: 'string', maxLength: TEXT_LIMITS.due },
           est: { type: 'string', maxLength: TEXT_LIMITS.est },
+          owner: { type: 'string', maxLength: TEXT_LIMITS.owner },
           importance: nullableImportance,
           urgency: nullableUrgency,
           acceptanceCriteria: {
@@ -115,7 +118,15 @@ function buildDiagnosis(categories) {
 }
 
 function diagnoseDistribution({ tasks, requestBody } = {}) {
-  const input = requestBody || { tasks };
+  const rawInput = requestBody || { tasks };
+  const input = Array.isArray(rawInput?.tasks)
+    ? {
+      ...rawInput,
+      tasks: rawInput.tasks.map(task => (
+        normalizeOptionalOwner(normalizeOptionalDue(task))
+      )),
+    }
+    : rawInput;
   if (!validateRequest(input)) {
     throw publicError('INPUT_INVALID', '任务数据不符合时间分布诊断要求。', 400);
   }

@@ -3,6 +3,7 @@ const assert = require('node:assert/strict');
 
 const {
   applyDeadlineUrgency,
+  normalizeDue,
   parseDue,
   parseExplicitDue,
   referenceDateInTimeZone,
@@ -86,6 +87,58 @@ test('中文相对日期按 Asia/Shanghai 参考日解析', () => {
     time: '11:30',
     sortKey: '2026-07-20T11:30',
   });
+  assert.deepEqual(parseDue('后天 08:05', context), {
+    date: '2026-07-22',
+    time: '08:05',
+    sortKey: '2026-07-22T08:05',
+  });
+});
+
+test('可确定截止时间标准化为具体上海日期', () => {
+  const context = { now: SHANGHAI_NOON, timeZone: 'Asia/Shanghai' };
+  assert.equal(normalizeDue('今天', context), '2026-07-20');
+  assert.equal(normalizeDue('今日 8:05 前', context), '2026-07-20 08:05');
+  assert.equal(normalizeDue('明天 09:30', context), '2026-07-21 09:30');
+  assert.equal(normalizeDue('后天', context), '2026-07-22');
+  assert.equal(normalizeDue('2026-07-31T16:00', context), '2026-07-31 16:00');
+});
+
+test('相对日期标准化正确跨月和跨年', () => {
+  assert.equal(normalizeDue('明天', {
+    now: () => new Date('2026-07-31T04:00:00.000Z'),
+    timeZone: 'Asia/Shanghai',
+  }), '2026-08-01');
+  assert.equal(normalizeDue('后天', {
+    now: () => new Date('2026-12-30T04:00:00.000Z'),
+    timeZone: 'Asia/Shanghai',
+  }), '2027-01-01');
+});
+
+test('无法唯一确定或无效的截止时间统一为待确认', () => {
+  const context = { now: SHANGHAI_NOON, timeZone: 'Asia/Shanghai' };
+  for (const value of ['', '待确认', '尽快', '月底', '近期', '本周五', '2026-02-30']) {
+    assert.equal(normalizeDue(value, context), '待确认', value);
+  }
+});
+
+test('紧急度纠偏同时回写标准截止日期且不丢失原始紧迫信号', () => {
+  const context = { now: SHANGHAI_NOON, timeZone: 'Asia/Shanghai' };
+  assert.deepEqual(
+    applyDeadlineUrgency(task({ due: '明天 09:00', urgency: '高' }), context),
+    {
+      ...task({ due: '明天 09:00', urgency: '高' }),
+      due: '2026-07-21 09:00',
+      urgency: '中',
+    },
+  );
+  assert.equal(
+    applyDeadlineUrgency(task({ due: '尽快', urgency: '低' }), context).urgency,
+    '高',
+  );
+  assert.equal(
+    applyDeadlineUrgency(task({ due: '尽快', urgency: '低' }), context).due,
+    '待确认',
+  );
 });
 
 test('期限、来源和明确压力按统一规则确定紧急度', () => {
@@ -99,7 +152,7 @@ test('期限、来源和明确压力按统一规则确定紧急度', () => {
     { name: '复盘待确认', input: { source: '复盘', due: '待确认', urgency: '高' }, expected: '低' },
     { name: '中长期待确认', input: { source: '中长期', due: '待确认', urgency: '高' }, expected: '低' },
     { name: '今天栏待确认', input: { source: '今天', due: '待确认', urgency: '低' }, expected: '高' },
-    { name: '不可解析自然期限', input: { source: '复盘', due: '本周五', urgency: '高' }, expected: '中' },
+    { name: '不可解析自然期限', input: { source: '复盘', due: '本周五', urgency: '高' }, expected: '低' },
     { name: '未来但明确阻塞', input: { source: '短期目标', name: '立即处理发布阻塞', due: '2026-07-28', urgency: '低' }, expected: '高' },
   ];
 

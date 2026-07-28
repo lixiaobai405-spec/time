@@ -8,6 +8,8 @@ const {
   TASK_STATUS,
   TEXT_LIMITS,
   URGENCY,
+  normalizeOptionalDue,
+  normalizeOptionalOwner,
   parseEstimatedMinutes,
 } = require('../contracts/time-management');
 
@@ -27,13 +29,14 @@ const validateRequest = ajv.compile({
       items: {
         type: 'object',
         additionalProperties: false,
-        required: ['id', 'name', 'source', 'due', 'est', 'importance', 'urgency', 'status', 'classificationSource'],
+        required: ['id', 'name', 'source', 'due', 'est', 'owner', 'importance', 'urgency', 'status', 'classificationSource'],
         properties: {
           id: { type: 'string', minLength: 1, maxLength: 200 },
           name: { type: 'string', maxLength: TEXT_LIMITS.taskName },
           source: { enum: SOURCES },
           due: { type: 'string', maxLength: TEXT_LIMITS.due },
           est: { type: 'string', maxLength: TEXT_LIMITS.est },
+          owner: { type: 'string', maxLength: TEXT_LIMITS.owner },
           importance: nullableImportance,
           urgency: nullableUrgency,
           acceptanceCriteria: {
@@ -63,9 +66,6 @@ function issuesForTask(task) {
   if (task.name.trim().length < 5) {
     issues.push(issue('name', 'DESCRIPTION_TOO_SHORT', '任务描述至少应包含明确动作和对象。'));
   }
-  if (!task.due.trim() || task.due.trim() === '待确认') {
-    issues.push(issue('due', 'DUE_REQUIRED', '请补充明确截止时间。'));
-  }
   const minutes = parseEstimatedMinutes(task.est);
   if (!Number.isFinite(minutes) || minutes <= 0) {
     issues.push(issue('est', 'ESTIMATE_REQUIRED', '请填写可解析的正数工时，如 1h、1.5小时或 30分钟。'));
@@ -77,7 +77,10 @@ function issuesForTask(task) {
 }
 
 function checkTaskSmart({ tasks, requestBody } = {}) {
-  const input = requestBody || { tasks };
+  const rawInput = requestBody || { tasks };
+  const input = Array.isArray(rawInput?.tasks)
+    ? { ...rawInput, tasks: rawInput.tasks.map(task => normalizeOptionalOwner(normalizeOptionalDue(task))) }
+    : rawInput;
   if (!validateRequest(input)) {
     throw publicError('INPUT_INVALID', '任务数据不符合 SMART 校验要求。', 400);
   }

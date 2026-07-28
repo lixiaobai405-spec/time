@@ -48,6 +48,7 @@ const TEXT_LIMITS = Object.freeze({
   taskName: 200,
   due: 80,
   est: 40,
+  owner: 100,
   acceptanceCriteria: 200,
   nextAction: 200,
 });
@@ -101,6 +102,43 @@ function sourceForCategory(category) {
   return CATEGORY_TO_SOURCE[category] || '今天';
 }
 
+function normalizeOptionalDue(task) {
+  if (!task || typeof task !== 'object' || Array.isArray(task)) return task;
+  if (task.due == null) return { ...task, due: '待确认' };
+  if (typeof task.due !== 'string') return task;
+  return { ...task, due: task.due.trim() || '待确认' };
+}
+
+function normalizeOptionalOwner(task) {
+  if (!task || typeof task !== 'object' || Array.isArray(task)) return task;
+  if (task.owner == null) return { ...task, owner: '待确认' };
+  if (typeof task.owner !== 'string') return task;
+  return { ...task, owner: task.owner.trim() || '待确认' };
+}
+
+const DATE_OR_LEGACY_TIMESTAMP = /^(\d{4})-(\d{2})-(\d{2})(?:[ T]\d{2}:\d{2})?$/;
+
+function validCalendarDate(yearText, monthText, dayText) {
+  const year = Number(yearText);
+  const month = Number(monthText);
+  const day = Number(dayText);
+  if (year < 1000 || month < 1 || month > 12 || day < 1) return false;
+  return day <= new Date(Date.UTC(year, month, 0)).getUTCDate();
+}
+
+function normalizeDueForWrite(task) {
+  const normalized = normalizeOptionalDue(task);
+  if (!normalized || typeof normalized !== 'object' || Array.isArray(normalized)) {
+    return normalized;
+  }
+  if (normalized.due === '待确认') return normalized;
+  const match = DATE_OR_LEGACY_TIMESTAMP.exec(normalized.due);
+  if (!match || !validCalendarDate(match[1], match[2], match[3])) {
+    return { ...normalized, due: '待确认' };
+  }
+  return { ...normalized, due: `${match[1]}-${match[2]}-${match[3]}` };
+}
+
 function normalizeTask(task) {
   const hasClassification = IMPORTANCE.includes(task.importance)
     && URGENCY.includes(task.urgency);
@@ -116,6 +154,7 @@ function normalizeTask(task) {
     source: task.source,
     due: normalizedText(task.due, '待确认'),
     est: normalizedText(task.est),
+    owner: normalizedText(task.owner, '待确认'),
     acceptanceCriteria,
     nextAction: normalizedText(task.nextAction),
     status: task.status || 'pending',
@@ -141,6 +180,9 @@ module.exports = {
   TEXT_LIMITS,
   URGENCY,
   categoryForTask,
+  normalizeDueForWrite,
+  normalizeOptionalDue,
+  normalizeOptionalOwner,
   normalizeTask,
   parseEstimatedMinutes,
   quadrantFor,

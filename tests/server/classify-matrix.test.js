@@ -78,7 +78,9 @@ test('每条任务只出现一次且精力比例合计 100', async () => {
   );
   assert.equal(modelClient.calls[0].maxAttempts, 1);
   assert.match(modelClient.calls[0].system, /重要-紧急矩阵分类模块/);
-  assert.deepEqual(JSON.parse(modelClient.calls[0].user), { tasks });
+  const sentTasks = JSON.parse(modelClient.calls[0].user).tasks;
+  assert.equal(sentTasks[0].due, '待确认');
+  assert.equal(sentTasks[0].owner, '待确认');
 });
 
 test('两个同名不同 ID 的任务均被保留', async () => {

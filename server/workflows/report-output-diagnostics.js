@@ -1,0 +1,78 @@
+const REPORT_OUTPUT_REASON = Object.freeze({
+  MODEL_RESPONSE_ENVELOPE_INVALID: 'MODEL_RESPONSE_ENVELOPE_INVALID',
+  MODEL_JSON_INVALID: 'MODEL_JSON_INVALID',
+  MODEL_OUTPUT_TOO_LARGE: 'MODEL_OUTPUT_TOO_LARGE',
+  MODEL_CONTENT_MISSING: 'MODEL_CONTENT_MISSING',
+  MODEL_CONTENT_EMPTY: 'MODEL_CONTENT_EMPTY',
+  MODEL_CONTENT_FILTERED: 'MODEL_CONTENT_FILTERED',
+  MODEL_JSON_TRUNCATED: 'MODEL_JSON_TRUNCATED',
+  MODEL_JSON_CODE_FENCE: 'MODEL_JSON_CODE_FENCE',
+  MODEL_JSON_EXTRA_TEXT: 'MODEL_JSON_EXTRA_TEXT',
+  MODEL_JSON_SYNTAX_INVALID: 'MODEL_JSON_SYNTAX_INVALID',
+  MODEL_JSON_CONTROL_CHARACTER_INVALID: 'MODEL_JSON_CONTROL_CHARACTER_INVALID',
+  MODEL_JSON_ESCAPE_INVALID: 'MODEL_JSON_ESCAPE_INVALID',
+  MODEL_JSON_PROPERTY_NAME_INVALID: 'MODEL_JSON_PROPERTY_NAME_INVALID',
+  MODEL_JSON_SEPARATOR_INVALID: 'MODEL_JSON_SEPARATOR_INVALID',
+  MODEL_JSON_TRAILING_CONTENT: 'MODEL_JSON_TRAILING_CONTENT',
+  MODEL_JSON_UNTERMINATED_STRING: 'MODEL_JSON_UNTERMINATED_STRING',
+  REPORT_SCHEMA_INVALID: 'REPORT_SCHEMA_INVALID',
+  REPORT_ORDER_REFERENCE_INVALID: 'REPORT_ORDER_REFERENCE_INVALID',
+  REPORT_ORDER_PRIORITY_MISMATCH: 'REPORT_ORDER_PRIORITY_MISMATCH',
+  REPORT_TASK_ID_LEAK: 'REPORT_TASK_ID_LEAK',
+  REPORT_LONG_TERM_MEASURE_MISSING: 'REPORT_LONG_TERM_MEASURE_MISSING',
+  REPORT_PROTECTED_TASK_DELAYED: 'REPORT_PROTECTED_TASK_DELAYED',
+  REPORT_DELEGATION_MISSING: 'REPORT_DELEGATION_MISSING',
+  REPORT_REMAINING_PROTECTED_UNSCHEDULED: 'REPORT_REMAINING_PROTECTED_UNSCHEDULED',
+  REPORT_SCHEDULE_CONFLICT: 'REPORT_SCHEDULE_CONFLICT',
+});
+
+const CORRECTION_BY_REASON = Object.freeze({
+  MODEL_RESPONSE_ENVELOPE_INVALID: '仅返回一个 JSON 对象，不要添加解释、代码围栏或其他文本。',
+  MODEL_JSON_INVALID: '仅返回可被 JSON.parse 解析的单个 JSON 对象。',
+  MODEL_OUTPUT_TOO_LARGE: '缩短内容并保持完整 JSON，总输出不得超过 64 KiB。',
+  MODEL_CONTENT_MISSING: '必须在 message.content 中返回单个完整 JSON 对象。',
+  MODEL_CONTENT_EMPTY: '不得返回空正文；必须返回单个完整 JSON 对象。',
+  MODEL_CONTENT_FILTERED: '保持内容简洁、安全，并返回单个完整 JSON 对象。',
+  MODEL_JSON_TRUNCATED: '缩短每条文字，确保在输出限制内闭合并返回完整 JSON 对象。',
+  MODEL_JSON_CODE_FENCE: '不要使用 Markdown 代码围栏；仅返回 JSON 对象本身。',
+  MODEL_JSON_EXTRA_TEXT: '删除 JSON 前后的解释、标签和其他文字；仅返回 JSON 对象本身。',
+  MODEL_JSON_SYNTAX_INVALID: '检查引号、逗号、转义和括号闭合，仅返回可被 JSON.parse 解析的对象。',
+  MODEL_JSON_CONTROL_CHARACTER_INVALID: '字符串内的换行必须写为 \\n，其他控制字符必须使用合法 JSON 转义。',
+  MODEL_JSON_ESCAPE_INVALID: '字符串反斜杠只能使用 JSON 支持的转义形式，例如 \\\\, \\", \\n 或 \\uXXXX。',
+  MODEL_JSON_PROPERTY_NAME_INVALID: '所有对象属性名必须使用双引号，且对象最后一个属性后不得保留尾逗号。',
+  MODEL_JSON_SEPARATOR_INVALID: '对象属性和数组元素之间必须使用逗号，并正确闭合对象与数组。',
+  MODEL_JSON_TRAILING_CONTENT: '只能返回一个 JSON 对象，对象结束后不得追加第二个对象或其他内容。',
+  MODEL_JSON_UNTERMINATED_STRING: '每个 JSON 字符串必须使用未转义的双引号正确闭合。',
+  REPORT_SCHEMA_INVALID: '严格返回 order、energyRules、adjustments 三个字段，并满足数组项结构和数量限制。',
+  REPORT_ORDER_REFERENCE_INVALID: 'order.taskId 只能引用当前 tasks 中的 ID，且不得重复。',
+  REPORT_ORDER_PRIORITY_MISMATCH: 'order.taskId 必须与 priorityContext.recommendedTaskIds 完全同序。',
+  REPORT_TASK_ID_LEAK: '任务 ID 只能出现在 order.taskId；用户可见文字不得包含完整 ID 或 UUID 前缀。',
+  REPORT_LONG_TERM_MEASURE_MISSING: '后天目标非空时，adjustments 必须包含数字、周期、截止点、指标或里程碑。',
+  REPORT_PROTECTED_TASK_DELAYED: '当天或已逾期任务不得被建议推迟、延后、取消、暂缓或搁置。',
+  REPORT_DELEGATION_MISSING: '需要立即授权的任务必须在相关建议中使用授权、委派或交办语义。',
+  REPORT_REMAINING_PROTECTED_UNSCHEDULED: 'remainingProtectedTaskIds 中每个任务都要在 adjustments 使用完整任务名并给出明确时间或立即授权。',
+  REPORT_SCHEDULE_CONFLICT: '明确时间段不得与其他任务的 fixedPoints 或 protectedWindows 冲突。',
+});
+
+function reportOutputError(diagnosticCode) {
+  return Object.assign(new Error('AI 返回格式异常，请重试。'), {
+    code: 'MODEL_OUTPUT_INVALID',
+    status: 502,
+    expose: true,
+    diagnosticCode,
+  });
+}
+
+function retryFeedbackFor(diagnosticCode) {
+  return {
+    failedRule: diagnosticCode,
+    correction: CORRECTION_BY_REASON[diagnosticCode]
+      || '严格按报告 JSON 契约重新生成。',
+  };
+}
+
+module.exports = {
+  REPORT_OUTPUT_REASON,
+  reportOutputError,
+  retryFeedbackFor,
+};

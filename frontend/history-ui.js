@@ -134,7 +134,6 @@ export function renderHistoryDetail(item) {
       task.source,
     ];
     if (task.source !== '中长期') {
-      metadata.push(`截止：${task.due || '待确认'}`);
       if (task.est) metadata.push(task.est);
     }
     if (task.classificationSource === 'ai-matrix') metadata.push('AI 判定');

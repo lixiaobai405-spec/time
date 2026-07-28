@@ -97,8 +97,37 @@ function hasScheduleConflict(report, scheduleContext) {
     .some(text => conflictsWithText(text, scheduleContext));
 }
 
+const SAFE_SCHEDULE_FALLBACK = Object.freeze({
+  energyRules: '安排专注工作时，避开已有截止点和保护时段。',
+  adjustments: '调整任务安排时，避开已有截止点和保护时段，并按当前优先级推进。',
+});
+
+function stabilizeTextList(items, scheduleContext, fallback) {
+  return [...new Set(items.map(text => (
+    conflictsWithText(text, scheduleContext) ? fallback : text
+  )))];
+}
+
+function stabilizeScheduleConflicts(report, scheduleContext) {
+  return {
+    ...report,
+    order: report.order.map(item => ({ ...item })),
+    energyRules: stabilizeTextList(
+      report.energyRules,
+      scheduleContext,
+      SAFE_SCHEDULE_FALLBACK.energyRules,
+    ),
+    adjustments: stabilizeTextList(
+      report.adjustments,
+      scheduleContext,
+      SAFE_SCHEDULE_FALLBACK.adjustments,
+    ),
+  };
+}
+
 module.exports = {
   buildReportScheduleContext,
   hasScheduleConflict,
   parseEstimatedRangeMinutes,
+  stabilizeScheduleConflicts,
 };

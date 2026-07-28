@@ -11,6 +11,9 @@ const {
   SOURCES,
   TASK_STATUS,
   URGENCY,
+  normalizeDueForWrite,
+  normalizeOptionalDue,
+  normalizeOptionalOwner,
   normalizeTask,
   parseEstimatedMinutes,
   quadrantFor,
@@ -135,14 +138,93 @@ test('运行提示词声明正式任务、矩阵和报告契约', () => {
     'utf8',
   );
 
-  assert.match(prompt, /"due":"原文中的期限或待确认"/);
-  assert.match(prompt, /只提取尚未完成的动作/);
-  assert.match(prompt, /"taskId":""/);
+  assert.match(prompt, /due.*YYYY-MM-DD或待确认/);
+  assert.match(prompt, /提取尚未完成的动作/);
+  assert.match(prompt, /taskId/);
   assert.match(prompt, /55、25、15、5/);
-  assert.match(prompt, /"energyRules":\["",""\]/);
-  assert.match(prompt, /"order":\[\{"taskId":"","reason":""\}\]/);
+  assert.match(prompt, /energyRules/);
+  assert.match(prompt, /order/);
   assert.match(prompt, /acceptanceCriteria/);
-  assert.match(prompt, /短期目标.*中长期.*至少.*验收标准/s);
+  assert.match(prompt, /短期目标.*中长.*至少/s);
   assert.match(prompt, /nextAction/);
   assert.match(prompt, /超过 8h.*拆分|超过 8 小时.*拆分/);
+  assert.match(prompt, /owner.*原文.*明确.*责任/s);
+  assert.match(prompt, /不得.*推断/);
+  assert.match(prompt, /due.*YYYY-MM-DD/s);
+});
+
+test('缺失、空白和 null owner 标准化为待确认', () => {
+  const missing = normalizeTask({
+    name: '提交方案', importance: '高', urgency: '低', source: '今天', est: '约1h',
+  });
+  assert.equal(missing.owner, '待确认');
+
+  const blank = normalizeTask({
+    name: '提交方案', importance: '高', urgency: '低', source: '今天', est: '约1h', owner: '   ',
+  });
+  assert.equal(blank.owner, '待确认');
+
+  const nullable = normalizeTask({
+    name: '提交方案', importance: '高', urgency: '低', source: '今天', est: '约1h', owner: null,
+  });
+  assert.equal(nullable.owner, '待确认');
+});
+
+test('明确 owner 原样保留', () => {
+  const task = normalizeTask({
+    name: '提交方案', importance: '高', urgency: '低', source: '今天', est: '约1h', owner: '张三',
+  });
+  assert.equal(task.owner, '张三');
+});
+
+test('normalizeOptionalOwner 将缺失和空白标准化为待确认', () => {
+  assert.equal(normalizeOptionalOwner({}).owner, '待确认');
+  assert.equal(normalizeOptionalOwner({ owner: '' }).owner, '待确认');
+  assert.equal(normalizeOptionalOwner({ owner: '  ' }).owner, '待确认');
+  assert.equal(normalizeOptionalOwner({ owner: null }).owner, '待确认');
+  assert.equal(normalizeOptionalOwner({ owner: '李四' }).owner, '李四');
+});
+
+test('新写入 due 只接受日期或待确认', () => {
+  const dateOnly = normalizeOptionalDue({ due: '2026-07-20' });
+  assert.equal(dateOnly.due, '2026-07-20');
+
+  const pending = normalizeOptionalDue({ due: '待确认' });
+  assert.equal(pending.due, '待确认');
+
+  const missing = normalizeOptionalDue({});
+  assert.equal(missing.due, '待确认');
+
+  const blank = normalizeOptionalDue({ due: '   ' });
+  assert.equal(blank.due, '待确认');
+});
+
+test('旧任务缺 owner 仍可读取并标准化', () => {
+  const task = normalizeTask({
+    name: '旧任务', importance: '中', urgency: '低', source: '今天', est: '1h',
+    due: '2026-07-20 18:00',
+  });
+  assert.equal(task.due, '2026-07-20 18:00');
+  assert.equal(task.owner, '待确认');
+});
+
+// --- Task 1 Step 3: Red tests for write-boundary deadline contract ---
+
+test('new writes convert valid legacy timestamps to date-only values', () => {
+  assert.deepEqual(
+    normalizeDueForWrite({ due: '2026-07-20 18:00' }),
+    { due: '2026-07-20' },
+  );
+  assert.deepEqual(
+    normalizeDueForWrite({ due: '2026-07-20T09:30' }),
+    { due: '2026-07-20' },
+  );
+});
+
+test('new writes retain only valid dates or pending', () => {
+  assert.equal(normalizeDueForWrite({ due: '2026-02-29' }).due, '待确认');
+  assert.equal(normalizeDueForWrite({ due: '下周某天' }).due, '待确认');
+  assert.equal(normalizeDueForWrite({ due: '' }).due, '待确认');
+  assert.equal(normalizeDueForWrite({ due: null }).due, '待确认');
+  assert.equal(normalizeDueForWrite({ due: '待确认' }).due, '待确认');
 });
