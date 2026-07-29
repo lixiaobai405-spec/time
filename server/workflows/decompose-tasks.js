@@ -87,6 +87,7 @@ function evidenceMap(response) {
 function assertTaskShapeAndSemantics(response, coachResponse) {
   const byEvidenceId = evidenceMap(coachResponse);
   const primaryCoverage = new Map();
+  const relatedCoverage = new Set();
 
   for (const task of response.tasks) {
     if (!task.evidenceIds.length) {
@@ -101,6 +102,9 @@ function assertTaskShapeAndSemantics(response, coachResponse) {
     const referenced = task.evidenceIds.map(id => byEvidenceId.get(id));
     if (referenced.some(item => !item)) {
       throw outputError('task-generation', ['TASK_EVIDENCE_NOT_FOUND']);
+    }
+    for (const evidence of referenced) {
+      relatedCoverage.add(evidence.id);
     }
     const primary = referenced[0];
     const expectedSource = SOURCE_FOR_DIMENSION[primary.dimension];
@@ -121,9 +125,6 @@ function assertTaskShapeAndSemantics(response, coachResponse) {
     }
     if (task.owner !== '待确认' && task.owner !== primary.owner) {
       throw outputError('task-generation', ['TASK_OWNER_NOT_GROUNDED']);
-    }
-    if (task.due !== '待确认' && task.due !== primary.due) {
-      throw outputError('task-generation', ['TASK_DUE_NOT_GROUNDED']);
     }
     if (
       ['短期目标', '中长期'].includes(task.source)
@@ -146,7 +147,7 @@ function assertTaskShapeAndSemantics(response, coachResponse) {
     if (
       evidence.dimension === '昨天'
       && evidence.status === 'unfinished'
-      && !primaryCoverage.has(evidence.id)
+      && !relatedCoverage.has(evidence.id)
     ) {
       throw outputError('task-generation', ['UNFINISHED_YESTERDAY_NOT_COVERED']);
     }
@@ -209,15 +210,28 @@ async function runValidatedStage({
   throw outputError(stage);
 }
 
+function groundTaskResponse(taskResponse, coachResponse) {
+  const byEvidenceId = evidenceMap(coachResponse);
+  return {
+    tasks: taskResponse.tasks.map(candidate => ({
+      ...candidate,
+      due: byEvidenceId.get(candidate.evidenceIds[0]).due,
+    })),
+  };
+}
+
 function normalizeGeneratedTasks(taskResponse, coachResponse, goals, now) {
+  const byEvidenceId = evidenceMap(coachResponse);
   const instant = now();
   const deadlineContext = {
     now: () => instant,
     timeZone: 'Asia/Shanghai',
   };
   return taskResponse.tasks.map((candidate) => {
+    const primary = byEvidenceId.get(candidate.evidenceIds[0]);
     const task = normalizeTask({
       ...candidate,
+      due: primary.due,
       classificationSource: 'ai-extraction',
     });
     const normalized = normalizeDueForWrite(applyDeadlineUrgency(task, {
@@ -265,7 +279,12 @@ async function decomposeTasks({ entries, modelClient, requestBody, now = () => n
     stage: 'task-generation',
   });
 
-  const normalized = normalizeGeneratedTasks(taskResponse, coachResponse, intake.entries, () => instant);
+  const groundedTaskResponse = groundTaskResponse(
+    taskResponse,
+    coachResponse,
+  );
+
+  const normalized = normalizeGeneratedTasks(groundedTaskResponse, coachResponse, intake.entries, () => instant);
   if (normalized.length === 0) {
     throw Object.assign(new Error('没有识别出可执行任务，请调整四栏内容后重试。'), {
       code: 'NO_ACTIONABLE_TASKS',
@@ -305,7 +324,7 @@ async function decomposeTasks({ entries, modelClient, requestBody, now = () => n
             version: taskPrompt.version,
             sha256: taskPrompt.sha256,
           },
-          output: taskResponse,
+          output: groundedTaskResponse,
         },
       ],
       taskEvidence: normalized.map(item => ({

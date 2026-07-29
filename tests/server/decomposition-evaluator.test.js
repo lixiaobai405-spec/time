@@ -15,13 +15,13 @@ function clone(value) {
   return JSON.parse(JSON.stringify(value));
 }
 
-test('16个模拟业务案例的黄金回放全部通过并输出核心指标', async () => {
+test('17个模拟业务案例的黄金回放全部通过并输出核心指标', async () => {
   const cases = loadJsonl(DATASET);
-  assert.equal(cases.length, 16);
+  assert.equal(cases.length, 17);
 
   const report = await runEvaluation({ cases, mode: 'replay' });
-  assert.equal(report.summary.cases, 16);
-  assert.equal(report.summary.passed, 16);
+  assert.equal(report.summary.cases, 17);
+  assert.equal(report.summary.passed, 17);
   assert.equal(report.summary.failed, 0);
   assert.equal(report.summary.tasks.precision, 1);
   assert.equal(report.summary.tasks.recall, 1);

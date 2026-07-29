@@ -671,7 +671,6 @@ function renderHistoryDetail() {
   const taskById = new Map(item.tasks.map(task => [task.id, task]));
   app().innerHTML = `<div class="phead"><button class="btn btn-ghost btn-sm" data-action="history-back">返回</button><div class="ptitle">${escapeHtml(item.title)}</div></div><div class="pdesc">生成时间：${escapeHtml(formatTimestamp(item.createdAt))} · 只读账号历史</div>
     <div class="history-detail-content"><section class="history-section"><h2>事务填写</h2><div class="history-goals">${Object.entries(item.goals).map(([key, value]) => `<div><strong>${escapeHtml(key)}</strong><p>${escapeHtml(value || '未填写')}</p></div>`).join('')}</div></section>
-      ${historyDecompositionSection(item.decomposition)}
       <section class="history-section"><h2>任务清单</h2><div class="history-tasks">${item.tasks.map(task => `<article><h3>${escapeHtml(task.name)}</h3><p>${escapeHtml(categoryForTask(task))} · ${escapeHtml(task.importance || '待确认')}/${escapeHtml(task.urgency || '待确认')} · ${escapeHtml(task.est || '')} · 截止：${escapeHtml(displayDue(task.due))} · 责任人：${escapeHtml(task.owner || '待确认')}</p></article>`).join('')}</div></section>
       ${historyDistributionSection(item.distribution)}
       <section class="history-section"><h2>轻重缓急矩阵</h2><div class="history-quadrants">${item.matrix.quadrants.map(quadrant => `<div><strong>${escapeHtml(quadrant.name)} · ${quadrant.energyPercent}%</strong><p>${quadrant.taskIds.map(id => escapeHtml(taskById.get(id)?.name || '')).filter(Boolean).join('、') || '暂无任务'}</p></div>`).join('')}</div></section>

@@ -491,7 +491,15 @@ test('新历史详情展示时间分布诊断，区块顺序为事务填写→�
 
   // Section order — only direct child h2 of each section
   const headings = await page.locator('.history-section > h2').allInnerTexts();
-  expect(headings).toEqual(['事务填写', '任务清单', '时间分布诊断', '轻重缓急矩阵', '优化报告']);
+  expect(headings).toEqual([
+    '事务填写',
+    '任务清单',
+    '时间分布诊断',
+    '轻重缓急矩阵',
+    '优化报告',
+  ]);
+  await expect(page.getByRole('heading', { name: '拆解审计' })).toHaveCount(0);
+  await expect(page.locator('.history-audit')).toHaveCount(0);
 
   // Distribution display
   await expect(page.locator('.history-section').filter({ hasText: '时间分布诊断' })).toContainText('昨天 · 遗留问题');

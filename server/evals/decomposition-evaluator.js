@@ -272,8 +272,7 @@ function evaluateSuccessfulCase(testCase, result) {
     const actual = findEvidenceMatch(expected, actualEvidence);
     if (!actual) continue;
     const covered = actualTasks.some(task => (
-      task.source === '复盘'
-      && (taskEvidenceById.get(task.id) || []).includes(actual.id)
+      (taskEvidenceById.get(task.id) || []).includes(actual.id)
     ));
     if (covered) yesterdayCovered += 1;
   }
