@@ -72,6 +72,29 @@ test('未知 API 返回安全统一错误结构', async () => {
   }
 });
 
+test('未知 API 仍限制 JSON 请求体大小', async () => {
+  const { createApp } = require('../../server/app');
+  const app = createApp({
+    authBoundary: createTestAuthBoundary(),
+    modelClient: { completeJson: async () => ({}) },
+  });
+  const server = await listen(app);
+
+  try {
+    const response = await fetch(`http://127.0.0.1:${server.address().port}/api/missing`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ padding: 'x'.repeat(65 * 1024) }),
+    });
+    const payload = await response.json();
+    assert.equal(response.status, 413);
+    assert.equal(payload.error.code, 'PAYLOAD_TOO_LARGE');
+    assert.doesNotMatch(JSON.stringify(payload), /stack|x{100}/i);
+  } finally {
+    await close(server);
+  }
+});
+
 test('loadConfig 只接受完整且有效的服务端配置', () => {
   const { loadConfig } = require('../../server/config');
   const config = loadConfig({

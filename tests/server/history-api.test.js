@@ -2,7 +2,10 @@ const assert = require('node:assert/strict');
 const { randomUUID } = require('node:crypto');
 const test = require('node:test');
 
+const { HISTORY_SNAPSHOT_MAX_BYTES } = require('../../server/history/limits');
 const { AuthClient } = require('../helpers/auth-client');
+const { taskFirstDecompositionFixture } = require('../helpers/decomposition-fixture');
+const { maxHistorySnapshot } = require('../helpers/max-history-fixture');
 const { DISTRIBUTION_FIXTURE, historySnapshot } = require('../helpers/history-fixture');
 const { createAuthTestApp } = require('../helpers/test-app');
 
@@ -22,6 +25,14 @@ function saveHistory(client, snapshot, csrfToken = client.sessionCsrfToken) {
   });
 }
 
+function patchCoaching(client, id, body, csrfToken = client.sessionCsrfToken) {
+  return client.request(`/api/time-management/history/${id}/coaching-analysis`, {
+    method: 'PATCH',
+    csrfToken,
+    body,
+  });
+}
+
 test('history APIs require authentication and mutations require session CSRF', async (t) => {
   const { baseUrl } = await createAuthTestApp(t);
   const anonymous = new AuthClient(baseUrl);
@@ -32,6 +43,11 @@ test('history APIs require authentication and mutations require session CSRF', a
   const anonymousSave = await saveHistory(anonymous, historySnapshot(), 'fake-token');
   assert.equal(anonymousSave.status, 401);
   assert.equal((await anonymousSave.json()).error.code, 'AUTH_REQUIRED');
+  const oversizedAnonymous = await saveHistory(anonymous, {
+    padding: 'x'.repeat(HISTORY_SNAPSHOT_MAX_BYTES + 1),
+  }, 'fake-token');
+  assert.equal(oversizedAnonymous.status, 401);
+  assert.equal((await oversizedAnonymous.json()).error.code, 'AUTH_REQUIRED');
 
   const client = new AuthClient(baseUrl);
   await login(client, 'History_Csrf');
@@ -148,6 +164,43 @@ test('POST with invalid distribution structure returns 400 INPUT_INVALID', async
   assert.equal((await response.json()).error.code, 'INPUT_INVALID');
 });
 
+test('authenticated history create uses the dedicated snapshot body budget', async (t) => {
+  const { baseUrl } = await createAuthTestApp(t);
+  const client = new AuthClient(baseUrl);
+  await login(client, 'History_LargeBody');
+
+  const response = await saveHistory(client, {
+    ...historySnapshot(),
+    padding: 'x'.repeat(70 * 1024),
+  });
+  assert.equal(response.status, 400);
+  assert.equal((await response.json()).error.code, 'INPUT_INVALID');
+});
+
+test('maximum legal version-3 history snapshot fits request and response budgets', async (t) => {
+  const { baseUrl } = await createAuthTestApp(t);
+  const client = new AuthClient(baseUrl);
+  await login(client, 'History_MaxBody');
+
+  const response = await saveHistory(client, maxHistorySnapshot());
+  const body = await response.json();
+  assert.equal(response.status, 201);
+  assert.equal(body.tasks.length, 100);
+  assert.equal(body.decomposition.stages.length, 2);
+});
+
+test('authenticated history create rejects bodies over the dedicated snapshot budget', async (t) => {
+  const { baseUrl } = await createAuthTestApp(t);
+  const client = new AuthClient(baseUrl);
+  await login(client, 'History_OverBudget');
+
+  const response = await saveHistory(client, {
+    padding: 'x'.repeat(HISTORY_SNAPSHOT_MAX_BYTES + 1),
+  });
+  assert.equal(response.status, 413);
+  assert.equal((await response.json()).error.code, 'PAYLOAD_TOO_LARGE');
+});
+
 test('error responses do not leak task content, raw JSON, SQL, or stack traces', async (t) => {
   const { baseUrl } = await createAuthTestApp(t);
   const client = new AuthClient(baseUrl);
@@ -160,6 +213,62 @@ test('error responses do not leak task content, raw JSON, SQL, or stack traces',
   assert.equal(response.status, 400);
   assert.equal(body.error.code, 'INPUT_INVALID');
   assert.ok(!/SQLITE|SELECT|INSERT|time_management|分布/.test(JSON.stringify(body)));
+});
+
+test('coaching PATCH conditionally enriches only the owned version-3 decomposition', async (t) => {
+  const { baseUrl } = await createAuthTestApp(t);
+  const owner = new AuthClient(baseUrl);
+  const other = new AuthClient(baseUrl);
+  await login(owner, 'History_Coaching_Owner');
+  await login(other, 'History_Coaching_Other');
+  const snapshot = historySnapshot({
+    goals: { 昨天: '', 今天: '今天18:00前提交方案', 明天: '', 后天: '' },
+  });
+  snapshot.decomposition = taskFirstDecompositionFixture(snapshot);
+  const savedResponse = await saveHistory(owner, snapshot);
+  const saved = await savedResponse.json();
+  const coachingStage = taskFirstDecompositionFixture(
+    snapshot,
+    { withCoaching: true },
+  ).stages[1];
+  const body = {
+    decompositionId: snapshot.decomposition.decompositionId,
+    analysisId: coachingStage.analysisId,
+    coachingStage,
+  };
+
+  const missingCsrf = await patchCoaching(owner, saved.id, body, '');
+  assert.equal(missingCsrf.status, 403);
+  const forbidden = await patchCoaching(other, saved.id, body);
+  assert.equal(forbidden.status, 404);
+
+  const patchedResponse = await patchCoaching(owner, saved.id, body);
+  const patched = await patchedResponse.json();
+  assert.equal(patchedResponse.status, 200);
+  assert.equal(patched.decomposition.stages.length, 2);
+  assert.equal(patched.decomposition.stages[1].analysisId, body.analysisId);
+  assert.deepEqual(patched.tasks, saved.tasks);
+
+  const retryResponse = await patchCoaching(owner, saved.id, body);
+  assert.equal(retryResponse.status, 200);
+  const injected = await patchCoaching(owner, saved.id, {
+    ...body,
+    decomposition: snapshot.decomposition,
+  });
+  assert.equal(injected.status, 400);
+  assert.equal((await injected.json()).error.code, 'INPUT_INVALID');
+
+  const conflictingStage = {
+    ...coachingStage,
+    analysisId: '55555555-5555-4555-8555-555555555555',
+  };
+  const conflict = await patchCoaching(owner, saved.id, {
+    ...body,
+    analysisId: conflictingStage.analysisId,
+    coachingStage: conflictingStage,
+  });
+  assert.equal(conflict.status, 409);
+  assert.equal((await conflict.json()).error.code, 'HISTORY_COACHING_CONFLICT');
 });
 
 test('detail and delete conceal ownership and deletion requires CSRF', async (t) => {

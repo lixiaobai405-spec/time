@@ -1,0 +1,3 @@
+const HISTORY_SNAPSHOT_MAX_BYTES = 36 * 64 * 1024;
+
+module.exports = { HISTORY_SNAPSHOT_MAX_BYTES };

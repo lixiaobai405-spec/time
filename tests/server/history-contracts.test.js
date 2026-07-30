@@ -6,12 +6,17 @@ const {
   decodeStoredSnapshot,
   validateHistorySnapshot,
 } = require('../../server/history/contracts');
+const { HISTORY_SNAPSHOT_MAX_BYTES } = require('../../server/history/limits');
 const {
   decodeHistoryCursor,
   encodeHistoryCursor,
   normalizeHistoryLimit,
 } = require('../../server/history/cursor');
-const { decompositionFixture } = require('../helpers/decomposition-fixture');
+const {
+  decompositionFixture,
+  taskFirstDecompositionFixture,
+} = require('../helpers/decomposition-fixture');
+const { maxHistorySnapshot } = require('../helpers/max-history-fixture');
 const {
   DISTRIBUTION_FIXTURE,
   TASK_ONE_ID,
@@ -44,11 +49,32 @@ function stored(snapshot, schemaVersion = 1) {
   };
 }
 
-test('a complete version-2 history snapshot preserves the formal workflow contract including distribution', () => {
+test('a complete version-3 history snapshot preserves distribution', () => {
   const snapshot = historySnapshot();
-  assert.equal(HISTORY_SCHEMA_VERSION, 2);
+  assert.equal(HISTORY_SCHEMA_VERSION, 3);
   assert.deepEqual(validateHistorySnapshot(snapshot), snapshot);
-  assert.deepEqual(decodeStoredSnapshot(stored(snapshot, 2)), snapshot);
+  assert.deepEqual(decodeStoredSnapshot(stored(snapshot, 3)), snapshot);
+});
+
+test('history snapshot budget covers the maximum legal version-3 response with ten percent margin', () => {
+  const snapshot = maxHistorySnapshot();
+  assert.doesNotThrow(() => validateHistorySnapshot(snapshot));
+  const response = {
+    id: '00000000-0000-4000-8000-000000000000',
+    ...snapshot,
+    schemaVersion: 3,
+    createdAt: '2026-07-30T00:00:00.000Z',
+    updatedAt: '2026-07-30T00:00:00.000Z',
+  };
+  const largestBytes = Math.max(
+    Buffer.byteLength(JSON.stringify(snapshot), 'utf8'),
+    Buffer.byteLength(JSON.stringify(response), 'utf8'),
+  );
+  const calculatedBudget = Math.ceil(
+    (largestBytes * 1.1) / (64 * 1024),
+  ) * 64 * 1024;
+  assert.equal(HISTORY_SNAPSHOT_MAX_BYTES, calculatedBudget);
+  assert.ok(largestBytes <= HISTORY_SNAPSHOT_MAX_BYTES);
 });
 
 test('version-2 history round-trips decomposition intermediate JSON', () => {
@@ -57,9 +83,49 @@ test('version-2 history round-trips decomposition intermediate JSON', () => {
     ...base,
     decomposition: decompositionFixture(base),
   };
-  const validated = validateHistorySnapshot(snapshot);
+  const validated = validateHistorySnapshot(snapshot, { schemaVersion: 2 });
   assert.deepEqual(validated.decomposition, snapshot.decomposition);
   assert.deepEqual(decodeStoredSnapshot(stored(snapshot, 2)), snapshot);
+});
+
+test('version-3 history accepts task-first decomposition with optional coaching', () => {
+  const base = historySnapshot({
+    goals: { 昨天: '', 今天: '今天18:00前提交方案', 明天: '', 后天: '' },
+  });
+  const withoutCoaching = {
+    ...base,
+    decomposition: taskFirstDecompositionFixture(base),
+  };
+  assert.deepEqual(validateHistorySnapshot(withoutCoaching), withoutCoaching);
+  assert.deepEqual(
+    decodeStoredSnapshot(stored(withoutCoaching, 3)),
+    withoutCoaching,
+  );
+
+  const withCoaching = {
+    ...base,
+    decomposition: taskFirstDecompositionFixture(base, { withCoaching: true }),
+  };
+  assert.deepEqual(validateHistorySnapshot(withCoaching), withCoaching);
+});
+
+test('version-3 history rejects wrong prompt identity and pending coaching', () => {
+  const base = historySnapshot({
+    goals: { 昨天: '', 今天: '今天18:00前提交方案', 明天: '', 后天: '' },
+  });
+  const wrongPrompt = {
+    ...base,
+    decomposition: taskFirstDecompositionFixture(base),
+  };
+  wrongPrompt.decomposition.stages[0].prompt.id = 'decomposition.task-generation';
+  inputInvalid(() => validateHistorySnapshot(wrongPrompt));
+
+  const pending = {
+    ...base,
+    decomposition: taskFirstDecompositionFixture(base, { withCoaching: true }),
+  };
+  pending.decomposition.stages[1].status = 'pending';
+  inputInvalid(() => validateHistorySnapshot(pending));
 });
 
 test('manual task edits keep the original decomposition trace auditable', () => {
@@ -71,7 +137,7 @@ test('manual task edits keep the original decomposition trace auditable', () => 
       index === 0 ? { ...task, name: '人工修订后的方案' } : task
     )),
   };
-  const validated = validateHistorySnapshot(snapshot);
+  const validated = validateHistorySnapshot(snapshot, { schemaVersion: 2 });
   assert.equal(validated.tasks[0].name, '人工修订后的方案');
   assert.equal(
     validated.decomposition.stages[1].output.tasks[0].name,
@@ -186,7 +252,7 @@ test('reports reference only current tasks and never expose UUID text or eight-c
 
 test('stored snapshots reject unknown schema versions and damaged JSON without partial data', () => {
   assert.throws(
-    () => decodeStoredSnapshot(stored(historySnapshot(), 3)),
+    () => decodeStoredSnapshot(stored(historySnapshot(), 4)),
     (error) => error.code === 'HISTORY_DATA_INVALID' && error.status === 500,
   );
   const damaged = stored(historySnapshot(), 2);

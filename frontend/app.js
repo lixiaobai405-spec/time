@@ -1,7 +1,9 @@
 import {
   cancelActiveRequest,
+  cancelRequestChannel,
   deleteJson,
   getJson,
+  patchJson,
   postJson,
   putJson,
   setCsrfToken,
@@ -12,6 +14,7 @@ import {
   createUuid,
   invalidateAfterEntries,
   invalidateAfterTasks,
+  resetCoaching,
   resetState,
   resetWorkflow,
   state,
@@ -76,11 +79,16 @@ const ICONS = Object.freeze({
 });
 
 let operationId = 0;
+let historyReadId = 0;
 let dailyLoadId = 0;
 let dailyChangeVersion = 0;
 let dailySaveTimer = null;
 let dailySaveInFlight = false;
 let dailySaveQueued = false;
+const COACHING_REQUEST_MAX_BYTES = 64 * 1024;
+const historyWriteChains = new Map();
+const historySavePromises = new Map();
+const historyPatchPromises = new Map();
 const app = () => document.getElementById('app');
 const topbar = () => document.getElementById('topbar');
 const modalHost = () => document.getElementById('modalHost');
@@ -442,12 +450,35 @@ function taskEditRow(task) {
   </div>`;
 }
 
+function coachingStatus() {
+  const { status, historySyncStatus } = state.coaching;
+  if (status === 'idle') return '';
+  const messages = {
+    running: '教练诊断正在后台生成，不影响任务确认和后续步骤。',
+    succeeded: historySyncStatus === 'failed'
+      ? '教练诊断已完成，但同步到历史失败。'
+      : '教练诊断已完成，并已纳入拆解审计。',
+    failed: '教练诊断暂时失败，已生成任务不受影响。',
+    timed_out: '教练诊断响应超时，已生成任务不受影响。',
+    cancelled: '教练诊断已取消，已生成任务不受影响。',
+    unavailable: '教练诊断请求内容过大，本次不可用；请修改输入后重新拆解。',
+  };
+  const retryable = ['failed', 'timed_out', 'cancelled'].includes(status);
+  const retryHistory = status === 'succeeded' && historySyncStatus === 'failed';
+  return `<div class="coaching-status ${['failed', 'timed_out', 'cancelled', 'unavailable'].includes(status) || retryHistory ? 'failed' : ''}" data-coaching-status="${status}">
+    <span>${escapeHtml(messages[status] || '')}</span>
+    ${retryable ? '<button class="btn btn-ghost btn-sm" data-action="coaching-retry">重试教练诊断</button>' : ''}
+    ${retryHistory ? '<button class="btn btn-ghost btn-sm" data-action="coaching-history-retry">重试历史同步</button>' : ''}
+  </div>`;
+}
+
 function stepTwoBody() {
   const needFix = state.smart?.summary?.needFix || 0;
   return `${panelHead('节点 ② · AI动作 + 你确认', 'AI 拆解确认', 'AI 已把四栏文字拆成结构化任务。补齐标红字段，并由后端执行正式 SMART 校验。')}
     <div class="panel-body"><div class="aibar"><span class="sp">AI</span><div style="flex:1">任务需具体、具有可解析工时和明确轻重缓急；后端不替你虚构缺失条件。</div>
       <button class="btn btn-ghost btn-sm" data-action="smart-check" ${state.pending ? 'disabled' : ''}>${state.pending === 'smart' ? '<span class="mini-spin"></span>校验中…' : 'SMART 校验'}</button>
       <button class="btn btn-ghost btn-sm" data-action="open-add-task">+ 手动添加任务</button></div>
+      <div id="coaching-status-host">${coachingStatus()}</div>
       <div class="tgrid"><div class="trow hd g-edit"><div>任务</div><div>类别</div><div>截止日期</div><div>预估时长（小时）</div><div>责任人</div><div>轻重缓急</div><div></div></div>
         ${state.tasks.length ? state.tasks.map(taskEditRow).join('') : '<div class="trow"><div style="color:var(--muted);font-size:12px">暂无任务，请返回上一步重新填写。</div></div>'}
       </div>
@@ -503,7 +534,13 @@ function reportStatus() {
   const messages = {
     idle: '报告生成后将自动保存到账号历史。', saving: '正在保存历史…', saved: '历史已保存。', failed: '报告已生成，但历史保存失败。',
   };
-  return `<div class="history-save-status ${state.historySave.status === 'failed' ? 'failed' : ''}"><span>${messages[state.historySave.status] || escapeHtml(state.historySave.message)}</span>${state.historySave.status === 'failed' ? '<button class="btn btn-ghost btn-sm" data-action="history-retry">重试保存</button>' : ''}</div>`;
+  const coachingSyncFailed = state.coaching.status === 'succeeded'
+    && state.coaching.historySyncStatus === 'failed';
+  const message = coachingSyncFailed
+    ? '报告已保存，但教练诊断同步失败。'
+    : messages[state.historySave.status] || state.historySave.message;
+  const failed = state.historySave.status === 'failed' || coachingSyncFailed;
+  return `<div class="history-save-status ${failed ? 'failed' : ''}"><span>${escapeHtml(message)}</span>${state.historySave.status === 'failed' ? '<button class="btn btn-ghost btn-sm" data-action="history-retry">重试保存</button>' : ''}${coachingSyncFailed ? '<button class="btn btn-ghost btn-sm" data-action="coaching-history-retry">重试诊断同步</button>' : ''}</div>`;
 }
 
 function stepFiveBody() {
@@ -657,11 +694,19 @@ function historyDecompositionSection(decomposition) {
   if (!decomposition) {
     return '<section class="history-section"><h2>拆解审计</h2><div class="history-empty">该历史版本未保存拆解中间产物。</div></section>';
   }
-  const coachStage = decomposition.stages?.find(stage => stage.name === 'coach-analysis');
-  const taskStage = decomposition.stages?.find(stage => stage.name === 'task-generation');
-  const evidenceCount = coachStage?.output?.evidence?.length || 0;
+  const evidenceStage = decomposition.stages?.find(stage => (
+    stage.name === 'evidence-task-generation' || stage.name === 'coach-analysis'
+  ));
+  const taskStage = decomposition.stages?.find(stage => (
+    stage.name === 'evidence-task-generation' || stage.name === 'task-generation'
+  ));
+  const coachingStage = decomposition.stages?.find(stage => (
+    stage.name === 'coaching-analysis' || stage.name === 'coach-analysis'
+  ));
+  const evidenceCount = evidenceStage?.output?.evidence?.length || 0;
   const candidateCount = taskStage?.output?.tasks?.length || 0;
-  return `<section class="history-section"><h2>拆解审计</h2><p>流水线：${escapeHtml(decomposition.pipelineVersion)} · 业务日期：${escapeHtml(decomposition.businessDate)} · 证据 ${evidenceCount} 条 · 候选任务 ${candidateCount} 条</p>
+  const coachingText = coachingStage ? '教练诊断已保存' : '教练诊断未保存';
+  return `<section class="history-section"><h2>拆解审计</h2><p>流水线：${escapeHtml(decomposition.pipelineVersion)} · 业务日期：${escapeHtml(decomposition.businessDate)} · 证据 ${evidenceCount} 条 · 候选任务 ${candidateCount} 条 · ${coachingText}</p>
     <details class="history-audit"><summary>查看中间产物 JSON</summary><pre>${escapeHtml(JSON.stringify(decomposition, null, 2))}</pre></details></section>`;
 }
 
@@ -975,18 +1020,161 @@ function handleWorkflowError(error, id) {
   toast(error.message || '请求失败，请重试。');
 }
 
+function serializedBytes(value) {
+  return new TextEncoder().encode(JSON.stringify(value)).byteLength;
+}
+
+function recordTaskVisible(startedAt, decompositionId) {
+  const metrics = globalThis.__TIME_MANAGEMENT_PERFORMANCE__ ||= [];
+  metrics.push({
+    name: 'task-visible',
+    decompositionId,
+    durationMs: Math.max(0, performance.now() - startedAt),
+  });
+  if (metrics.length > 20) metrics.splice(0, metrics.length - 20);
+}
+
+function coachingRequestPayload() {
+  const taskStage = state.decomposition?.stages?.find(
+    stage => stage.name === 'evidence-task-generation',
+  );
+  if (!taskStage || !Array.isArray(taskStage.output?.evidence)) return null;
+  return {
+    decompositionId: state.coaching.decompositionId,
+    attemptId: state.coaching.attemptId,
+    businessDate: state.decomposition.businessDate,
+    entries: { ...state.entries },
+    evidence: taskStage.output.evidence,
+  };
+}
+
+function isCurrentCoaching({ decompositionId, attemptId, requestSequence }) {
+  return state.decomposition?.decompositionId === decompositionId
+    && state.coaching.decompositionId === decompositionId
+    && state.coaching.attemptId === attemptId
+    && state.coaching.requestSequence === requestSequence;
+}
+
+function mergeCoachingStage(stage) {
+  const stages = state.decomposition.stages.filter(
+    item => item.name !== 'coaching-analysis',
+  );
+  state.decomposition = { ...state.decomposition, stages: [...stages, stage] };
+}
+
+function renderCoachingStatus() {
+  if (state.screen !== 'workspace') return;
+  if (state.step === 2) {
+    const host = document.getElementById('coaching-status-host');
+    if (host) host.innerHTML = coachingStatus();
+    return;
+  }
+  if (state.step === 5) render();
+}
+
+async function requestCoachingAnalysis() {
+  const payload = coachingRequestPayload();
+  const identity = {
+    decompositionId: state.coaching.decompositionId,
+    attemptId: state.coaching.attemptId,
+    requestSequence: state.coaching.requestSequence,
+  };
+  if (!payload || serializedBytes(payload) > COACHING_REQUEST_MAX_BYTES) {
+    if (!isCurrentCoaching(identity)) return;
+    state.coaching.status = 'unavailable';
+    state.coaching.error = {
+      code: 'COACHING_PAYLOAD_TOO_LARGE',
+      message: '教练诊断请求内容过大。',
+    };
+    renderCoachingStatus();
+    return;
+  }
+
+  try {
+    const result = await postJson(
+      '/api/time-management/tasks/coaching-analysis',
+      payload,
+      { channel: 'coaching', cancelPrevious: true },
+    );
+    if (!isCurrentCoaching(identity)) return;
+    if (
+      result.decompositionId !== identity.decompositionId
+      || result.attemptId !== identity.attemptId
+      || !result.analysisId
+      || result.stage?.name !== 'coaching-analysis'
+      || result.stage.analysisId !== result.analysisId
+    ) {
+      throw Object.assign(new Error('教练诊断响应格式不正确。'), {
+        code: 'COACHING_RESPONSE_INVALID',
+      });
+    }
+    mergeCoachingStage(result.stage);
+    state.coaching = {
+      ...state.coaching,
+      status: 'succeeded',
+      analysisId: result.analysisId,
+      stage: result.stage,
+      error: null,
+      historySyncStatus: 'pending',
+    };
+    renderCoachingStatus();
+    void syncCurrentCoachingToHistory();
+  } catch (error) {
+    if (!isCurrentCoaching(identity)) return;
+    const unavailable = error.status === 413
+      || ['COACHING_PAYLOAD_TOO_LARGE', 'PAYLOAD_TOO_LARGE'].includes(error.code);
+    state.coaching.status = unavailable
+      ? 'unavailable'
+      : error.code === 'MODEL_TIMEOUT'
+        ? 'timed_out'
+        : error.code === 'REQUEST_CANCELLED'
+          ? 'cancelled'
+          : 'failed';
+    state.coaching.error = error;
+    renderCoachingStatus();
+  }
+}
+
+function retryCoachingAnalysis() {
+  if (!['failed', 'timed_out', 'cancelled'].includes(state.coaching.status)) return;
+  cancelRequestChannel('coaching');
+  state.coaching = {
+    ...state.coaching,
+    status: 'running',
+    requestSequence: state.coaching.requestSequence + 1,
+    error: null,
+  };
+  renderCoachingStatus();
+  void requestCoachingAnalysis();
+}
+
 async function decomposeTasks() {
   if (state.pending) return;
+  cancelRequestChannel('coaching');
+  resetCoaching();
   const id = ++operationId;
+  const startedAt = performance.now();
+  const entries = { ...state.entries };
   state.pending = 'decompose';
-  renderProcessing('正在进行证据化拆解', '先生成可追溯诊断中间产物，再据此生成任务并由服务端校验', ['校验四栏输入', '提取原文证据并形成教练诊断', '根据证据拆分独立任务', '核验证据覆盖、状态与任务来源']);
+  renderProcessing('正在拆解可执行任务', '服务端一次生成证据与任务，校验完成后立即展示', ['校验四栏输入', '生成逐行证据与任务', '核验证据覆盖和任务来源', '标准化任务并完成 SMART 初检']);
   try {
-    const intake = await postJson('/api/time-management/intake/check', { entries: state.entries });
+    const result = await postJson('/api/time-management/tasks/decompose', { entries });
     if (!isCurrent(id)) return;
-    const result = await postJson('/api/time-management/tasks/decompose', { entries: state.entries });
-    if (!isCurrent(id)) return;
+    const taskStage = result.decomposition?.stages?.find(
+      stage => stage.name === 'evidence-task-generation',
+    );
+    if (
+      !result.decomposition?.decompositionId
+      || !result.decomposition.businessDate
+      || !Array.isArray(taskStage?.output?.evidence)
+      || !Array.isArray(result.tasks)
+    ) {
+      throw Object.assign(new Error('任务拆解响应格式不正确。'), {
+        code: 'DECOMPOSITION_RESPONSE_INVALID',
+      });
+    }
     state.pending = null;
-    state.intake = intake;
+    state.intake = result.intake;
     state.decomposition = result.decomposition;
     state.tasks = result.tasks.map(normalizeTaskForUi);
     state.smart = result.smart;
@@ -997,7 +1185,19 @@ async function decomposeTasks() {
     state.step = 2;
     state.maxStep = 2;
     state.clientRunId = createUuid();
+    state.coaching = {
+      status: 'running',
+      decompositionId: result.decomposition.decompositionId,
+      attemptId: createUuid(),
+      requestSequence: 1,
+      analysisId: null,
+      stage: null,
+      error: null,
+      historySyncStatus: 'idle',
+    };
     renderAtTop();
+    recordTaskVisible(startedAt, result.decomposition.decompositionId);
+    void requestCoachingAnalysis();
     toast(`已拆解出 ${result.tasks.length} 条任务`);
   } catch (error) {
     handleWorkflowError(error, id);
@@ -1265,25 +1465,147 @@ function renderCurrentHistoryStatus() {
   if (state.screen === 'workspace' && state.step === 5) render();
 }
 
-async function saveCurrentHistory() {
-  if (!state.report || !state.matrix || !state.distribution || state.historySave.status === 'saving') return;
-  const clientRunId = state.clientRunId;
-  state.historySave = { status: 'saving', id: state.historySave.id, message: '' };
-  renderCurrentHistoryStatus();
-  try {
-    const item = await postJson('/api/time-management/history', currentHistorySnapshot());
-    if (state.clientRunId !== clientRunId) return;
-    state.historySave = { status: 'saved', id: item.id, message: '' };
-    renderCurrentHistoryStatus();
-  } catch {
-    if (state.clientRunId !== clientRunId) return;
-    state.historySave = { status: 'failed', id: null, message: '报告已生成，但历史保存失败。' };
-    renderCurrentHistoryStatus();
+function historyWriteKey(clientRunId, decompositionId) {
+  return `${clientRunId}:${decompositionId || 'none'}`;
+}
+
+function enqueueHistoryWrite(key, operation) {
+  const previous = historyWriteChains.get(key) || Promise.resolve();
+  const current = previous.catch(() => undefined).then(operation);
+  historyWriteChains.set(key, current);
+  const cleanup = () => {
+    if (historyWriteChains.get(key) === current) historyWriteChains.delete(key);
+  };
+  current.then(cleanup, cleanup);
+  return current;
+}
+
+function syncCurrentCoachingToHistory() {
+  const save = state.historySave;
+  const coaching = state.coaching;
+  if (
+    save.status !== 'saved'
+    || !save.id
+    || coaching.status !== 'succeeded'
+    || !coaching.stage
+    || save.clientRunId !== state.clientRunId
+    || save.decompositionId !== coaching.decompositionId
+    || state.decomposition?.decompositionId !== coaching.decompositionId
+  ) {
+    return Promise.resolve(null);
   }
+
+  const key = historyWriteKey(save.clientRunId, save.decompositionId);
+  const patchKey = `${key}:${coaching.analysisId}`;
+  const existing = historyPatchPromises.get(patchKey);
+  if (existing) return existing;
+
+  state.coaching.historySyncStatus = 'saving';
+  const identity = {
+    historyId: save.id,
+    clientRunId: save.clientRunId,
+    decompositionId: coaching.decompositionId,
+    analysisId: coaching.analysisId,
+  };
+  const promise = enqueueHistoryWrite(key, () => patchJson(
+    `/api/time-management/history/${encodeURIComponent(identity.historyId)}/coaching-analysis`,
+    {
+      decompositionId: identity.decompositionId,
+      analysisId: identity.analysisId,
+      coachingStage: coaching.stage,
+    },
+    { channel: 'history-write', cancelPrevious: false },
+  )).then((item) => {
+    if (
+      state.clientRunId === identity.clientRunId
+      && state.coaching.analysisId === identity.analysisId
+      && state.historySave.id === identity.historyId
+    ) {
+      state.coaching.historySyncStatus = 'succeeded';
+      renderCoachingStatus();
+    }
+    return item;
+  }).catch((error) => {
+    if (
+      state.clientRunId === identity.clientRunId
+      && state.coaching.analysisId === identity.analysisId
+      && state.historySave.id === identity.historyId
+    ) {
+      state.coaching.historySyncStatus = 'failed';
+      state.coaching.error = error;
+      renderCoachingStatus();
+    }
+    return null;
+  });
+  historyPatchPromises.set(patchKey, promise);
+  promise.then(() => {
+    if (historyPatchPromises.get(patchKey) === promise) {
+      historyPatchPromises.delete(patchKey);
+    }
+  });
+  return promise;
+}
+
+function retryCurrentCoachingHistory() {
+  if (state.coaching.historySyncStatus !== 'failed') return;
+  void syncCurrentCoachingToHistory();
+  renderCoachingStatus();
+}
+
+function saveCurrentHistory() {
+  if (!state.report || !state.matrix || !state.distribution) return Promise.resolve(null);
+  const snapshot = currentHistorySnapshot();
+  const decompositionId = snapshot.decomposition?.decompositionId || null;
+  const key = historyWriteKey(snapshot.clientRunId, decompositionId);
+  const existing = historySavePromises.get(key);
+  if (existing) return existing;
+
+  state.historySave = {
+    status: 'saving',
+    id: state.historySave.id,
+    clientRunId: snapshot.clientRunId,
+    decompositionId,
+    message: '',
+  };
+  renderCurrentHistoryStatus();
+  const promise = enqueueHistoryWrite(key, () => postJson(
+    '/api/time-management/history',
+    snapshot,
+    { channel: 'history-write', cancelPrevious: false },
+  )).then((item) => {
+    if (state.clientRunId !== snapshot.clientRunId) return item;
+    state.historySave = {
+      status: 'saved',
+      id: item.id,
+      clientRunId: snapshot.clientRunId,
+      decompositionId,
+      message: '',
+    };
+    renderCurrentHistoryStatus();
+    void syncCurrentCoachingToHistory();
+    return item;
+  }).catch(() => {
+    if (state.clientRunId !== snapshot.clientRunId) return null;
+    state.historySave = {
+      status: 'failed',
+      id: null,
+      clientRunId: snapshot.clientRunId,
+      decompositionId,
+      message: '报告已生成，但历史保存失败。',
+    };
+    renderCurrentHistoryStatus();
+    return null;
+  });
+  historySavePromises.set(key, promise);
+  promise.then(() => {
+    if (historySavePromises.get(key) === promise) historySavePromises.delete(key);
+  });
+  return promise;
 }
 
 async function loadHistory({ append = false } = {}) {
   if (state.pending === 'history-list') return;
+  const readId = ++historyReadId;
   const cursor = append ? state.historyCursor : null;
   if (!append) {
     state.historyItems = [];
@@ -1295,30 +1617,41 @@ async function loadHistory({ append = false } = {}) {
   try {
     const query = new URLSearchParams({ limit: '20' });
     if (cursor) query.set('cursor', cursor);
-    const result = await getJson(`/api/time-management/history?${query}`);
+    const result = await getJson(`/api/time-management/history?${query}`, {
+      channel: 'history-read',
+      cancelPrevious: true,
+    });
+    if (readId !== historyReadId || state.screen !== 'history') return;
     state.historyItems = append ? [...state.historyItems, ...result.items] : result.items;
     state.historyCursor = result.nextCursor;
     state.pending = null;
-    if (state.screen === 'history') render();
+    render();
   } catch (error) {
+    if (readId !== historyReadId || state.screen !== 'history') return;
     state.pending = null;
-    state.error = error;
-    if (state.screen === 'history') render();
+    if (error.code !== 'REQUEST_CANCELLED') state.error = error;
+    render();
   }
 }
 
 async function openHistoryDetail(id) {
   if (state.pending) return;
+  const readId = ++historyReadId;
   state.pending = 'history-detail';
   try {
-    state.historyDetail = await getJson(`/api/time-management/history/${encodeURIComponent(id)}`);
+    const item = await getJson(
+      `/api/time-management/history/${encodeURIComponent(id)}`,
+      { channel: 'history-read', cancelPrevious: true },
+    );
+    if (readId !== historyReadId || state.screen !== 'history') return;
+    state.historyDetail = item;
     state.pending = null;
     state.screen = 'history-detail';
     renderAtTop();
   } catch (error) {
+    if (readId !== historyReadId || state.screen !== 'history') return;
     state.pending = null;
-    state.error = error;
-    state.screen = 'history';
+    if (error.code !== 'REQUEST_CANCELLED') state.error = error;
     render();
   }
 }
@@ -1328,7 +1661,10 @@ async function deleteHistory(id) {
   if (state.pending) return;
   state.pending = 'history-delete';
   try {
-    await deleteJson(`/api/time-management/history/${encodeURIComponent(id)}`);
+    await deleteJson(
+      `/api/time-management/history/${encodeURIComponent(id)}`,
+      { channel: 'history-write', cancelPrevious: false },
+    );
     state.historyItems = state.historyItems.filter(item => item.id !== id);
     if (state.historyDetail?.id === id) {
       state.historyDetail = null;
@@ -1348,6 +1684,10 @@ function navigate(screen) {
   if (!confirmDailyLeave(screen)) return;
   if (screen !== 'daily') dailyLoadId += 1;
   if (screen !== 'home') homeDailyLoadId += 1;
+  if (!['history', 'history-detail'].includes(screen)) {
+    historyReadId += 1;
+    cancelRequestChannel('history-read');
+  }
   cancelPending();
   state.error = null;
   if (screen === 'workspace') {
@@ -1482,6 +1822,9 @@ async function logout() {
   if (!confirmDailyLeave('login')) return;
   if (state.pending) return;
   cancelPending();
+  cancelRequestChannel('coaching');
+  cancelRequestChannel('history-read');
+  cancelRequestChannel('history-write');
   state.pending = 'auth';
   try {
     await postJson('/api/auth/logout');
@@ -1517,6 +1860,7 @@ document.addEventListener('input', event => {
   }
   const key = event.target.dataset.entry;
   if (!key) return;
+  cancelRequestChannel('coaching');
   state.entries[key] = event.target.value;
   invalidateAfterEntries();
 });
@@ -1555,6 +1899,8 @@ document.addEventListener('click', event => {
   else if (action === 'back-step') navigateStep(Math.max(1, state.step - 1));
   else if (action === 'decompose') decomposeTasks();
   else if (action === 'smart-check') checkSmart();
+  else if (action === 'coaching-retry') retryCoachingAnalysis();
+  else if (action === 'coaching-history-retry') retryCurrentCoachingHistory();
   else if (action === 'diagnose') diagnoseDistribution();
   else if (action === 'classify') classifyTasks();
   else if (action === 'generate-report') generateReport();

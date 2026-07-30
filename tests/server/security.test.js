@@ -127,6 +127,30 @@ test('65KB 请求体返回安全 413 JSON', async () => {
   }
 });
 
+test('65KB coaching 请求返回专用安全错误', async () => {
+  const app = createApp({
+    authBoundary: createTestAuthBoundary(),
+    modelClient: { completeJson: async () => passingReview() },
+  });
+  const server = await listen(app);
+  try {
+    const response = await fetch(
+      `http://127.0.0.1:${server.address().port}/api/time-management/tasks/coaching-analysis`,
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ padding: 'x'.repeat(65 * 1024) }),
+      },
+    );
+    const payload = await response.json();
+    assert.equal(response.status, 413);
+    assert.equal(payload.error.code, 'COACHING_PAYLOAD_TOO_LARGE');
+    assert.doesNotMatch(JSON.stringify(payload), /stack|x{100}/i);
+  } finally {
+    await close(server);
+  }
+});
+
 test('额外字段在模型调用前返回 INPUT_INVALID', async () => {
   let calls = 0;
   const app = createApp({

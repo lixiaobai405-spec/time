@@ -3,6 +3,7 @@ const test = require('node:test');
 
 const { createHistoryRepository } = require('../../server/repositories/history-repository');
 const { createUserRepository } = require('../../server/repositories/user-repository');
+const { taskFirstDecompositionFixture } = require('../helpers/decomposition-fixture');
 const { DISTRIBUTION_FIXTURE, historySnapshot } = require('../helpers/history-fixture');
 const { createTestDatabase } = require('../helpers/test-database');
 
@@ -43,11 +44,88 @@ test('save is idempotent per user and clientRunId without overwriting the origin
   assert.equal((await database.get('SELECT COUNT(*) AS count FROM time_management_runs')).count, 1);
 });
 
+test('appendCoaching is transactional, idempotent, and never overwrites a different result', async (t) => {
+  const { database } = await createTestDatabase(t);
+  await seedUser(database, USER_A, 'History_A');
+  await seedUser(database, USER_B, 'History_B');
+  let currentTime = '2026-07-21T08:00:00.000Z';
+  const repository = createHistoryRepository({
+    database,
+    now: () => currentTime,
+    randomUUID: () => '10000000-0000-4000-8000-000000000002',
+  });
+  const base = historySnapshot({
+    goals: { 昨天: '', 今天: '今天18:00前提交方案', 明天: '', 后天: '' },
+  });
+  base.decomposition = taskFirstDecompositionFixture(base);
+  const saved = await repository.save({ userId: USER_A, snapshot: base });
+  const before = await database.get(
+    'SELECT tasks_json, matrix_json, report_json, distribution_json FROM time_management_runs WHERE id = ?',
+    [saved.item.id],
+  );
+  const coachingStage = taskFirstDecompositionFixture(
+    base,
+    { withCoaching: true },
+  ).stages[1];
+
+  currentTime = '2026-07-21T09:00:00.000Z';
+  const first = await repository.appendCoaching({
+    userId: USER_A,
+    id: saved.item.id,
+    decompositionId: base.decomposition.decompositionId,
+    analysisId: coachingStage.analysisId,
+    coachingStage,
+  });
+  assert.equal(first.updated, true);
+  assert.equal(first.item.updatedAt, currentTime);
+  assert.equal(first.item.decomposition.stages.length, 2);
+
+  currentTime = '2026-07-21T10:00:00.000Z';
+  const retry = await repository.appendCoaching({
+    userId: USER_A,
+    id: saved.item.id,
+    decompositionId: base.decomposition.decompositionId,
+    analysisId: coachingStage.analysisId,
+    coachingStage,
+  });
+  assert.equal(retry.updated, false);
+  assert.equal(retry.item.updatedAt, '2026-07-21T09:00:00.000Z');
+
+  const conflictingStage = {
+    ...coachingStage,
+    analysisId: '55555555-5555-4555-8555-555555555555',
+  };
+  await assert.rejects(
+    repository.appendCoaching({
+      userId: USER_A,
+      id: saved.item.id,
+      decompositionId: base.decomposition.decompositionId,
+      analysisId: conflictingStage.analysisId,
+      coachingStage: conflictingStage,
+    }),
+    error => error.code === 'HISTORY_COACHING_CONFLICT' && error.status === 409,
+  );
+  assert.equal(await repository.appendCoaching({
+    userId: USER_B,
+    id: saved.item.id,
+    decompositionId: base.decomposition.decompositionId,
+    analysisId: coachingStage.analysisId,
+    coachingStage,
+  }), null);
+
+  const after = await database.get(
+    'SELECT tasks_json, matrix_json, report_json, distribution_json FROM time_management_runs WHERE id = ?',
+    [saved.item.id],
+  );
+  assert.deepEqual(after, before);
+});
+
 test('all repository operations require a server-supplied userId', async (t) => {
   const { database } = await createTestDatabase(t);
   const repository = createHistoryRepository({ database });
   const calls = [
     () => repository.save({ snapshot: historySnapshot() }),
+    () => repository.appendCoaching({}),
     () => repository.list({}),
     () => repository.listTasksCreatedBetween({
       startUtc: '2026-07-22T16:00:00.000Z',
@@ -184,7 +262,7 @@ test('details reject unknown schema versions and damaged JSON with a stable safe
   });
   const saved = await repository.save({ userId: USER_A, snapshot: historySnapshot() });
 
-  await database.run('UPDATE time_management_runs SET schema_version = 3 WHERE id = ?', [saved.item.id]);
+  await database.run('UPDATE time_management_runs SET schema_version = 4 WHERE id = ?', [saved.item.id]);
   await assert.rejects(
     repository.getById({ userId: USER_A, id: saved.item.id }),
     (error) => error.code === 'HISTORY_DATA_INVALID'
@@ -309,7 +387,7 @@ test('history task source open lower bound requires endUtc and rejects invalid r
   );
 });
 
-test('new history saves schema_version 2 with distribution_json', async (t) => {
+test('new history saves schema_version 3 with distribution_json', async (t) => {
   const { database } = await createTestDatabase(t);
   await seedUser(database, USER_A, 'History_Dist');
   const repository = createHistoryRepository({
@@ -325,12 +403,12 @@ test('new history saves schema_version 2 with distribution_json', async (t) => {
     'SELECT schema_version, distribution_json FROM time_management_runs WHERE id = ?',
     [saved.item.id],
   );
-  assert.equal(row.schema_version, 2);
+  assert.equal(row.schema_version, 3);
   const parsed = JSON.parse(row.distribution_json);
   assert.deepEqual(parsed, DISTRIBUTION_FIXTURE);
 });
 
-test('getById returns full distribution for Schema 2 rows', async (t) => {
+test('getById returns full distribution for current rows', async (t) => {
   const { database } = await createTestDatabase(t);
   await seedUser(database, USER_A, 'History_Detail');
   const repository = createHistoryRepository({

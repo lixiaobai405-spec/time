@@ -2,8 +2,12 @@ const Ajv = require('ajv');
 
 const {
   COACH_RESPONSE_SCHEMA,
+  COACHING_RESPONSE_SCHEMA,
+  EVIDENCE_TASK_RESPONSE_SCHEMA,
   TASK_RESPONSE_SCHEMA,
   validateCoachResponse,
+  validateCoachingResponse,
+  validateEvidenceTaskResponse,
   validateTaskResponse,
   visitClaims,
 } = require('../workflows/decomposition-contracts');
@@ -24,8 +28,9 @@ const {
   normalizeOptionalOwner,
   quadrantFor,
 } = require('../contracts/time-management');
+const { splitEntries } = require('../workflows/check-intake');
 
-const HISTORY_SCHEMA_VERSION = 2;
+const HISTORY_SCHEMA_VERSION = 3;
 const UUID_PATTERN = '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89aAbB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$';
 const ajv = new Ajv({ allErrors: true, strict: true });
 
@@ -101,7 +106,7 @@ const distributionSchema = {
 
 const validateDistribution = ajv.compile(distributionSchema);
 
-const decompositionSchema = {
+const decompositionSchemaV2 = {
   type: 'object',
   additionalProperties: false,
   required: ['pipelineVersion', 'businessDate', 'stages', 'taskEvidence'],
@@ -154,7 +159,72 @@ const decompositionSchema = {
   },
 };
 
-const snapshotSchema = {
+const stagePromptSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['id', 'version', 'sha256'],
+  properties: {
+    id: { type: 'string', minLength: 1, maxLength: 100 },
+    version: { type: 'string', minLength: 1, maxLength: 40 },
+    sha256: { type: 'string', pattern: '^[0-9a-f]{64}$' },
+  },
+};
+const stageMetricsProperties = {
+  status: { const: 'succeeded' },
+  prompt: stagePromptSchema,
+  attempts: { type: 'integer', minimum: 1, maximum: 3 },
+  durationMs: { type: 'integer', minimum: 0 },
+  responseFormat: { enum: ['json_schema', 'json_object'] },
+  fallbackUsed: { type: 'boolean' },
+};
+const evidenceTaskStageSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: [
+    'name', 'status', 'prompt', 'attempts', 'durationMs',
+    'responseFormat', 'fallbackUsed', 'output',
+  ],
+  properties: {
+    name: { const: 'evidence-task-generation' },
+    ...stageMetricsProperties,
+    output: EVIDENCE_TASK_RESPONSE_SCHEMA,
+  },
+};
+const coachingStageSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: [
+    'name', 'analysisId', 'status', 'prompt', 'attempts', 'durationMs',
+    'responseFormat', 'fallbackUsed', 'output',
+  ],
+  properties: {
+    name: { const: 'coaching-analysis' },
+    analysisId: { type: 'string', pattern: UUID_PATTERN },
+    ...stageMetricsProperties,
+    output: COACHING_RESPONSE_SCHEMA,
+  },
+};
+const decompositionSchemaV3 = {
+  type: 'object',
+  additionalProperties: false,
+  required: [
+    'pipelineVersion', 'decompositionId', 'businessDate', 'stages', 'taskEvidence',
+  ],
+  properties: {
+    pipelineVersion: { const: 'task-first-v2' },
+    decompositionId: { type: 'string', pattern: UUID_PATTERN },
+    businessDate: { type: 'string', pattern: '^\\d{4}-\\d{2}-\\d{2}$' },
+    stages: {
+      type: 'array',
+      minItems: 1,
+      maxItems: 2,
+      items: { anyOf: [evidenceTaskStageSchema, coachingStageSchema] },
+    },
+    taskEvidence: decompositionSchemaV2.properties.taskEvidence,
+  },
+};
+
+const snapshotSchemaV2 = {
   type: 'object',
   additionalProperties: false,
   required: ['clientRunId', 'title', 'goals', 'tasks', 'matrix', 'report'],
@@ -170,7 +240,7 @@ const snapshotSchema = {
         maxLength: TEXT_LIMITS.goal,
       }])),
     },
-    decomposition: { anyOf: [decompositionSchema, { type: 'null' }] },
+    decomposition: { anyOf: [decompositionSchemaV2, { type: 'null' }] },
     tasks: {
       type: 'array',
       maxItems: TASK_LIMIT,
@@ -295,7 +365,15 @@ const snapshotSchema = {
   },
 };
 
-const validateShape = ajv.compile(snapshotSchema);
+const snapshotSchemaV3 = {
+  ...snapshotSchemaV2,
+  properties: {
+    ...snapshotSchemaV2.properties,
+    decomposition: { anyOf: [decompositionSchemaV3, { type: 'null' }] },
+  },
+};
+const validateShapeV2 = ajv.compile(snapshotSchemaV2);
+const validateShapeV3 = ajv.compile(snapshotSchemaV3);
 const QUADRANT_RULES = Object.freeze({
   第一象限: Object.freeze({ priority: 1, action: '立即做' }),
   第二象限: Object.freeze({ priority: 2, action: '计划做' }),
@@ -303,7 +381,7 @@ const QUADRANT_RULES = Object.freeze({
   第四象限: Object.freeze({ priority: 4, action: '减少做' }),
 });
 
-const SUPPORTED_READ_VERSIONS = Object.freeze(new Set([1, 2]));
+const SUPPORTED_READ_VERSIONS = Object.freeze(new Set([1, 2, 3]));
 const PERCENT_TOLERANCE = 0.1;
 const MINUTES_TOLERANCE = 1;
 
@@ -400,7 +478,7 @@ function assertDistributionSemantics(distribution, tasks) {
   if (containsModelArtifacts(distribution.recommendations)) throw inputError();
 }
 
-function assertDecompositionSemantics(decomposition, tasks, goals) {
+function assertDecompositionSemanticsV2(decomposition, tasks, goals) {
   if (decomposition == null) return;
   const stageByName = new Map();
   for (const stage of decomposition.stages) {
@@ -485,6 +563,115 @@ function assertDecompositionSemantics(decomposition, tasks, goals) {
   if (finalTaskIds.size !== tasks.length) throw inputError();
 }
 
+function assertDecompositionSemanticsV3(decomposition, tasks, goals) {
+  if (decomposition == null) return;
+  const stageByName = new Map();
+  for (const stage of decomposition.stages) {
+    if (stageByName.has(stage.name)) throw inputError();
+    stageByName.set(stage.name, stage);
+  }
+  const taskStage = stageByName.get('evidence-task-generation');
+  const coachingStage = stageByName.get('coaching-analysis');
+  if (
+    !taskStage
+    || stageByName.size !== (coachingStage ? 2 : 1)
+    || taskStage.prompt.id !== 'decomposition.evidence-task-generation'
+    || taskStage.prompt.version !== '2.0.0'
+    || !validateEvidenceTaskResponse(taskStage.output)
+    || (coachingStage && (
+      coachingStage.prompt.id !== 'decomposition.coaching-analysis'
+      || coachingStage.prompt.version !== '2.0.0'
+      || !validateCoachingResponse(coachingStage.output)
+    ))
+  ) {
+    throw inputError();
+  }
+
+  const lines = Object.fromEntries(
+    GOAL_KEYS.map(key => [key, splitEntries(goals[key])]),
+  );
+  const evidenceById = new Map();
+  const coveredLines = new Set();
+  for (const evidence of taskStage.output.evidence) {
+    const sourceLine = lines[evidence.dimension]?.[evidence.sourceLineIndex];
+    if (
+      evidenceById.has(evidence.id)
+      || !sourceLine
+      || !sourceLine.includes(evidence.quote)
+      || (evidence.owner !== '待确认' && !sourceLine.includes(evidence.owner))
+      || (evidence.due !== '待确认' && !sourceLine.includes(evidence.due))
+    ) {
+      throw inputError();
+    }
+    evidenceById.set(evidence.id, evidence);
+    coveredLines.add(`${evidence.dimension}:${evidence.sourceLineIndex}`);
+  }
+  for (const dimension of GOAL_KEYS) {
+    for (const index of lines[dimension].keys()) {
+      if (!coveredLines.has(`${dimension}:${index}`)) throw inputError();
+    }
+  }
+
+  if (coachingStage) {
+    visitClaims(coachingStage.output.coachingAnalysis, claim => {
+      if (
+        new Set(claim.evidenceIds).size !== claim.evidenceIds.length
+        || claim.evidenceIds.some(id => !evidenceById.has(id))
+        || (claim.evidenceIds.length === 0 && !claim.text.startsWith('证据不足'))
+      ) {
+        throw inputError();
+      }
+    });
+  }
+
+  const candidates = taskStage.output.tasks;
+  if (decomposition.taskEvidence.length !== candidates.length) throw inputError();
+  const sourceForDimension = {
+    昨天: '复盘',
+    今天: '今天',
+    明天: '短期目标',
+    后天: '中长期',
+  };
+  const primaryCoverage = new Set();
+  const linkedTaskIds = new Set();
+  for (let index = 0; index < candidates.length; index += 1) {
+    const candidate = candidates[index];
+    const link = decomposition.taskEvidence[index];
+    const referenced = candidate.evidenceIds.map(id => evidenceById.get(id));
+    const primary = referenced[0];
+    const sourceMatches = primary?.dimension === '今天'
+      ? ['今天', '临时'].includes(candidate.source)
+      : candidate.source === sourceForDimension[primary?.dimension];
+    if (
+      linkedTaskIds.has(link.taskId)
+      || candidate.status !== 'pending'
+      || candidate.evidenceIds.length === 0
+      || new Set(candidate.evidenceIds).size !== candidate.evidenceIds.length
+      || referenced.some(item => !item)
+      || referenced.some(item => ['completed', 'not_actionable'].includes(item.status))
+      || JSON.stringify(link.evidenceIds) !== JSON.stringify(candidate.evidenceIds)
+      || !sourceMatches
+      || (candidate.owner !== '待确认' && candidate.owner !== primary?.owner)
+      || (candidate.due !== '待确认' && candidate.due !== primary?.due)
+    ) {
+      throw inputError();
+    }
+    primaryCoverage.add(primary.id);
+    linkedTaskIds.add(link.taskId);
+  }
+  for (const evidence of evidenceById.values()) {
+    if (
+      ['planned', 'unfinished'].includes(evidence.status)
+      && !primaryCoverage.has(evidence.id)
+    ) {
+      throw inputError();
+    }
+  }
+
+  const finalTaskIds = new Set(tasks.map(task => task.id));
+  if (finalTaskIds.size !== tasks.length) throw inputError();
+}
+
 function assertSemantics(snapshot, schemaVersion = HISTORY_SCHEMA_VERSION) {
   if (!snapshot.title.trim()) throw inputError();
   const tasksById = new Map();
@@ -551,10 +738,15 @@ function assertSemantics(snapshot, schemaVersion = HISTORY_SCHEMA_VERSION) {
   ];
   if (visibleText.some((text) => containsTaskIdLeak(text, snapshot.tasks))) throw inputError();
 
-  if (schemaVersion === 2) {
+  if (schemaVersion >= 2) {
     if (!snapshot.distribution) throw inputError();
     assertDistributionSemantics(snapshot.distribution, snapshot.tasks);
-    assertDecompositionSemantics(snapshot.decomposition, snapshot.tasks, snapshot.goals);
+  }
+  if (schemaVersion === 2) {
+    assertDecompositionSemanticsV2(snapshot.decomposition, snapshot.tasks, snapshot.goals);
+  }
+  if (schemaVersion === 3) {
+    assertDecompositionSemanticsV3(snapshot.decomposition, snapshot.tasks, snapshot.goals);
   }
 }
 
@@ -570,6 +762,7 @@ function validateHistorySnapshot(value, { dueMode = 'read', schemaVersion = HIST
       }),
     }
     : value;
+  const validateShape = schemaVersion === 3 ? validateShapeV3 : validateShapeV2;
   if (!validateShape(normalized)) throw inputError();
   assertSemantics(normalized, schemaVersion);
   return JSON.parse(JSON.stringify(normalized));
@@ -602,7 +795,7 @@ function decodeStoredSnapshot(record) {
     if (typeof record.decompositionJson === 'string') {
       candidate.decomposition = JSON.parse(record.decompositionJson);
     }
-    return validateHistorySnapshot(candidate, { schemaVersion: 2 });
+    return validateHistorySnapshot(candidate, { schemaVersion: record.schemaVersion });
   } catch (error) {
     if (error?.code === 'INPUT_INVALID' || error?.code === 'HISTORY_DATA_INVALID') {
       throw error;

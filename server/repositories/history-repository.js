@@ -27,6 +27,22 @@ function requireUserId(userId) {
   return userId;
 }
 
+function inputInvalid() {
+  return Object.assign(new Error('历史补写格式不正确。'), {
+    code: 'INPUT_INVALID',
+    status: 400,
+    expose: true,
+  });
+}
+
+function coachingConflict() {
+  return Object.assign(new Error('教练诊断结果与已保存历史冲突。'), {
+    code: 'HISTORY_COACHING_CONFLICT',
+    status: 409,
+    expose: true,
+  });
+}
+
 function mapSummary(row) {
   return {
     id: row.id,
@@ -106,6 +122,80 @@ function createHistoryRepository({
           [ownerId, value.clientRunId],
         );
         return { created: inserted.changes === 1, item: mapDetail(row) };
+      });
+    },
+
+    async appendCoaching({
+      userId,
+      id,
+      decompositionId,
+      analysisId,
+      coachingStage,
+    } = {}) {
+      const ownerId = requireUserId(userId);
+      if (
+        typeof id !== 'string'
+        || !UUID.test(id)
+        || typeof decompositionId !== 'string'
+        || !UUID.test(decompositionId)
+        || typeof analysisId !== 'string'
+        || !UUID.test(analysisId)
+        || !coachingStage
+        || coachingStage.analysisId !== analysisId
+      ) {
+        throw inputInvalid();
+      }
+
+      return database.transaction(async transaction => {
+        const row = await transaction.get(
+          `SELECT ${DETAIL_COLUMNS}
+           FROM time_management_runs
+           WHERE id = ? AND user_id = ? AND schema_version = 3`,
+          [id, ownerId],
+        );
+        if (!row) return null;
+
+        const detail = mapDetail(row);
+        if (detail.decomposition?.decompositionId !== decompositionId) {
+          throw coachingConflict();
+        }
+        const existing = detail.decomposition.stages.find(
+          stage => stage.name === 'coaching-analysis',
+        );
+        if (existing) {
+          if (existing.analysisId !== analysisId) throw coachingConflict();
+          return { updated: false, item: detail };
+        }
+
+        const mergedDecomposition = {
+          ...detail.decomposition,
+          stages: [...detail.decomposition.stages, coachingStage],
+        };
+        const {
+          id: ignoredId,
+          schemaVersion: ignoredVersion,
+          createdAt: ignoredCreatedAt,
+          updatedAt: ignoredUpdatedAt,
+          ...snapshot
+        } = detail;
+        validateHistorySnapshot(
+          { ...snapshot, decomposition: mergedDecomposition },
+          { schemaVersion: 3 },
+        );
+        const timestamp = now();
+        await transaction.run(
+          `UPDATE time_management_runs
+           SET decomposition_json = ?, updated_at = ?
+           WHERE id = ? AND user_id = ? AND schema_version = 3`,
+          [JSON.stringify(mergedDecomposition), timestamp, id, ownerId],
+        );
+        const updated = await transaction.get(
+          `SELECT ${DETAIL_COLUMNS}
+           FROM time_management_runs
+           WHERE id = ? AND user_id = ?`,
+          [id, ownerId],
+        );
+        return { updated: true, item: mapDetail(updated) };
       });
     },
 

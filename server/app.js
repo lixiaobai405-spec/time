@@ -2,8 +2,9 @@ const express = require('express');
 const { randomUUID } = require('node:crypto');
 const path = require('node:path');
 
-const { notFound, problemHandler } = require('./http/problem');
+const { httpProblem, notFound, problemHandler } = require('./http/problem');
 const { createRequestLifecycle } = require('./http/request-lifecycle');
+const { HISTORY_SNAPSHOT_MAX_BYTES } = require('./history/limits');
 const { analyzeCoaching } = require('./workflows/analyze-coaching');
 const { checkGoals } = require('./workflows/check-goals');
 const { checkIntake } = require('./workflows/check-intake');
@@ -81,6 +82,35 @@ function requireMutationSecurity(authBoundary) {
   };
 }
 
+function createTimeManagementJsonParser() {
+  const standardParser = express.json({ limit: '64kb', strict: true });
+  const historyParser = express.json({
+    limit: HISTORY_SNAPSHOT_MAX_BYTES,
+    strict: true,
+  });
+  return (request, response, next) => {
+    if (['GET', 'HEAD', 'OPTIONS'].includes(request.method)) return next();
+    const pathname = new URL(request.originalUrl, 'http://localhost').pathname;
+    const parser = request.method === 'POST'
+      && /^\/api\/time-management\/history\/?$/.test(pathname)
+      ? historyParser
+      : standardParser;
+    return parser(request, response, (error) => {
+      if (
+        error?.type === 'entity.too.large'
+        && /^\/api\/time-management\/tasks\/coaching-analysis\/?$/.test(pathname)
+      ) {
+        return next(httpProblem(
+          'COACHING_PAYLOAD_TOO_LARGE',
+          '教练诊断请求内容过大。',
+          413,
+        ));
+      }
+      return next(error);
+    });
+  };
+}
+
 function createApp({
   modelClient,
   authBoundary,
@@ -142,12 +172,16 @@ function createApp({
   app.use('/api', createRequestLifecycle({
     modelTimeoutMs: config.modelTimeoutMs || 30_000,
   }));
-  app.use(express.json({ limit: '64kb', strict: true }));
   app.get('/api/health', (_request, response) => response.json({ status: 'ok' }));
   app.use(authBoundary.sessionMiddleware);
-  app.use('/api/auth', authBoundary.router);
+  app.use(
+    '/api/auth',
+    express.json({ limit: '64kb', strict: true }),
+    authBoundary.router,
+  );
   app.use('/api/time-management', authBoundary.requireAuth);
   app.use('/api/time-management', requireMutationSecurity(authBoundary));
+  app.use('/api/time-management', createTimeManagementJsonParser());
   app.use('/api/time-management/daily-tracking', authBoundary.dailyTrackingRouter);
   app.use('/api/time-management/history', authBoundary.historyRouter);
   app.post('/api/time-management/intake/check', (request, response, next) => {
@@ -299,7 +333,11 @@ function createApp({
       next(error);
     }
   });
-  app.use('/api', notFound);
+  app.use(
+    '/api',
+    express.json({ limit: '64kb', strict: true }),
+    notFound,
+  );
   app.use(express.static(path.join(__dirname, '..', 'frontend')));
   app.use(problemHandler);
 
