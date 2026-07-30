@@ -92,6 +92,9 @@ test('loadConfig 只接受完整且有效的服务端配置', () => {
     modelApiKey: 'fake-key',
     modelName: 'fake-model',
     modelTimeoutMs: 30000,
+    modelResponseFormatMode: 'auto',
+    modelTaskMaxOutputTokens: 16_384,
+    modelCoachMaxOutputTokens: 8_192,
     databasePath: './data/test.sqlite',
     sessionSecret: 'fake-session-secret-with-at-least-forty-eight-bytes-000000',
     sessionCookieSecure: false,
@@ -136,5 +139,18 @@ test('loadConfig 只接受完整且有效的服务端配置', () => {
       SESSION_MAX_AGE_MS: '86400000',
     }),
     error => error.code === 'CONFIG_INVALID' && /SESSION_MAX_AGE_MS/.test(error.message),
+  );
+  assert.throws(
+    () => loadConfig({
+      MODEL_API_BASE_URL: 'https://model.example/v1',
+      MODEL_API_KEY: 'fake-key',
+      MODEL_NAME: 'fake-model',
+      MODEL_RESPONSE_FORMAT_MODE: 'xml',
+      DATABASE_PATH: './data/test.sqlite',
+      SESSION_SECRET: 'fake-session-secret-with-at-least-forty-eight-bytes-000000',
+      SESSION_COOKIE_SECURE: 'false',
+      SESSION_MAX_AGE_MS: '604800000',
+    }),
+    error => error.code === 'CONFIG_INVALID' && /MODEL_RESPONSE_FORMAT_MODE/.test(error.message),
   );
 });

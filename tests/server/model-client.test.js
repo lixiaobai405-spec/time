@@ -9,9 +9,33 @@ function responseWith(content, options = {}) {
   return {
     ok: options.ok !== false,
     status: options.status || 200,
-    json: async () => ({ choices: [choice] }),
+    json: async () => options.payload || { choices: [choice] },
   };
 }
+
+function streamedResponse(payload, options = {}) {
+  const bytes = new TextEncoder().encode(
+    typeof payload === 'string' ? payload : JSON.stringify(payload),
+  );
+  return {
+    ok: options.ok !== false,
+    status: options.status || 200,
+    body: new ReadableStream({
+      start(controller) {
+        controller.enqueue(bytes);
+        controller.close();
+      },
+    }),
+  };
+}
+
+const unsupportedResponseFormat = Object.freeze({
+  error: {
+    code: 'unsupported_response_format',
+    param: 'response_format',
+    message: 'unsupported fixture',
+  },
+});
 
 function clientOptions(fetchImpl, overrides = {}) {
   return {
@@ -90,7 +114,13 @@ test('不支持 JSON Schema 的兼容供应商回退到 json_object', async () =
   const calls = [];
   const client = createModelClient(clientOptions(async (url, options) => {
     calls.push({ url, options });
-    if (calls.length === 1) return responseWith('', { ok: false, status: 400 });
+    if (calls.length === 1) {
+      return responseWith('', {
+        ok: false,
+        status: 400,
+        payload: unsupportedResponseFormat,
+      });
+    }
     return responseWith('{"value":"fallback"}');
   }));
 
@@ -123,7 +153,13 @@ test('回退到 json_object 时把响应 Schema 提供给模型', async () => {
   };
   const client = createModelClient(clientOptions(async (url, options) => {
     calls.push({ url, options });
-    if (calls.length === 1) return responseWith('', { ok: false, status: 400 });
+    if (calls.length === 1) {
+      return responseWith('', {
+        ok: false,
+        status: 400,
+        payload: unsupportedResponseFormat,
+      });
+    }
     return responseWith('{"value":"fallback"}');
   }));
 
@@ -141,6 +177,187 @@ test('回退到 json_object 时把响应 Schema 提供给模型', async () => {
   );
   assert.ok(schemaBlock, 'fallback system prompt must contain the response JSON Schema');
   assert.deepEqual(JSON.parse(schemaBlock[1]), schema);
+});
+
+test('通用 400 不触发 response_format 回退', async () => {
+  const { createModelClient } = require('../../server/model/model-client');
+  let calls = 0;
+  const client = createModelClient(clientOptions(async () => {
+    calls += 1;
+    return responseWith('', {
+      ok: false,
+      status: 400,
+      payload: { error: { code: 'invalid_request', param: 'messages' } },
+    });
+  }));
+
+  await assert.rejects(
+    client.completeJson({
+      system: 'rules',
+      user: '{}',
+      responseSchema: { type: 'object' },
+      maxAttempts: 1,
+    }),
+    error => error.code === 'MODEL_UPSTREAM_ERROR',
+  );
+  assert.equal(calls, 1);
+});
+
+test('显式 json_object 模式跳过 Structured Outputs 探测', async () => {
+  const { createModelClient } = require('../../server/model/model-client');
+  const calls = [];
+  const client = createModelClient(clientOptions(async (url, options) => {
+    calls.push({ url, options });
+    return responseWith('{"value":"ok"}');
+  }, { modelResponseFormatMode: 'json_object' }));
+
+  await client.completeJson({
+    system: 'rules',
+    user: '{}',
+    responseSchema: { type: 'object' },
+    maxAttempts: 1,
+  });
+
+  assert.equal(calls.length, 1);
+  assert.deepEqual(JSON.parse(calls[0].options.body).response_format, {
+    type: 'json_object',
+  });
+});
+
+test('已确认的 response_format 能力在客户端内缓存', async () => {
+  const { createModelClient } = require('../../server/model/model-client');
+  const formats = [];
+  const client = createModelClient(clientOptions(async (url, options) => {
+    const format = JSON.parse(options.body).response_format.type;
+    formats.push(format);
+    if (format === 'json_schema') {
+      return responseWith('', {
+        ok: false,
+        status: 422,
+        payload: unsupportedResponseFormat,
+      });
+    }
+    return responseWith('{"value":"ok"}');
+  }));
+  const request = {
+    system: 'rules',
+    user: '{}',
+    responseSchema: { type: 'object' },
+    maxAttempts: 1,
+  };
+
+  await client.completeJson(request);
+  await client.completeJson(request);
+
+  assert.deepEqual(formats, ['json_schema', 'json_object', 'json_object']);
+});
+
+test('maxTokens 写入供应商请求', async () => {
+  const { createModelClient } = require('../../server/model/model-client');
+  let requestBody;
+  const client = createModelClient(clientOptions(async (url, options) => {
+    requestBody = JSON.parse(options.body);
+    return responseWith('{"value":"ok"}');
+  }));
+
+  await client.completeJson({
+    system: 'rules',
+    user: '{}',
+    maxAttempts: 1,
+    maxTokens: 8192,
+  });
+
+  assert.equal(requestBody.max_tokens, 8192);
+});
+
+test('响应头到达后正文挂起仍按 deadline 超时', async () => {
+  const { createModelClient } = require('../../server/model/model-client');
+  let cancelled = false;
+  const client = createModelClient(clientOptions(async () => ({
+    ok: true,
+    status: 200,
+    body: {
+      getReader() {
+        return {
+          read: () => new Promise(() => {}),
+          cancel: async () => { cancelled = true; },
+          releaseLock() {},
+        };
+      },
+    },
+  }), { modelTimeoutMs: 20 }));
+
+  await assert.rejects(
+    client.completeJson({ system: 'rules', user: '{}', maxAttempts: 2 }),
+    error => error.code === 'MODEL_TIMEOUT',
+  );
+  assert.equal(cancelled, true);
+});
+
+test('调用方取消终止上游且不重试', async () => {
+  const { createModelClient } = require('../../server/model/model-client');
+  const controller = new AbortController();
+  let calls = 0;
+  const client = createModelClient(clientOptions(() => {
+    calls += 1;
+    return new Promise(() => {});
+  }));
+  const pending = client.completeJson({
+    system: 'rules',
+    user: '{}',
+    maxAttempts: 2,
+    signal: controller.signal,
+  });
+  controller.abort();
+
+  await assert.rejects(pending, error => error.code === 'MODEL_CANCELLED');
+  assert.equal(calls, 1);
+});
+
+test('供应商 envelope 超过 96 KiB 时流式终止', async () => {
+  const { createModelClient } = require('../../server/model/model-client');
+  const payload = {
+    choices: [{ message: { content: JSON.stringify({ value: 'x'.repeat(97 * 1024) }) } }],
+  };
+  const client = createModelClient(clientOptions(async () => streamedResponse(payload)));
+
+  await assert.rejects(
+    client.completeJson({ system: 'rules', user: '{}', maxAttempts: 1 }),
+    error => error.code === 'MODEL_RESPONSE_ENVELOPE_TOO_LARGE',
+  );
+});
+
+test('供应商错误正文超过 8 KiB 时返回稳定错误', async () => {
+  const { createModelClient } = require('../../server/model/model-client');
+  const marker = 'PRIVATE-UPSTREAM-BODY';
+  const client = createModelClient(clientOptions(async () => streamedResponse(
+    marker.repeat(1024),
+    { ok: false, status: 400 },
+  )));
+
+  await assert.rejects(
+    client.completeJson({ system: 'rules', user: '{}', maxAttempts: 1 }),
+    error => error.code === 'MODEL_ERROR_BODY_TOO_LARGE'
+      && !JSON.stringify(error).includes(marker),
+  );
+});
+
+test('阶段可收紧模型 content 字节上限', async () => {
+  const { createModelClient } = require('../../server/model/model-client');
+  const client = createModelClient(clientOptions(async () => responseWith(
+    JSON.stringify({ value: 'x'.repeat(33 * 1024) }),
+  )));
+
+  await assert.rejects(
+    client.completeJson({
+      system: 'rules',
+      user: '{}',
+      maxAttempts: 1,
+      maxContentBytes: 32 * 1024,
+    }),
+    error => error.code === 'MODEL_OUTPUT_INVALID'
+      && error.diagnosticCode === 'MODEL_OUTPUT_TOO_LARGE',
+  );
 });
 
 test('第一次返回合法 JSON 时只请求一次', async () => {
