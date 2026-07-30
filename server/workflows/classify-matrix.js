@@ -166,13 +166,23 @@ function normalizeModelError(error) {
   if (error.code === 'MODEL_TIMEOUT') {
     return publicError('MODEL_TIMEOUT', 'AI 响应超时，请重试。', 504);
   }
+  if (error.code === 'MODEL_CANCELLED') {
+    return publicError('REQUEST_CANCELLED', '请求已取消。', 499);
+  }
   if (error.code === 'MODEL_UPSTREAM_ERROR') {
     return publicError('MODEL_UPSTREAM_ERROR', 'AI 服务暂时不可用，请稍后重试。', 502);
   }
   return error;
 }
 
-async function classifyMatrix({ tasks, modelClient, requestBody }) {
+async function classifyMatrix({
+  tasks,
+  modelClient,
+  requestBody,
+  signal,
+  deadlineAt,
+  onAttempt,
+}) {
   const rawInput = requestBody || { tasks };
   const input = Array.isArray(rawInput?.tasks)
     ? {
@@ -192,6 +202,9 @@ async function classifyMatrix({ tasks, modelClient, requestBody }) {
     user: JSON.stringify({ tasks: input.tasks }),
     temperature: 0.2,
     maxAttempts: 1,
+    signal,
+    deadlineAt,
+    onAttempt,
   };
 
   for (let attempt = 1; attempt <= 2; attempt += 1) {

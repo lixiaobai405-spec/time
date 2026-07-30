@@ -33,6 +33,7 @@ function coachOutput() {
     evidence: [{
       id: 'E1',
       dimension: '今天',
+      sourceLineIndex: 0,
       quote: entries.今天,
       observation: '完成时间管理新版接口联调',
       kind: 'work',
@@ -93,6 +94,13 @@ function directTasks(taskOverridesArray) {
   };
 }
 
+function taskFirstOutput(taskOverridesArray, evidenceOverrides = {}) {
+  return {
+    evidence: [{ ...coachOutput().evidence[0], ...evidenceOverrides }],
+    ...directTasks(taskOverridesArray),
+  };
+}
+
 test('新版五步接口要求登录和会话 CSRF', async (t) => {
   const { baseUrl } = await createAuthTestApp(t);
   const response = await fetch(`${baseUrl}/api/time-management/intake/check`, {
@@ -108,9 +116,8 @@ test('四栏校验、任务拆解、SMART 和时间分布通过正式 API 串联
   const client = await authenticatedClient(t, {
     completeJson: async ({ responseSchemaName }) => {
       modelCalls += 1;
-      return responseSchemaName === 'time_coach_analysis_v1'
-        ? coachOutput()
-        : directTasks([{}]);
+      assert.equal(responseSchemaName, 'time_evidence_task_generation_v2');
+      return taskFirstOutput([{}]);
     },
   });
   const request = (path, body) => client.request(path, {
@@ -128,15 +135,15 @@ test('四栏校验、任务拆解、SMART 和时间分布通过正式 API 串联
   const decomposeResponse = await request('/api/time-management/tasks/decompose', { entries });
   assert.equal(decomposeResponse.status, 200);
   const decomposed = await decomposeResponse.json();
-  assert.equal(modelCalls, 2);
+  assert.equal(modelCalls, 1);
   assert.equal(decomposed.tasks.length, 1);
   assert.equal(decomposed.tasks[0].name, '完成时间管理新版接口联调');
   assert.deepEqual(
     Object.keys(decomposed).sort(),
     ['decomposition', 'intake', 'smart', 'tasks'],
   );
-  assert.equal(decomposed.decomposition.pipelineVersion, 'coach-decompose-v1');
-  assert.equal(decomposed.decomposition.stages.length, 2);
+  assert.equal(decomposed.decomposition.pipelineVersion, 'task-first-v2');
+  assert.equal(decomposed.decomposition.stages.length, 1);
   assert.equal(decomposed.decomposition.taskEvidence[0].taskId, decomposed.tasks[0].id);
   assert.equal(decomposed.smart.overall, 'pass');
 
@@ -155,11 +162,50 @@ test('四栏校验、任务拆解、SMART 和时间分布通过正式 API 串联
   assert.deepEqual(distribution.percentages, { 昨天: 0, 今天: 100, 明天: 0, 后天: 0 });
 });
 
+test('任务返回后可独立请求 coaching analysis', async (t) => {
+  const client = await authenticatedClient(t, {
+    completeJson: async ({ responseSchemaName }) => {
+      if (responseSchemaName === 'time_evidence_task_generation_v2') {
+        return taskFirstOutput([{}]);
+      }
+      assert.equal(responseSchemaName, 'time_coaching_analysis_v2');
+      return { coachingAnalysis: coachOutput().coachingAnalysis };
+    },
+  });
+  const decomposeResponse = await client.request(
+    '/api/time-management/tasks/decompose',
+    {
+      method: 'POST',
+      csrfToken: client.sessionCsrfToken,
+      body: { entries },
+    },
+  );
+  const decomposed = await decomposeResponse.json();
+  const coachingResponse = await client.request(
+    '/api/time-management/tasks/coaching-analysis',
+    {
+      method: 'POST',
+      csrfToken: client.sessionCsrfToken,
+      body: {
+        decompositionId: decomposed.decomposition.decompositionId,
+        attemptId: '22222222-2222-4222-8222-222222222222',
+        businessDate: decomposed.decomposition.businessDate,
+        entries,
+        evidence: decomposed.decomposition.stages[0].output.evidence,
+      },
+    },
+  );
+
+  assert.equal(coachingResponse.status, 200);
+  const coaching = await coachingResponse.json();
+  assert.equal(coaching.decompositionId, decomposed.decomposition.decompositionId);
+  assert.equal(coaching.stage.name, 'coaching-analysis');
+  assert.equal(coaching.stage.analysisId, coaching.analysisId);
+});
+
 test('零任务返回 422 NO_ACTIONABLE_TASKS', async (t) => {
   const client = await authenticatedClient(t, {
-    completeJson: async ({ responseSchemaName }) => (
-      responseSchemaName === 'time_coach_analysis_v1' ? coachOutput() : directTasks([])
-    ),
+    completeJson: async () => taskFirstOutput([], { status: 'completed' }),
   });
   const response = await client.request('/api/time-management/tasks/decompose', {
     method: 'POST',

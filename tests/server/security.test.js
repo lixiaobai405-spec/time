@@ -604,7 +604,7 @@ test('任务拆解格式失败日志包含阶段和固定规则码但不泄漏�
   const modelClient = {
     completeJson: async () => ({
       evidence: [{ marker }],
-      coachingAnalysis: {},
+      tasks: [],
     }),
   };
   const app = createApp({
@@ -640,8 +640,8 @@ test('任务拆解格式失败日志包含阶段和固定规则码但不泄漏�
       entry => entry.path === '/api/time-management/tasks/decompose',
     );
     assert.ok(logEntry);
-    assert.equal(logEntry.modelOutputStage, 'coach-analysis');
-    assert.equal(logEntry.modelOutputReason, 'JSON_SCHEMA_INVALID');
+    assert.equal(logEntry.modelOutputStage, 'evidence-task-generation');
+    assert.equal(logEntry.modelOutputReason, 'EVIDENCE_SCHEMA_INVALID');
     assert.equal(logEntry.modelAttempts, 2);
     assert.doesNotMatch(JSON.stringify(logEntry), new RegExp(marker));
   } finally {

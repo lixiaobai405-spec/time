@@ -11,6 +11,14 @@ const DEFINITIONS = Object.freeze({
     version: '1.0.0',
     relativePath: 'decomposition/task-generation.v1.md',
   }),
+  'decomposition.evidence-task-generation': Object.freeze({
+    version: '2.0.0',
+    relativePath: 'decomposition/evidence-task-generation.v2.md',
+  }),
+  'decomposition.coaching-analysis': Object.freeze({
+    version: '2.0.0',
+    relativePath: 'decomposition/coaching-analysis.v2.md',
+  }),
 });
 
 const CACHE = new Map();

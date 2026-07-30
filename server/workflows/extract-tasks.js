@@ -148,13 +148,24 @@ function normalizeModelError(error) {
   if (error.code === 'MODEL_TIMEOUT') {
     return publicError('MODEL_TIMEOUT', 'AI 响应超时，请重试。', 504);
   }
+  if (error.code === 'MODEL_CANCELLED') {
+    return publicError('REQUEST_CANCELLED', '请求已取消。', 499);
+  }
   if (error.code === 'MODEL_UPSTREAM_ERROR') {
     return publicError('MODEL_UPSTREAM_ERROR', 'AI 服务暂时不可用，请稍后重试。', 502);
   }
   return error;
 }
 
-async function extractTasks({ goals, modelClient, requestBody, now }) {
+async function extractTasks({
+  goals,
+  modelClient,
+  requestBody,
+  now,
+  signal,
+  deadlineAt,
+  onAttempt,
+}) {
   const input = requestBody || { goals };
   if (!validateRequest(input)) {
     throw publicError('INPUT_INVALID', '输入内容不符合要求。', 400);
@@ -175,6 +186,9 @@ async function extractTasks({ goals, modelClient, requestBody, now }) {
         user: JSON.stringify({ goals: validatedGoals }),
         temperature: 0.2,
         maxAttempts: 1,
+        signal,
+        deadlineAt,
+        onAttempt,
       });
     } catch (error) {
       const normalized = normalizeModelError(error);

@@ -4,64 +4,19 @@ const assert = require('node:assert/strict');
 const { loadVersionedPrompt } = require('../../server/prompts/load-versioned-prompt');
 const { decomposeTasks } = require('../../server/workflows/decompose-tasks');
 
-function claim(text, evidenceIds = []) {
-  return { text, evidenceIds };
-}
-
-function analysisFor(evidenceIds = []) {
-  const supported = claim('基于原文证据形成当前判断。', evidenceIds);
-  const unknown = claim('证据不足：当前输入未提供该维度信息。');
+function evidence(overrides = {}) {
   return {
-    yesterday_analysis: {
-      key_problem: evidenceIds.length ? supported : unknown,
-      gap: unknown,
-      root_cause: unknown,
-      management_insight: evidenceIds.length ? supported : unknown,
-    },
-    today_focus: {
-      key_work: unknown,
-      priority_reason: unknown,
-      manager_action: unknown,
-      possible_delegation: unknown,
-    },
-    tomorrow_optimization: {
-      management_improvement: unknown,
-      system_building: unknown,
-      capability_upgrade: unknown,
-    },
-    future_direction: {
-      long_term_goal: unknown,
-      organization_capability: unknown,
-      future_focus: unknown,
-    },
-    connection_analysis: {
-      problem_to_action: unknown,
-      action_to_optimization: unknown,
-      optimization_to_future: unknown,
-    },
-    coaching_suggestions: [],
-    overall_insight: evidenceIds.length ? supported : unknown,
+    id: 'E1',
+    dimension: '昨天',
+    sourceLineIndex: 0,
+    quote: '昨天未完成审核方案',
+    observation: '审核方案尚未完成',
+    kind: 'work',
+    status: 'unfinished',
+    owner: '待确认',
+    due: '待确认',
+    ...overrides,
   };
-}
-
-function yesterdayCoach({ status = 'unfinished', quote = '昨天未完成审核方案' } = {}) {
-  return {
-    evidence: [{
-      id: 'E1',
-      dimension: '昨天',
-      quote,
-      observation: status === 'completed' ? '审核方案已完成' : '审核方案尚未完成',
-      kind: 'work',
-      status,
-      owner: '待确认',
-      due: '待确认',
-    }],
-    coachingAnalysis: analysisFor(['E1']),
-  };
-}
-
-function generatedTasks(tasks) {
-  return { tasks };
 }
 
 function task(overrides = {}) {
@@ -81,6 +36,14 @@ function task(overrides = {}) {
   };
 }
 
+function taskFirst(overrides = {}) {
+  return {
+    evidence: [evidence()],
+    tasks: [task()],
+    ...overrides,
+  };
+}
+
 function queuedModel(outputs) {
   const calls = [];
   return {
@@ -93,57 +56,54 @@ function queuedModel(outputs) {
   };
 }
 
-test('昨天未完成事项必须拆为复盘任务并进入可追溯任务映射', async () => {
-  const modelClient = queuedModel([
-    yesterdayCoach(),
-    generatedTasks([task()]),
-  ]);
+test('正常拆解一次模型调用返回可追溯任务', async () => {
+  const modelClient = queuedModel([taskFirst()]);
   const result = await decomposeTasks({
     entries: { 昨天: '昨天未完成审核方案', 今天: '', 明天: '', 后天: '' },
     modelClient,
     now: () => new Date('2026-07-28T04:00:00.000Z'),
   });
 
-  assert.equal(modelClient.calls.length, 2);
-  assert.equal(modelClient.calls[0].responseSchemaName, 'time_coach_analysis_v1');
+  assert.equal(modelClient.calls.length, 1);
+  assert.equal(
+    modelClient.calls[0].responseSchemaName,
+    'time_evidence_task_generation_v2',
+  );
   assert.doesNotMatch(modelClient.calls[0].system, /昨天未完成审核方案/);
   assert.match(modelClient.calls[0].user, /昨天未完成审核方案/);
-  assert.equal(modelClient.calls[1].responseSchemaName, 'time_task_generation_v1');
   assert.equal(result.tasks[0].source, '复盘');
   assert.equal(result.tasks[0].name, '审核方案');
-  assert.equal(result.decomposition.pipelineVersion, 'coach-decompose-v1');
+  assert.equal(result.decomposition.pipelineVersion, 'task-first-v2');
+  assert.match(result.decomposition.decompositionId, /^[0-9a-f-]{36}$/);
   assert.deepEqual(result.decomposition.taskEvidence, [{
     taskId: result.tasks[0].id,
     evidenceIds: ['E1'],
   }]);
-  assert.equal(result.decomposition.stages[0].output.evidence[0].quote, '昨天未完成审核方案');
+  assert.equal(result.decomposition.stages[0].name, 'evidence-task-generation');
 });
 
-test('任务生成遗漏昨天未完成证据时重试后拒绝', async () => {
+test('evidence 合法但任务遗漏时只重试冻结 evidence 的任务', async () => {
+  const frozenEvidence = [evidence()];
   const modelClient = queuedModel([
-    yesterdayCoach(),
-    generatedTasks([]),
-    generatedTasks([]),
+    { evidence: frozenEvidence, tasks: [] },
+    { tasks: [task()] },
   ]);
 
-  await assert.rejects(
-    decomposeTasks({
-      entries: { 昨天: '昨天未完成审核方案', 今天: '', 明天: '', 后天: '' },
-      modelClient,
-    }),
-    error => error.code === 'MODEL_OUTPUT_INVALID'
-      && error.stage === 'task-generation'
-      && error.failedRules.includes('UNFINISHED_YESTERDAY_NOT_COVERED'),
-  );
-  assert.equal(modelClient.calls.length, 3);
-  assert.deepEqual(
-    JSON.parse(modelClient.calls[2].user).retryFeedback.failedRules,
-    ['UNFINISHED_YESTERDAY_NOT_COVERED'],
-  );
+  const result = await decomposeTasks({
+    entries: { 昨天: '昨天未完成审核方案', 今天: '', 明天: '', 后天: '' },
+    modelClient,
+  });
+
+  assert.equal(modelClient.calls.length, 2);
+  assert.equal(modelClient.calls[1].responseSchemaName, 'time_task_generation_v2');
+  assert.deepEqual(JSON.parse(modelClient.calls[1].user).evidence, frozenEvidence);
+  assert.deepEqual(result.decomposition.stages[0].output.evidence, frozenEvidence);
 });
 
-test('证据 quote 不存在于对应原文时不得进入任务生成阶段', async () => {
-  const invalid = yesterdayCoach({ quote: '原文不存在的内容' });
+test('evidence quote 不在指定行时联合重试后拒绝', async () => {
+  const invalid = taskFirst({
+    evidence: [evidence({ quote: '原文不存在的内容' })],
+  });
   const modelClient = queuedModel([invalid, invalid]);
 
   await assert.rejects(
@@ -152,64 +112,152 @@ test('证据 quote 不存在于对应原文时不得进入任务生成阶段', a
       modelClient,
     }),
     error => error.code === 'MODEL_OUTPUT_INVALID'
-      && error.stage === 'coach-analysis'
-      && error.failedRules.includes('EVIDENCE_QUOTE_NOT_IN_SOURCE'),
+      && error.stage === 'evidence-task-generation'
+      && error.failedRules.includes('EVIDENCE_QUOTE_NOT_IN_SOURCE_LINE'),
   );
   assert.equal(modelClient.calls.length, 2);
-});
-
-test('versioned prompts expose stable identity, version and content hash', () => {
-  const coach = loadVersionedPrompt('decomposition.coach-analysis');
-  const tasks = loadVersionedPrompt('decomposition.task-generation');
-  assert.equal(coach.id, 'decomposition.coach-analysis');
-  assert.equal(tasks.id, 'decomposition.task-generation');
-  assert.equal(coach.version, '1.0.0');
-  assert.match(coach.sha256, /^[0-9a-f]{64}$/);
-  assert.match(tasks.sha256, /^[0-9a-f]{64}$/);
-  assert.match(coach.text, /evidence_protocol/);
-  assert.match(tasks.text, /昨天的 unfinished 证据必须生成/);
-  assert.strictEqual(loadVersionedPrompt('decomposition.coach-analysis'), coach);
-  assert.throws(
-    () => loadVersionedPrompt('decomposition.unknown'),
-    error => error.code === 'PROMPT_INVALID',
+  assert.equal(
+    modelClient.calls[1].responseSchemaName,
+    'time_evidence_task_generation_v2',
   );
 });
 
-test('昨天已完成证据不得转成待办任务', async () => {
-  const coach = {
+test('owner 不得从同栏另一行借用', async () => {
+  const invalid = {
     evidence: [
-      yesterdayCoach({ status: 'completed', quote: '昨天已完成审核方案' }).evidence[0],
-      {
+      evidence({ owner: '张三' }),
+      evidence({
         id: 'E2',
-        dimension: '今天',
-        quote: '今天提交汇总结果',
-        observation: '提交汇总结果',
-        kind: 'work',
+        sourceLineIndex: 1,
+        quote: '张三跟进供应商',
+        observation: '跟进供应商',
         status: 'planned',
-        owner: '待确认',
-        due: '待确认',
-      },
+        owner: '张三',
+      }),
     ],
-    coachingAnalysis: analysisFor(['E1', 'E2']),
+    tasks: [task()],
   };
+  const modelClient = queuedModel([invalid, invalid]);
+
+  await assert.rejects(
+    decomposeTasks({
+      entries: {
+        昨天: '昨天未完成审核方案\n张三跟进供应商',
+        今天: '',
+        明天: '',
+        后天: '',
+      },
+      modelClient,
+    }),
+    error => error.failedRules.includes('EVIDENCE_OWNER_NOT_IN_SOURCE_LINE'),
+  );
+});
+
+test('每个 planned 或 unfinished evidence 必须成为主任务', async () => {
   const modelClient = queuedModel([
-    coach,
-    generatedTasks([task({
+    {
+      evidence: [
+        evidence(),
+        evidence({
+          id: 'E2',
+          dimension: '今天',
+          quote: '今天提交汇总结果',
+          observation: '提交汇总结果',
+          status: 'planned',
+        }),
+      ],
+      tasks: [task()],
+    },
+    { tasks: [task()] },
+  ]);
+
+  await assert.rejects(
+    decomposeTasks({
+      entries: {
+        昨天: '昨天未完成审核方案',
+        今天: '今天提交汇总结果',
+        明天: '',
+        后天: '',
+      },
+      modelClient,
+    }),
+    error => error.failedRules.includes('ACTIONABLE_EVIDENCE_NOT_COVERED'),
+  );
+});
+
+test('completed evidence 不得出现在任务任一证据位置', async () => {
+  const modelClient = queuedModel([
+    {
+      evidence: [
+        evidence({
+          quote: '昨天已完成审核方案',
+          observation: '审核方案已完成',
+          status: 'completed',
+        }),
+        evidence({
+          id: 'E2',
+          dimension: '今天',
+          quote: '今天提交汇总结果',
+          observation: '提交汇总结果',
+          status: 'planned',
+        }),
+      ],
+      tasks: [task({
+        name: '提交汇总结果',
+        source: '今天',
+        evidenceIds: ['E2', 'E1'],
+      })],
+    },
+    { tasks: [task({
       name: '提交汇总结果',
       source: '今天',
-      evidenceIds: ['E2'],
-    })]),
+      evidenceIds: ['E2', 'E1'],
+    })] },
   ]);
-  const result = await decomposeTasks({
-    entries: {
-      昨天: '昨天已完成审核方案',
-      今天: '今天提交汇总结果',
-      明天: '',
-      后天: '',
-    },
-    modelClient,
-  });
 
-  assert.deepEqual(result.tasks.map(item => item.name), ['提交汇总结果']);
-  assert.deepEqual(result.decomposition.taskEvidence[0].evidenceIds, ['E2']);
+  await assert.rejects(
+    decomposeTasks({
+      entries: {
+        昨天: '昨天已完成审核方案',
+        今天: '今天提交汇总结果',
+        明天: '',
+        后天: '',
+      },
+      modelClient,
+    }),
+    error => error.failedRules.includes('NON_ACTIONABLE_EVIDENCE_USED'),
+  );
+});
+
+test('快速拆解最多接受 12 个非空行', async () => {
+  const modelClient = queuedModel([taskFirst()]);
+  await assert.rejects(
+    decomposeTasks({
+      entries: {
+        昨天: Array.from({ length: 13 }, (_, index) => `事项${index}`).join('\n'),
+        今天: '',
+        明天: '',
+        后天: '',
+      },
+      modelClient,
+    }),
+    error => error.code === 'DECOMPOSITION_ITEM_LIMIT_EXCEEDED'
+      && error.status === 422,
+  );
+  assert.equal(modelClient.calls.length, 0);
+});
+
+test('v2 prompts expose stable identity, version and content hash', () => {
+  const tasks = loadVersionedPrompt('decomposition.evidence-task-generation');
+  const coaching = loadVersionedPrompt('decomposition.coaching-analysis');
+  assert.equal(tasks.version, '2.0.0');
+  assert.equal(coaching.version, '2.0.0');
+  assert.match(tasks.sha256, /^[0-9a-f]{64}$/);
+  assert.match(coaching.sha256, /^[0-9a-f]{64}$/);
+  assert.match(tasks.text, /sourceLineIndex/);
+  assert.match(coaching.text, /证据不足/);
+  assert.strictEqual(
+    loadVersionedPrompt('decomposition.evidence-task-generation'),
+    tasks,
+  );
 });

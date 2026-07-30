@@ -3,6 +3,8 @@ const { randomUUID } = require('node:crypto');
 const path = require('node:path');
 
 const { notFound, problemHandler } = require('./http/problem');
+const { createRequestLifecycle } = require('./http/request-lifecycle');
+const { analyzeCoaching } = require('./workflows/analyze-coaching');
 const { checkGoals } = require('./workflows/check-goals');
 const { checkIntake } = require('./workflows/check-intake');
 const { checkTaskSmart } = require('./workflows/check-task-smart');
@@ -24,9 +26,49 @@ const CONTENT_SECURITY_POLICY = [
   "form-action 'self'",
 ].join('; ');
 
+const DECOMPOSE_RESPONSE_MAX_BYTES = 192 * 1024;
+const COACHING_REQUEST_KEYS = new Set([
+  'decompositionId',
+  'attemptId',
+  'businessDate',
+  'entries',
+  'evidence',
+]);
+
 function writeLog(logger, entry) {
   if (typeof logger === 'function') logger(entry);
   else if (logger && typeof logger.info === 'function') logger.info(entry);
+}
+
+function modelRequestOptions(request, response, logger, extra = {}) {
+  const context = response.locals.requestContext || {};
+  return {
+    signal: context.signal,
+    deadlineAt: context.deadlineAt,
+    onAttempt: event => writeLog(logger, {
+      requestId: request.requestId,
+      ...extra,
+      stage: event.stage,
+      attempt: event.attempt,
+      responseFormat: event.responseFormat,
+      fallbackUsed: event.fallbackUsed,
+      status: event.status,
+      durationMs: event.durationMs,
+      errorCode: event.errorCode,
+    }),
+  };
+}
+
+function sendBoundedJson(response, value, maxBytes) {
+  const serialized = JSON.stringify(value);
+  if (Buffer.byteLength(serialized, 'utf8') > maxBytes) {
+    throw Object.assign(new Error('AI 响应内容过大，请减少输入后重试。'), {
+      code: 'API_RESPONSE_TOO_LARGE',
+      status: 502,
+      expose: true,
+    });
+  }
+  response.type('application/json').send(serialized);
 }
 
 function requireMutationSecurity(authBoundary) {
@@ -39,7 +81,13 @@ function requireMutationSecurity(authBoundary) {
   };
 }
 
-function createApp({ modelClient, authBoundary, logger, now = Date.now } = {}) {
+function createApp({
+  modelClient,
+  authBoundary,
+  logger,
+  now = Date.now,
+  config = {},
+} = {}) {
   if (
     !authBoundary
     || typeof authBoundary.sessionMiddleware !== 'function'
@@ -91,6 +139,9 @@ function createApp({ modelClient, authBoundary, logger, now = Date.now } = {}) {
     });
     next();
   });
+  app.use('/api', createRequestLifecycle({
+    modelTimeoutMs: config.modelTimeoutMs || 30_000,
+  }));
   app.use(express.json({ limit: '64kb', strict: true }));
   app.get('/api/health', (_request, response) => response.json({ status: 'ok' }));
   app.use(authBoundary.sessionMiddleware);
@@ -110,17 +161,58 @@ function createApp({ modelClient, authBoundary, logger, now = Date.now } = {}) {
     }
   });
   app.post('/api/time-management/tasks/decompose', async (request, response, next) => {
+    const decompositionId = randomUUID();
     try {
-      response.json(await decomposeTasks({
+      const result = await decomposeTasks({
         entries: request.body?.entries,
         modelClient,
         requestBody: request.body,
         now,
-      }));
+        decompositionId,
+        responseFormatMode: config.modelResponseFormatMode,
+        maxTokens: config.modelTaskMaxOutputTokens,
+        ...modelRequestOptions(request, response, logger, { decompositionId }),
+      });
+      sendBoundedJson(response, result, DECOMPOSE_RESPONSE_MAX_BYTES);
     } catch (error) {
       if (error?.code === 'MODEL_OUTPUT_INVALID') {
         response.locals.modelOutputDiagnostic = {
           stage: error.stage,
+          reason: error.failedRules?.[0] || error.diagnosticCode || 'MODEL_JSON_INVALID',
+          attempts: error.modelAttempts || 2,
+        };
+      }
+      next(error);
+    }
+  });
+  app.post('/api/time-management/tasks/coaching-analysis', async (request, response, next) => {
+    try {
+      if (
+        !request.body
+        || typeof request.body !== 'object'
+        || Array.isArray(request.body)
+        || Object.keys(request.body).some(key => !COACHING_REQUEST_KEYS.has(key))
+      ) {
+        throw Object.assign(new Error('教练诊断请求不符合要求。'), {
+          code: 'INPUT_INVALID',
+          status: 400,
+          expose: true,
+        });
+      }
+      const result = await analyzeCoaching({
+        ...request.body,
+        modelClient,
+        responseFormatMode: config.modelResponseFormatMode,
+        maxTokens: config.modelCoachMaxOutputTokens,
+        ...modelRequestOptions(request, response, logger, {
+          decompositionId: request.body.decompositionId,
+        }),
+      });
+      response.json(result);
+    } catch (error) {
+      if (error?.code === 'MODEL_OUTPUT_INVALID') {
+        response.locals.modelOutputDiagnostic = {
+          stage: 'coaching-analysis',
           reason: error.failedRules?.[0] || error.diagnosticCode || 'MODEL_JSON_INVALID',
           attempts: error.modelAttempts || 2,
         };
@@ -154,6 +246,7 @@ function createApp({ modelClient, authBoundary, logger, now = Date.now } = {}) {
         goals: request.body?.goals,
         modelClient,
         requestBody: request.body,
+        ...modelRequestOptions(request, response, logger),
       }));
     } catch (error) {
       next(error);
@@ -165,6 +258,7 @@ function createApp({ modelClient, authBoundary, logger, now = Date.now } = {}) {
         goals: request.body?.goals,
         modelClient,
         requestBody: request.body,
+        ...modelRequestOptions(request, response, logger),
         now,
       }));
     } catch (error) {
@@ -177,6 +271,7 @@ function createApp({ modelClient, authBoundary, logger, now = Date.now } = {}) {
         tasks: request.body?.tasks,
         modelClient,
         requestBody: request.body,
+        ...modelRequestOptions(request, response, logger),
       }));
     } catch (error) {
       next(error);
@@ -192,6 +287,7 @@ function createApp({ modelClient, authBoundary, logger, now = Date.now } = {}) {
         modelClient,
         requestBody: request.body,
         now,
+        ...modelRequestOptions(request, response, logger),
       }));
     } catch (error) {
       if (error?.code === 'MODEL_OUTPUT_INVALID') {
