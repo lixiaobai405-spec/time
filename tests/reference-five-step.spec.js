@@ -41,6 +41,124 @@ const TASKS = [
   },
 ];
 
+const DECOMPOSITION_ID = '11111111-1111-4111-8111-111111111111';
+const ANALYSIS_ID = '22222222-2222-4222-8222-222222222222';
+
+function claim(text, evidenceIds = []) {
+  return { text, evidenceIds };
+}
+
+function coachingAnalysis(evidenceIds) {
+  const supported = claim('基于原文证据形成当前判断。', evidenceIds);
+  const unknown = claim('证据不足：当前输入未提供该维度信息。');
+  return {
+    yesterday_analysis: {
+      key_problem: supported,
+      gap: unknown,
+      root_cause: unknown,
+      management_insight: supported,
+    },
+    today_focus: {
+      key_work: supported,
+      priority_reason: supported,
+      manager_action: unknown,
+      possible_delegation: unknown,
+    },
+    tomorrow_optimization: {
+      management_improvement: supported,
+      system_building: unknown,
+      capability_upgrade: unknown,
+    },
+    future_direction: {
+      long_term_goal: supported,
+      organization_capability: unknown,
+      future_focus: unknown,
+    },
+    connection_analysis: {
+      problem_to_action: supported,
+      action_to_optimization: unknown,
+      optimization_to_future: unknown,
+    },
+    coaching_suggestions: [],
+    overall_insight: supported,
+  };
+}
+
+function decompositionPayload(entries, decompositionId = DECOMPOSITION_ID) {
+  const dimensions = ['昨天', '今天', '明天', '后天'];
+  const evidence = dimensions.map((dimension, index) => ({
+    id: `E${index + 1}`,
+    dimension,
+    sourceLineIndex: 0,
+    quote: entries[dimension],
+    observation: TASKS[index].name,
+    kind: 'work',
+    status: index === 0 ? 'unfinished' : 'planned',
+    owner: TASKS[index].owner,
+    due: TASKS[index].due,
+  }));
+  const candidates = TASKS.map((task, index) => ({
+    name: task.name,
+    importance: task.importance,
+    urgency: task.urgency,
+    source: task.source,
+    due: task.due,
+    est: task.est,
+    owner: task.owner,
+    acceptanceCriteria: task.acceptanceCriteria,
+    nextAction: task.nextAction,
+    status: task.status,
+    evidenceIds: [`E${index + 1}`],
+  }));
+  return {
+    pipelineVersion: 'task-first-v2',
+    decompositionId,
+    businessDate: '2026-07-22',
+    stages: [{
+      name: 'evidence-task-generation',
+      status: 'succeeded',
+      prompt: {
+        id: 'decomposition.evidence-task-generation',
+        version: '2.0.0',
+        sha256: 'a'.repeat(64),
+      },
+      attempts: 1,
+      durationMs: 120,
+      responseFormat: 'json_object',
+      fallbackUsed: false,
+      output: { evidence, tasks: candidates },
+    }],
+    taskEvidence: TASKS.map((task, index) => ({
+      taskId: task.id,
+      evidenceIds: [`E${index + 1}`],
+    })),
+  };
+}
+
+function coachingResponse(request, analysisId = ANALYSIS_ID) {
+  const evidenceIds = request.evidence.map(item => item.id);
+  return {
+    decompositionId: request.decompositionId,
+    attemptId: request.attemptId,
+    analysisId,
+    stage: {
+      name: 'coaching-analysis',
+      analysisId,
+      status: 'succeeded',
+      prompt: {
+        id: 'decomposition.coaching-analysis',
+        version: '2.0.0',
+        sha256: 'b'.repeat(64),
+      },
+      attempts: 1,
+      durationMs: 80,
+      responseFormat: 'json_object',
+      fallbackUsed: false,
+      output: { coachingAnalysis: coachingAnalysis(evidenceIds) },
+    },
+  };
+}
+
 function matrixPayload() {
   return {
     classifications: TASKS.map(task => ({
@@ -65,23 +183,31 @@ async function installMocks(page) {
     contentType: 'application/json',
     body: JSON.stringify({ user: { id: 'user-1', username: '测试用户' }, csrfToken: 'csrf' }),
   }));
-  await page.route('**/api/time-management/intake/check', route => route.fulfill({
-    status: 200,
-    contentType: 'application/json',
-    body: JSON.stringify({
-      status: 'pass', entries: route.request().postDataJSON().entries,
-      lineCounts: { 昨天: 1, 今天: 1, 明天: 1, 后天: 1 }, totalLines: 4, warnings: [],
-    }),
-  }));
-  await page.route('**/api/time-management/tasks/decompose', route => route.fulfill({
-    status: 200,
-    contentType: 'application/json',
-    body: JSON.stringify({
-      intake: { lineCounts: { 昨天: 1, 今天: 1, 明天: 1, 后天: 1 }, totalLines: 4, warnings: [] },
-      tasks: TASKS,
-      smart: { overall: 'pass', results: TASKS.map(task => ({ taskId: task.id, status: 'pass', issues: [] })), summary: { total: 4, pass: 4, needFix: 0 } },
-    }),
-  }));
+  await page.route('**/api/time-management/tasks/decompose', route => {
+    const entries = route.request().postDataJSON().entries;
+    return route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        intake: {
+          lineCounts: { 昨天: 1, 今天: 1, 明天: 1, 后天: 1 },
+          totalLines: 4,
+          warnings: [],
+        },
+        tasks: TASKS,
+        smart: { overall: 'pass', results: TASKS.map(task => ({ taskId: task.id, status: 'pass', issues: [] })), summary: { total: 4, pass: 4, needFix: 0 } },
+        decomposition: decompositionPayload(entries),
+      }),
+    });
+  });
+  await page.route('**/api/time-management/tasks/coaching-analysis', route => {
+    const request = route.request().postDataJSON();
+    return route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify(coachingResponse(request)),
+    });
+  });
   await page.route('**/api/time-management/tasks/smart-check', route => route.fulfill({
     status: 200,
     contentType: 'application/json',
@@ -127,7 +253,24 @@ async function installMocks(page) {
     return route.fulfill({
       status: 201,
       contentType: 'application/json',
-      body: JSON.stringify({ id: 'history-1', ...body, schemaVersion: 2, createdAt: '2026-07-22T12:00:00.000Z', updatedAt: '2026-07-22T12:00:00.000Z' }),
+      body: JSON.stringify({ id: 'history-1', ...body, schemaVersion: 3, createdAt: '2026-07-22T12:00:00.000Z', updatedAt: '2026-07-22T12:00:00.000Z' }),
+    });
+  });
+  await page.route('**/api/time-management/history/*/coaching-analysis', async route => {
+    const body = route.request().postDataJSON();
+    return route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        id: 'history-1',
+        decomposition: {
+          ...decompositionPayload({ 昨天: 'x', 今天: 'x', 明天: 'x', 后天: 'x' }, body.decompositionId),
+          stages: [
+            ...decompositionPayload({ 昨天: 'x', 今天: 'x', 明天: 'x', 后天: 'x' }, body.decompositionId).stages,
+            body.coachingStage,
+          ],
+        },
+      }),
     });
   });
   await page.route('**/api/time-management/daily-tracking/today', async route => {
@@ -294,7 +437,8 @@ test('AI 拆解确认和手动新增展示并提交日期责任人', async ({ pa
 });
 
 test('第一步骤四栏显示甲方指定提示语且不进入提交内容', async ({ page }) => {
-  let intakePayload = null;
+  let decomposeRequest = null;
+  let intakeRequestCount = 0;
   const browserErrors = [];
   page.on('pageerror', error => browserErrors.push(error.message));
   page.on('console', message => {
@@ -302,7 +446,10 @@ test('第一步骤四栏显示甲方指定提示语且不进入提交内容', as
   });
   page.on('request', request => {
     if (request.url().endsWith('/api/time-management/intake/check')) {
-      intakePayload = request.postDataJSON();
+      intakeRequestCount += 1;
+    }
+    if (request.url().endsWith('/api/time-management/tasks/decompose')) {
+      decomposeRequest = request.postDataJSON();
     }
   });
 
@@ -325,17 +472,192 @@ test('第一步骤四栏显示甲方指定提示语且不进入提交内容', as
 
   await page.getByRole('button', { name: /AI 拆解为任务/ }).click();
 
-  expect(intakePayload.entries.昨天).toBe('测试昨天事项');
-  expect(intakePayload.entries.今天).toBe('测试今天事项');
-  expect(intakePayload.entries.明天).toBe('测试明天事项');
-  expect(intakePayload.entries.后天).toBe('测试后天事项');
-  for (const value of Object.values(intakePayload.entries)) {
+  expect(decomposeRequest.entries.昨天).toBe('测试昨天事项');
+  expect(decomposeRequest.entries.今天).toBe('测试今天事项');
+  expect(decomposeRequest.entries.明天).toBe('测试明天事项');
+  expect(decomposeRequest.entries.后天).toBe('测试后天事项');
+  expect(intakeRequestCount).toBe(0);
+  for (const value of Object.values(decomposeRequest.entries)) {
     expect(value).not.toContain('记录尚未完成');
     expect(value).not.toContain('记录今天计划');
     expect(value).not.toContain('1-4周');
     expect(value).not.toContain('战略思考');
   }
   expect(browserErrors).toEqual([]);
+});
+
+test('任务先于教练诊断可见且前台请求不会取消教练通道', async ({ page }) => {
+  let releaseCoaching;
+  const coachingGate = new Promise(resolve => { releaseCoaching = resolve; });
+  await page.route('**/api/time-management/tasks/coaching-analysis', async route => {
+    const request = route.request().postDataJSON();
+    await coachingGate;
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify(coachingResponse(request)),
+    });
+  });
+
+  try {
+    await openAiConfirmation(page);
+    await expect(page.locator('[data-task-row]')).toHaveCount(TASKS.length);
+    await expect(page.locator('[data-coaching-status="running"]')).toBeVisible();
+    const taskVisibleMs = await page.evaluate(() => (
+      window.__TIME_MANAGEMENT_PERFORMANCE__.at(-1).durationMs
+    ));
+    expect(taskVisibleMs).toBeLessThan(5_000);
+
+    await page.getByRole('button', { name: 'SMART 校验' }).click();
+    await expect(page.locator('#panel').getByText('全部任务通过 SMART 校验')).toBeVisible();
+    await expect(page.locator('[data-coaching-status="running"]')).toBeVisible();
+    const activeTaskName = page.locator('[data-task-row="task-y"] [data-task-field="name"]');
+    await activeTaskName.evaluate((input) => {
+      input.value = '尚未失焦保存的编辑内容';
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+
+    releaseCoaching();
+    await expect(page.locator('[data-coaching-status="succeeded"]')).toBeVisible();
+    await expect(activeTaskName).toHaveValue('尚未失焦保存的编辑内容');
+  } finally {
+    releaseCoaching();
+  }
+});
+
+test('教练诊断超时可独立重试且不清空任务', async ({ page }) => {
+  let coachingCalls = 0;
+  await page.route('**/api/time-management/tasks/coaching-analysis', route => {
+    coachingCalls += 1;
+    if (coachingCalls === 1) {
+      return route.fulfill({
+        status: 504,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          error: { code: 'MODEL_TIMEOUT', message: 'AI 响应超时，请重试。' },
+        }),
+      });
+    }
+    const request = route.request().postDataJSON();
+    return route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify(coachingResponse(request)),
+    });
+  });
+
+  await openAiConfirmation(page);
+  await expect(page.locator('[data-task-row]')).toHaveCount(TASKS.length);
+  await expect(page.locator('[data-coaching-status="timed_out"]')).toBeVisible();
+  await page.getByRole('button', { name: '重试教练诊断' }).click();
+  await expect(page.locator('[data-coaching-status="succeeded"]')).toBeVisible();
+  await expect(page.locator('[data-task-row]')).toHaveCount(TASKS.length);
+  expect(coachingCalls).toBe(2);
+});
+
+test('新拆解抑制已取消教练请求的迟到结果', async ({ page }) => {
+  let decompositionCount = 0;
+  let coachingCount = 0;
+  let releaseFirst;
+  const firstGate = new Promise(resolve => { releaseFirst = resolve; });
+  const secondAnalysisId = '33333333-3333-4333-8333-333333333333';
+
+  await page.route('**/api/time-management/tasks/decompose', route => {
+    decompositionCount += 1;
+    const entries = route.request().postDataJSON().entries;
+    const decompositionId = decompositionCount === 1
+      ? DECOMPOSITION_ID
+      : '44444444-4444-4444-8444-444444444444';
+    return route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        intake: { lineCounts: { 昨天: 1, 今天: 1, 明天: 1, 后天: 1 }, totalLines: 4, warnings: [] },
+        tasks: TASKS,
+        smart: { overall: 'pass', results: TASKS.map(task => ({ taskId: task.id, status: 'pass', issues: [] })), summary: { total: 4, pass: 4, needFix: 0 } },
+        decomposition: decompositionPayload(entries, decompositionId),
+      }),
+    });
+  });
+  await page.route('**/api/time-management/tasks/coaching-analysis', async route => {
+    const call = ++coachingCount;
+    const request = route.request().postDataJSON();
+    if (call === 1) await firstGate;
+    try {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify(coachingResponse(
+          request,
+          call === 1 ? ANALYSIS_ID : secondAnalysisId,
+        )),
+      });
+    } catch {
+      // The first browser request is expected to be aborted by the new decomposition.
+    }
+  });
+
+  try {
+    await openAiConfirmation(page);
+    await page.getByRole('button', { name: '上一步' }).click();
+    await page.locator('#entry-今天').fill('重新拆解后的今天事项');
+    await page.getByRole('button', { name: /AI 拆解为任务/ }).click();
+    await expect(page.locator('[data-coaching-status="succeeded"]')).toBeVisible();
+    releaseFirst();
+    await page.waitForTimeout(100);
+
+    const coaching = await page.evaluate(async () => (
+      (await import('/state.js')).state.coaching
+    ));
+    expect(coaching.analysisId).toBe(secondAnalysisId);
+    expect(coaching.decompositionId).toBe('44444444-4444-4444-8444-444444444444');
+  } finally {
+    releaseFirst();
+  }
+});
+
+test('历史先保存时会在教练完成后条件补写', async ({ page }) => {
+  let releaseCoaching;
+  let historyPost = null;
+  let coachingPatch = null;
+  const coachingGate = new Promise(resolve => { releaseCoaching = resolve; });
+  await page.route('**/api/time-management/tasks/coaching-analysis', async route => {
+    const request = route.request().postDataJSON();
+    await coachingGate;
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify(coachingResponse(request)),
+    });
+  });
+  page.on('request', request => {
+    if (request.url().endsWith('/api/time-management/history') && request.method() === 'POST') {
+      historyPost = request.postDataJSON();
+    }
+    if (request.url().includes('/coaching-analysis') && request.method() === 'PATCH') {
+      coachingPatch = request.postDataJSON();
+    }
+  });
+
+  try {
+    await openAiConfirmation(page);
+    await page.getByRole('button', { name: 'SMART 校验' }).click();
+    await expect(page.locator('#panel').getByText('全部任务通过 SMART 校验')).toBeVisible();
+    await page.getByRole('button', { name: /时间分布诊断/ }).click();
+    await page.getByRole('button', { name: /优先级排序/ }).click();
+    await page.getByRole('button', { name: /生成优化报告/ }).click();
+    await expect(page.getByText('历史已保存。')).toBeVisible();
+    await expect.poll(() => historyPost).not.toBeNull();
+    expect(historyPost.decomposition.stages).toHaveLength(1);
+
+    releaseCoaching();
+    await expect.poll(() => coachingPatch).not.toBeNull();
+    expect(coachingPatch.decompositionId).toBe(DECOMPOSITION_ID);
+    expect(coachingPatch.analysisId).toBe(ANALYSIS_ID);
+    expect(coachingPatch.coachingStage.name).toBe('coaching-analysis');
+  } finally {
+    releaseCoaching();
+  }
 });
 
 test('新版参考界面完整贯穿五步后端流程', async ({ page }) => {

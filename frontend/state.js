@@ -18,7 +18,26 @@ function emptyEntries() {
 }
 
 function idleHistorySave() {
-  return { status: 'idle', id: null, message: '' };
+  return {
+    status: 'idle',
+    id: null,
+    clientRunId: null,
+    decompositionId: null,
+    message: '',
+  };
+}
+
+function idleCoaching() {
+  return {
+    status: 'idle',
+    decompositionId: null,
+    attemptId: null,
+    requestSequence: 0,
+    analysisId: null,
+    stage: null,
+    error: null,
+    historySyncStatus: 'idle',
+  };
 }
 
 function emptyDaily() {
@@ -63,6 +82,7 @@ export const state = {
   entries: emptyEntries(),
   intake: null,
   decomposition: null,
+  coaching: idleCoaching(),
   tasks: [],
   smart: null,
   smartChecked: false,
@@ -96,9 +116,14 @@ export function taskSnapshot() {
   return JSON.stringify(state.tasks);
 }
 
+export function resetCoaching() {
+  state.coaching = idleCoaching();
+}
+
 export function invalidateAfterEntries() {
   state.intake = null;
   state.decomposition = null;
+  state.coaching = idleCoaching();
   state.tasks = [];
   state.smart = null;
   state.smartChecked = false;
@@ -136,6 +161,7 @@ export function resetWorkflow({ keepEntries = false } = {}) {
   if (!keepEntries) state.entries = emptyEntries();
   state.intake = null;
   state.decomposition = null;
+  state.coaching = idleCoaching();
   state.tasks = [];
   state.smart = null;
   state.smartChecked = false;

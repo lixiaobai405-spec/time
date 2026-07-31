@@ -2,6 +2,7 @@ const { readFileSync } = require('node:fs');
 
 const { SOURCE_TO_CATEGORY } = require('../contracts/time-management');
 const { decomposeTasks } = require('../workflows/decompose-tasks');
+const { splitEntries } = require('../workflows/check-intake');
 
 function deepClone(value) {
   return JSON.parse(JSON.stringify(value));
@@ -95,16 +96,21 @@ function buildCoachingAnalysis(testCase, evidence) {
 }
 
 function buildReplayCoachResponse(testCase) {
-  const evidence = (testCase.expected.evidence || []).map((item, index) => ({
-    id: `E${index + 1}`,
-    dimension: item.dimension,
-    quote: item.quote,
-    observation: item.observation || item.quote,
-    kind: item.kind,
-    status: item.status,
-    owner: item.owner || '待确认',
-    due: item.dueRaw || '待确认',
-  }));
+  const evidence = (testCase.expected.evidence || []).map((item, index) => {
+    const sourceLines = splitEntries(testCase.entries[item.dimension]);
+    const sourceLineIndex = sourceLines.findIndex(line => line.includes(item.quote));
+    return {
+      id: `E${index + 1}`,
+      dimension: item.dimension,
+      sourceLineIndex,
+      quote: item.quote,
+      observation: item.observation || item.quote,
+      kind: item.kind,
+      status: item.status,
+      owner: item.owner || '待确认',
+      due: item.dueRaw || '待确认',
+    };
+  });
   return {
     evidence,
     coachingAnalysis: buildCoachingAnalysis(testCase, evidence),
@@ -129,16 +135,26 @@ function buildReplayTaskResponse(testCase) {
   };
 }
 
+function buildReplayEvidenceTaskResponse(testCase) {
+  return {
+    evidence: buildReplayCoachResponse(testCase).evidence,
+    tasks: buildReplayTaskResponse(testCase).tasks,
+  };
+}
+
 function createReplayModel(testCase) {
-  const coach = buildReplayCoachResponse(testCase);
-  const tasks = buildReplayTaskResponse(testCase);
+  const combined = buildReplayEvidenceTaskResponse(testCase);
   const calls = [];
   return {
     calls,
     async completeJson(input) {
       calls.push(input);
-      if (input.responseSchemaName === 'time_coach_analysis_v1') return deepClone(coach);
-      if (input.responseSchemaName === 'time_task_generation_v1') return deepClone(tasks);
+      if (input.responseSchemaName === 'time_evidence_task_generation_v2') {
+        return deepClone(combined);
+      }
+      if (input.responseSchemaName === 'time_task_generation_v2') {
+        return { tasks: deepClone(combined.tasks) };
+      }
       throw new Error(`Unexpected response schema: ${input.responseSchemaName}`);
     },
   };
@@ -207,8 +223,13 @@ function evaluateSuccessfulCase(testCase, result) {
   const expectedTasks = testCase.expected.tasks || [];
   const actualTasks = result.tasks || [];
   const pairs = pairTasks(expectedTasks, actualTasks);
-  const coachStage = result.decomposition?.stages?.find(item => item.name === 'coach-analysis');
-  const actualEvidence = coachStage?.output?.evidence || [];
+  const evidenceStage = result.decomposition?.stages?.find(item => (
+    item.name === 'evidence-task-generation' || item.name === 'coach-analysis'
+  ));
+  const coachingStage = result.decomposition?.stages?.find(item => (
+    item.name === 'coaching-analysis' || item.name === 'coach-analysis'
+  ));
+  const actualEvidence = evidenceStage?.output?.evidence || [];
   const expectedEvidence = testCase.expected.evidence || [];
   const evidenceMatches = expectedEvidence.map(item => ({
     expected: item,
@@ -277,10 +298,12 @@ function evaluateSuccessfulCase(testCase, result) {
     if (covered) yesterdayCovered += 1;
   }
 
-  const rootCauseRequired = Number(testCase.expected.rootCauseMode === 'insufficient');
+  const rootCauseRequired = Number(
+    coachingStage && testCase.expected.rootCauseMode === 'insufficient',
+  );
   let rootCauseCorrect = 0;
   if (rootCauseRequired) {
-    const text = coachStage?.output?.coachingAnalysis?.yesterday_analysis?.root_cause?.text || '';
+    const text = coachingStage?.output?.coachingAnalysis?.yesterday_analysis?.root_cause?.text || '';
     rootCauseCorrect = Number(text.startsWith('证据不足'));
   }
 
@@ -477,6 +500,7 @@ async function runEvaluation({ cases, mode = 'replay', liveModelClient = null } 
 
 module.exports = {
   buildReplayCoachResponse,
+  buildReplayEvidenceTaskResponse,
   buildReplayTaskResponse,
   createReplayModel,
   loadJsonl,

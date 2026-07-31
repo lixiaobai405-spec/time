@@ -72,6 +72,29 @@ test('未知 API 返回安全统一错误结构', async () => {
   }
 });
 
+test('未知 API 仍限制 JSON 请求体大小', async () => {
+  const { createApp } = require('../../server/app');
+  const app = createApp({
+    authBoundary: createTestAuthBoundary(),
+    modelClient: { completeJson: async () => ({}) },
+  });
+  const server = await listen(app);
+
+  try {
+    const response = await fetch(`http://127.0.0.1:${server.address().port}/api/missing`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ padding: 'x'.repeat(65 * 1024) }),
+    });
+    const payload = await response.json();
+    assert.equal(response.status, 413);
+    assert.equal(payload.error.code, 'PAYLOAD_TOO_LARGE');
+    assert.doesNotMatch(JSON.stringify(payload), /stack|x{100}/i);
+  } finally {
+    await close(server);
+  }
+});
+
 test('loadConfig 只接受完整且有效的服务端配置', () => {
   const { loadConfig } = require('../../server/config');
   const config = loadConfig({
@@ -92,6 +115,9 @@ test('loadConfig 只接受完整且有效的服务端配置', () => {
     modelApiKey: 'fake-key',
     modelName: 'fake-model',
     modelTimeoutMs: 30000,
+    modelResponseFormatMode: 'auto',
+    modelTaskMaxOutputTokens: 16_384,
+    modelCoachMaxOutputTokens: 8_192,
     databasePath: './data/test.sqlite',
     sessionSecret: 'fake-session-secret-with-at-least-forty-eight-bytes-000000',
     sessionCookieSecure: false,
@@ -136,5 +162,18 @@ test('loadConfig 只接受完整且有效的服务端配置', () => {
       SESSION_MAX_AGE_MS: '86400000',
     }),
     error => error.code === 'CONFIG_INVALID' && /SESSION_MAX_AGE_MS/.test(error.message),
+  );
+  assert.throws(
+    () => loadConfig({
+      MODEL_API_BASE_URL: 'https://model.example/v1',
+      MODEL_API_KEY: 'fake-key',
+      MODEL_NAME: 'fake-model',
+      MODEL_RESPONSE_FORMAT_MODE: 'xml',
+      DATABASE_PATH: './data/test.sqlite',
+      SESSION_SECRET: 'fake-session-secret-with-at-least-forty-eight-bytes-000000',
+      SESSION_COOKIE_SECURE: 'false',
+      SESSION_MAX_AGE_MS: '604800000',
+    }),
+    error => error.code === 'CONFIG_INVALID' && /MODEL_RESPONSE_FORMAT_MODE/.test(error.message),
   );
 });

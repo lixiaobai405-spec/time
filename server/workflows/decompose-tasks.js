@@ -1,6 +1,8 @@
+const { randomUUID } = require('node:crypto');
+const { performance } = require('node:perf_hooks');
 const {
+  CATEGORY_KEYS,
   SOURCE_TO_CATEGORY,
-  TASK_LIMIT,
   normalizeDueForWrite,
   normalizeTask,
   parseEstimatedMinutes,
@@ -8,17 +10,17 @@ const {
 const { shanghaiBusinessDay } = require('../daily-tracking/business-date');
 const { applyDeadlineUrgency } = require('../policies/deadline');
 const { loadVersionedPrompt } = require('../prompts/load-versioned-prompt');
-const { checkIntake } = require('./check-intake');
+const { checkIntake, splitEntries } = require('./check-intake');
 const { checkTaskSmart } = require('./check-task-smart');
 const {
-  COACH_RESPONSE_SCHEMA,
-  TASK_RESPONSE_SCHEMA,
-  validateCoachResponse,
-  validateTaskResponse,
-  visitClaims,
+  DECOMPOSITION_ITEM_LIMIT,
+  EVIDENCE_TASK_RESPONSE_SCHEMA,
+  TASK_RESPONSE_V2_SCHEMA,
+  validateEvidenceResponseV2,
+  validateTaskResponseV2,
 } = require('./decomposition-contracts');
 
-const PIPELINE_VERSION = 'coach-decompose-v1';
+const PIPELINE_VERSION = 'task-first-v2';
 const SOURCE_FOR_DIMENSION = Object.freeze({
   昨天: '复盘',
   今天: '今天',
@@ -38,99 +40,117 @@ function outputError(stage, failedRules = []) {
 }
 
 function normalizeModelError(error, stage) {
-  if (error.code === 'MODEL_OUTPUT_INVALID') return outputError(stage);
+  if (error.code === 'MODEL_OUTPUT_INVALID') {
+    return Object.assign(outputError(stage), {
+      diagnosticCode: error.diagnosticCode,
+    });
+  }
   if (error.code === 'MODEL_TIMEOUT') {
     return publicError('MODEL_TIMEOUT', 'AI 响应超时，请重试。', 504);
   }
-  if (error.code === 'MODEL_UPSTREAM_ERROR') {
+  if (error.code === 'MODEL_CANCELLED') {
+    return publicError('REQUEST_CANCELLED', '请求已取消。', 499);
+  }
+  if ([
+    'MODEL_UPSTREAM_ERROR',
+    'MODEL_RESPONSE_ENVELOPE_TOO_LARGE',
+    'MODEL_ERROR_BODY_TOO_LARGE',
+  ].includes(error.code)) {
     return publicError('MODEL_UPSTREAM_ERROR', 'AI 服务暂时不可用，请稍后重试。', 502);
   }
   return error;
 }
 
-function assertEvidenceTrace(response, goals) {
+function linesForEntries(entries) {
+  return Object.fromEntries(
+    CATEGORY_KEYS.map(key => [key, splitEntries(entries[key])]),
+  );
+}
+
+function assertEvidenceTrace(response, entries) {
+  const lines = linesForEntries(entries);
   const ids = new Set();
+  const coveredLines = new Set();
+
   for (const evidence of response.evidence) {
-    if (ids.has(evidence.id)) throw outputError('coach-analysis', ['EVIDENCE_ID_DUPLICATED']);
+    if (ids.has(evidence.id)) {
+      throw outputError('evidence-task-generation', ['EVIDENCE_ID_DUPLICATED']);
+    }
     ids.add(evidence.id);
-    const sourceText = goals[evidence.dimension] || '';
-    if (!sourceText.includes(evidence.quote)) {
-      throw outputError('coach-analysis', ['EVIDENCE_QUOTE_NOT_IN_SOURCE']);
+    const sourceLine = lines[evidence.dimension]?.[evidence.sourceLineIndex];
+    if (!sourceLine) {
+      throw outputError('evidence-task-generation', ['EVIDENCE_SOURCE_LINE_NOT_FOUND']);
     }
-    if (evidence.owner !== '待确认' && !sourceText.includes(evidence.owner)) {
-      throw outputError('coach-analysis', ['EVIDENCE_OWNER_NOT_IN_SOURCE']);
+    if (!sourceLine.includes(evidence.quote)) {
+      throw outputError('evidence-task-generation', ['EVIDENCE_QUOTE_NOT_IN_SOURCE_LINE']);
     }
-    if (evidence.due !== '待确认' && !sourceText.includes(evidence.due)) {
-      throw outputError('coach-analysis', ['EVIDENCE_DUE_NOT_IN_SOURCE']);
+    if (evidence.owner !== '待确认' && !sourceLine.includes(evidence.owner)) {
+      throw outputError('evidence-task-generation', ['EVIDENCE_OWNER_NOT_IN_SOURCE_LINE']);
     }
+    if (evidence.due !== '待确认' && !sourceLine.includes(evidence.due)) {
+      throw outputError('evidence-task-generation', ['EVIDENCE_DUE_NOT_IN_SOURCE_LINE']);
+    }
+    coveredLines.add(`${evidence.dimension}:${evidence.sourceLineIndex}`);
   }
 
-  visitClaims(response.coachingAnalysis, (claim) => {
-    if (new Set(claim.evidenceIds).size !== claim.evidenceIds.length) {
-      throw outputError('coach-analysis', ['CLAIM_EVIDENCE_DUPLICATED']);
-    }
-    for (const evidenceId of claim.evidenceIds) {
-      if (!ids.has(evidenceId)) {
-        throw outputError('coach-analysis', ['CLAIM_EVIDENCE_NOT_FOUND']);
+  for (const dimension of CATEGORY_KEYS) {
+    for (const index of lines[dimension].keys()) {
+      if (!coveredLines.has(`${dimension}:${index}`)) {
+        throw outputError('evidence-task-generation', ['INPUT_LINE_NOT_COVERED']);
       }
     }
-    if (claim.evidenceIds.length === 0 && !claim.text.startsWith('证据不足')) {
-      throw outputError('coach-analysis', ['UNSUPPORTED_CLAIM_NOT_MARKED']);
-    }
-  });
+  }
 }
 
 function evidenceMap(response) {
   return new Map(response.evidence.map(item => [item.id, item]));
 }
 
-function assertTaskShapeAndSemantics(response, coachResponse) {
-  const byEvidenceId = evidenceMap(coachResponse);
-  const primaryCoverage = new Map();
+function assertTaskShapeAndSemantics(response, evidenceResponse) {
+  const byEvidenceId = evidenceMap(evidenceResponse);
+  const primaryCoverage = new Set();
   const relatedCoverage = new Set();
 
   for (const task of response.tasks) {
     if (!task.evidenceIds.length) {
-      throw outputError('task-generation', ['TASK_WITHOUT_EVIDENCE']);
+      throw outputError('evidence-task-generation', ['TASK_WITHOUT_EVIDENCE']);
     }
     if (new Set(task.evidenceIds).size !== task.evidenceIds.length) {
-      throw outputError('task-generation', ['TASK_EVIDENCE_DUPLICATED']);
+      throw outputError('evidence-task-generation', ['TASK_EVIDENCE_DUPLICATED']);
     }
     if (task.status !== 'pending') {
-      throw outputError('task-generation', ['TASK_STATUS_NOT_PENDING']);
+      throw outputError('evidence-task-generation', ['TASK_STATUS_NOT_PENDING']);
     }
     const referenced = task.evidenceIds.map(id => byEvidenceId.get(id));
     if (referenced.some(item => !item)) {
-      throw outputError('task-generation', ['TASK_EVIDENCE_NOT_FOUND']);
+      throw outputError('evidence-task-generation', ['TASK_EVIDENCE_NOT_FOUND']);
+    }
+    if (referenced.some(item => ['completed', 'not_actionable'].includes(item.status))) {
+      throw outputError('evidence-task-generation', ['NON_ACTIONABLE_EVIDENCE_USED']);
     }
     for (const evidence of referenced) {
       relatedCoverage.add(evidence.id);
     }
+
     const primary = referenced[0];
     const expectedSource = SOURCE_FOR_DIMENSION[primary.dimension];
     const sourceMatches = primary.dimension === '今天'
       ? ['今天', '临时'].includes(task.source)
       : task.source === expectedSource;
     if (!sourceMatches) {
-      throw outputError('task-generation', ['TASK_SOURCE_MISMATCH']);
+      throw outputError('evidence-task-generation', ['TASK_SOURCE_MISMATCH']);
     }
-    if (
-      task.source === '临时'
-      && !/临时|突发|插入|插单/.test(primary.quote)
-    ) {
-      throw outputError('task-generation', ['TEMPORARY_SOURCE_UNSUPPORTED']);
-    }
-    if (['completed', 'not_actionable'].includes(primary.status)) {
-      throw outputError('task-generation', ['NON_ACTIONABLE_EVIDENCE_USED']);
+    if (task.source === '临时' && !/临时|突发|插入|插单/.test(primary.quote)) {
+      throw outputError('evidence-task-generation', ['TEMPORARY_SOURCE_UNSUPPORTED']);
     }
     if (task.owner !== '待确认' && task.owner !== primary.owner) {
-      throw outputError('task-generation', ['TASK_OWNER_NOT_GROUNDED']);
+      throw outputError('evidence-task-generation', ['TASK_OWNER_NOT_GROUNDED']);
     }
     if (
       ['短期目标', '中长期'].includes(task.source)
       && task.acceptanceCriteria.length === 0
     ) {
-      throw outputError('task-generation', ['FUTURE_TASK_WITHOUT_ACCEPTANCE']);
+      throw outputError('evidence-task-generation', ['FUTURE_TASK_WITHOUT_ACCEPTANCE']);
     }
     const estimatedMinutes = parseEstimatedMinutes(task.est);
     if (
@@ -138,80 +158,36 @@ function assertTaskShapeAndSemantics(response, coachResponse) {
       && estimatedMinutes > 8 * 60
       && (task.source !== '中长期' || !task.nextAction.trim())
     ) {
-      throw outputError('task-generation', ['OVERSIZED_TASK_NOT_DECOMPOSED']);
+      throw outputError('evidence-task-generation', ['OVERSIZED_TASK_NOT_DECOMPOSED']);
     }
-    primaryCoverage.set(primary.id, (primaryCoverage.get(primary.id) || 0) + 1);
+    primaryCoverage.add(primary.id);
   }
 
-  for (const evidence of coachResponse.evidence) {
-    if (
-      evidence.dimension === '昨天'
-      && evidence.status === 'unfinished'
-      && !relatedCoverage.has(evidence.id)
-    ) {
-      throw outputError('task-generation', ['UNFINISHED_YESTERDAY_NOT_COVERED']);
-    }
-    if (
-      evidence.dimension === '昨天'
-      && evidence.status === 'completed'
-      && primaryCoverage.has(evidence.id)
-    ) {
-      throw outputError('task-generation', ['COMPLETED_YESTERDAY_BECAME_TASK']);
+  for (const evidence of evidenceResponse.evidence) {
+    if (!['planned', 'unfinished'].includes(evidence.status)) continue;
+    const isCovered = evidence.dimension === '昨天'
+      ? relatedCoverage.has(evidence.id)
+      : primaryCoverage.has(evidence.id);
+    if (!isCovered) {
+      throw outputError('evidence-task-generation', ['ACTIONABLE_EVIDENCE_NOT_COVERED']);
     }
   }
 }
 
-async function runValidatedStage({
-  modelClient,
-  prompt,
-  input,
-  responseSchema,
-  responseSchemaName,
-  validateShape,
-  validateSemantics,
-  stage,
-}) {
-  let retryFeedback = null;
-  for (let attempt = 1; attempt <= 2; attempt += 1) {
-    let response;
-    try {
-      response = await modelClient.completeJson({
-        system: prompt.text,
-        user: JSON.stringify(retryFeedback ? { ...input, retryFeedback } : input),
-        temperature: 0.1,
-        maxAttempts: 1,
-        responseSchema,
-        responseSchemaName,
-      });
-    } catch (error) {
-      const normalized = normalizeModelError(error, stage);
-      if (normalized.code !== 'MODEL_OUTPUT_INVALID' || attempt === 2) throw normalized;
-      retryFeedback = {
-        failedRules: normalized.failedRules || ['MODEL_JSON_INVALID'],
-        correction: '重新生成完整 JSON，并严格满足响应 Schema 与证据约束。',
-      };
-      continue;
-    }
-
-    try {
-      if (!validateShape(response)) {
-        throw outputError(stage, ['JSON_SCHEMA_INVALID']);
-      }
-      validateSemantics(response);
-      return response;
-    } catch (error) {
-      if (attempt === 2 || error.code !== 'MODEL_OUTPUT_INVALID') throw error;
-      retryFeedback = {
-        failedRules: error.failedRules || ['SEMANTIC_VALIDATION_FAILED'],
-        correction: '仅修正失败规则，重新返回完整 JSON，不得省略字段。',
-      };
-    }
+function validateEvidencePart(response, entries) {
+  if (!response || typeof response !== 'object' || Array.isArray(response)) {
+    throw outputError('evidence-task-generation', ['JSON_SCHEMA_INVALID']);
   }
-  throw outputError(stage);
+  const evidenceResponse = { evidence: response.evidence };
+  if (!validateEvidenceResponseV2(evidenceResponse)) {
+    throw outputError('evidence-task-generation', ['EVIDENCE_SCHEMA_INVALID']);
+  }
+  assertEvidenceTrace(evidenceResponse, entries);
+  return evidenceResponse;
 }
 
-function groundTaskResponse(taskResponse, coachResponse) {
-  const byEvidenceId = evidenceMap(coachResponse);
+function groundTaskResponse(taskResponse, evidenceResponse) {
+  const byEvidenceId = evidenceMap(evidenceResponse);
   return {
     tasks: taskResponse.tasks.map(candidate => ({
       ...candidate,
@@ -220,18 +196,187 @@ function groundTaskResponse(taskResponse, coachResponse) {
   };
 }
 
-function normalizeGeneratedTasks(taskResponse, coachResponse, goals, now) {
-  const byEvidenceId = evidenceMap(coachResponse);
+function validateTaskPart(response, evidenceResponse) {
+  const taskResponse = { tasks: response?.tasks };
+  if (!validateTaskResponseV2(taskResponse)) {
+    throw outputError('evidence-task-generation', ['TASK_SCHEMA_INVALID']);
+  }
+  assertTaskShapeAndSemantics(taskResponse, evidenceResponse);
+  return groundTaskResponse(taskResponse, evidenceResponse);
+}
+
+function validateJointResponse(response, entries) {
+  const keys = response && typeof response === 'object'
+    ? Object.keys(response).sort()
+    : [];
+  if (keys.length !== 2 || keys[0] !== 'evidence' || keys[1] !== 'tasks') {
+    throw outputError('evidence-task-generation', ['JSON_SCHEMA_INVALID']);
+  }
+  const evidenceResponse = validateEvidencePart(response, entries);
+  const taskResponse = validateTaskPart(response, evidenceResponse);
+  return { evidenceResponse, taskResponse };
+}
+
+function canRetry(deadlineAt, monotonicNow) {
+  return !Number.isFinite(deadlineAt) || deadlineAt - monotonicNow() >= 2_000;
+}
+
+function copy(value) {
+  return JSON.parse(JSON.stringify(value));
+}
+
+async function runEvidenceTaskStage({
+  modelClient,
+  entries,
+  businessDate,
+  signal,
+  deadlineAt,
+  responseFormatMode,
+  maxTokens,
+  onAttempt,
+  monotonicNow,
+}) {
+  const taskPrompt = loadVersionedPrompt('decomposition.evidence-task-generation');
+  const correctionPrompt = loadVersionedPrompt('decomposition.task-generation');
+  const attemptEvents = [];
+  let modelCalls = 0;
+  const startedAt = monotonicNow();
+
+  const recordAttempt = event => {
+    attemptEvents.push(event);
+    try {
+      onAttempt?.({ ...event, stage: 'evidence-task-generation' });
+    } catch {
+      // Logging must not affect generation.
+    }
+  };
+
+  async function invoke({ prompt, input, schema, schemaName }) {
+    modelCalls += 1;
+    try {
+      return await modelClient.completeJson({
+        system: prompt.text,
+        user: JSON.stringify(input),
+        temperature: 0.1,
+        maxAttempts: 1,
+        responseSchema: schema,
+        responseSchemaName: schemaName,
+        signal,
+        deadlineAt,
+        responseFormatMode,
+        maxTokens,
+        maxContentBytes: 64 * 1024,
+        onAttempt: recordAttempt,
+      });
+    } catch (error) {
+      throw normalizeModelError(error, 'evidence-task-generation');
+    }
+  }
+
+  const baseInput = { goals: entries, businessDate };
+  let firstResponse;
+  try {
+    firstResponse = await invoke({
+      prompt: taskPrompt,
+      input: baseInput,
+      schema: EVIDENCE_TASK_RESPONSE_SCHEMA,
+      schemaName: 'time_evidence_task_generation_v2',
+    });
+  } catch (error) {
+    if (error.code !== 'MODEL_OUTPUT_INVALID' || !canRetry(deadlineAt, monotonicNow)) {
+      throw error;
+    }
+    const corrected = await invoke({
+      prompt: taskPrompt,
+      input: {
+        ...baseInput,
+        retryFeedback: {
+          failedRules: [error.diagnosticCode || 'MODEL_JSON_INVALID'],
+          correction: '重新生成完整 evidence 与 tasks JSON。',
+        },
+      },
+      schema: EVIDENCE_TASK_RESPONSE_SCHEMA,
+      schemaName: 'time_evidence_task_generation_v2',
+    });
+    validateJointResponse(corrected, entries);
+    firstResponse = corrected;
+  }
+
+  let evidenceResponse;
+  try {
+    evidenceResponse = validateEvidencePart(firstResponse, entries);
+  } catch (error) {
+    if (error.code !== 'MODEL_OUTPUT_INVALID' || !canRetry(deadlineAt, monotonicNow)) {
+      throw error;
+    }
+    const corrected = await invoke({
+      prompt: taskPrompt,
+      input: {
+        ...baseInput,
+        retryFeedback: {
+          failedRules: error.failedRules,
+          correction: '重新生成完整 evidence 与 tasks，逐行修正证据。',
+        },
+      },
+      schema: EVIDENCE_TASK_RESPONSE_SCHEMA,
+      schemaName: 'time_evidence_task_generation_v2',
+    });
+    validateJointResponse(corrected, entries);
+    firstResponse = corrected;
+    evidenceResponse = { evidence: corrected.evidence };
+  }
+
+  let taskResponse;
+  try {
+    taskResponse = validateTaskPart(firstResponse, evidenceResponse);
+  } catch (error) {
+    if (error.code !== 'MODEL_OUTPUT_INVALID' || !canRetry(deadlineAt, monotonicNow)) {
+      throw error;
+    }
+    const frozenEvidence = copy(evidenceResponse.evidence);
+    const corrected = await invoke({
+      prompt: correctionPrompt,
+      input: {
+        ...baseInput,
+        evidence: frozenEvidence,
+        retryFeedback: {
+          failedRules: error.failedRules,
+          correction: '只返回 tasks，禁止返回或修改 evidence。',
+        },
+      },
+      schema: TASK_RESPONSE_V2_SCHEMA,
+      schemaName: 'time_task_generation_v2',
+    });
+    taskResponse = validateTaskPart(corrected, { evidence: frozenEvidence });
+    evidenceResponse = { evidence: frozenEvidence };
+  }
+
+  const successfulAttempt = [...attemptEvents]
+    .reverse()
+    .find(event => !event.errorCode);
+  return {
+    prompt: taskPrompt,
+    response: {
+      evidence: evidenceResponse.evidence,
+      tasks: taskResponse.tasks,
+    },
+    attempts: Math.max(modelCalls, attemptEvents.length),
+    durationMs: Math.max(0, Math.round(monotonicNow() - startedAt)),
+    responseFormat: successfulAttempt?.responseFormat
+      || (responseFormatMode === 'json_object' ? 'json_object' : 'json_schema'),
+    fallbackUsed: attemptEvents.some(event => event.fallbackUsed),
+  };
+}
+
+function normalizeGeneratedTasks(taskResponse, evidenceResponse, goals, now) {
   const instant = now();
   const deadlineContext = {
     now: () => instant,
     timeZone: 'Asia/Shanghai',
   };
-  return taskResponse.tasks.map((candidate) => {
-    const primary = byEvidenceId.get(candidate.evidenceIds[0]);
+  return taskResponse.tasks.map(candidate => {
     const task = normalizeTask({
       ...candidate,
-      due: primary.due,
       classificationSource: 'ai-extraction',
     });
     const normalized = normalizeDueForWrite(applyDeadlineUrgency(task, {
@@ -245,54 +390,57 @@ function normalizeGeneratedTasks(taskResponse, coachResponse, goals, now) {
   });
 }
 
-async function decomposeTasks({ entries, modelClient, requestBody, now = () => new Date() } = {}) {
+async function decomposeTasks({
+  entries,
+  modelClient,
+  requestBody,
+  now = () => new Date(),
+  monotonicNow = () => performance.now(),
+  signal,
+  deadlineAt,
+  responseFormatMode,
+  maxTokens,
+  onAttempt,
+  decompositionId = randomUUID(),
+} = {}) {
   const input = requestBody || { entries };
   const intake = checkIntake({ requestBody: input });
+  if (intake.totalLines > DECOMPOSITION_ITEM_LIMIT) {
+    throw publicError(
+      'DECOMPOSITION_ITEM_LIMIT_EXCEEDED',
+      `快速拆解单次最多处理 ${DECOMPOSITION_ITEM_LIMIT} 项事务。`,
+      422,
+    );
+  }
+
   const instant = now();
   const businessDate = shanghaiBusinessDay(instant).trackingDate;
-  const coachPrompt = loadVersionedPrompt('decomposition.coach-analysis');
-  const coachResponse = await runValidatedStage({
+  const stage = await runEvidenceTaskStage({
     modelClient,
-    prompt: coachPrompt,
-    input: { goals: intake.entries, businessDate },
-    responseSchema: COACH_RESPONSE_SCHEMA,
-    responseSchemaName: 'time_coach_analysis_v1',
-    validateShape: validateCoachResponse,
-    validateSemantics: response => assertEvidenceTrace(response, intake.entries),
-    stage: 'coach-analysis',
+    entries: intake.entries,
+    businessDate,
+    signal,
+    deadlineAt,
+    responseFormatMode,
+    maxTokens,
+    onAttempt,
+    monotonicNow,
   });
-
-  const taskPrompt = loadVersionedPrompt('decomposition.task-generation');
-  const taskResponse = await runValidatedStage({
-    modelClient,
-    prompt: taskPrompt,
-    input: {
-      goals: intake.entries,
-      businessDate,
-      evidence: coachResponse.evidence,
-      coachingAnalysis: coachResponse.coachingAnalysis,
-    },
-    responseSchema: TASK_RESPONSE_SCHEMA,
-    responseSchemaName: 'time_task_generation_v1',
-    validateShape: validateTaskResponse,
-    validateSemantics: response => assertTaskShapeAndSemantics(response, coachResponse),
-    stage: 'task-generation',
-  });
-
-  const groundedTaskResponse = groundTaskResponse(
+  const taskResponse = { tasks: stage.response.tasks };
+  const evidenceResponse = { evidence: stage.response.evidence };
+  const normalized = normalizeGeneratedTasks(
     taskResponse,
-    coachResponse,
+    evidenceResponse,
+    intake.entries,
+    () => instant,
   );
-
-  const normalized = normalizeGeneratedTasks(groundedTaskResponse, coachResponse, intake.entries, () => instant);
   if (normalized.length === 0) {
-    throw Object.assign(new Error('没有识别出可执行任务，请调整四栏内容后重试。'), {
-      code: 'NO_ACTIONABLE_TASKS',
-      status: 422,
-      expose: true,
-    });
+    throw publicError(
+      'NO_ACTIONABLE_TASKS',
+      '没有识别出可执行任务，请调整四栏内容后重试。',
+      422,
+    );
   }
-  if (normalized.length > TASK_LIMIT) throw outputError('task-generation', ['TASK_LIMIT_EXCEEDED']);
 
   const tasks = normalized.map(item => item.task);
   const smart = checkTaskSmart({ tasks });
@@ -306,27 +454,22 @@ async function decomposeTasks({ entries, modelClient, requestBody, now = () => n
     smart,
     decomposition: {
       pipelineVersion: PIPELINE_VERSION,
+      decompositionId,
       businessDate,
-      stages: [
-        {
-          name: 'coach-analysis',
-          prompt: {
-            id: coachPrompt.id,
-            version: coachPrompt.version,
-            sha256: coachPrompt.sha256,
-          },
-          output: coachResponse,
+      stages: [{
+        name: 'evidence-task-generation',
+        status: 'succeeded',
+        prompt: {
+          id: stage.prompt.id,
+          version: stage.prompt.version,
+          sha256: stage.prompt.sha256,
         },
-        {
-          name: 'task-generation',
-          prompt: {
-            id: taskPrompt.id,
-            version: taskPrompt.version,
-            sha256: taskPrompt.sha256,
-          },
-          output: groundedTaskResponse,
-        },
-      ],
+        attempts: stage.attempts,
+        durationMs: stage.durationMs,
+        responseFormat: stage.responseFormat,
+        fallbackUsed: stage.fallbackUsed,
+        output: stage.response,
+      }],
       taskEvidence: normalized.map(item => ({
         taskId: item.task.id,
         evidenceIds: item.evidenceIds,
@@ -335,4 +478,8 @@ async function decomposeTasks({ entries, modelClient, requestBody, now = () => n
   };
 }
 
-module.exports = { decomposeTasks };
+module.exports = {
+  assertEvidenceTrace,
+  assertTaskShapeAndSemantics,
+  decomposeTasks,
+};

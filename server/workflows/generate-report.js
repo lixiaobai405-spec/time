@@ -299,13 +299,27 @@ function normalizeModelError(error) {
   if (error.code === 'MODEL_TIMEOUT') {
     return publicError('MODEL_TIMEOUT', 'AI 响应超时，请重试。', 504);
   }
+  if (error.code === 'MODEL_CANCELLED') {
+    return publicError('REQUEST_CANCELLED', '请求已取消。', 499);
+  }
   if (error.code === 'MODEL_UPSTREAM_ERROR') {
     return publicError('MODEL_UPSTREAM_ERROR', 'AI 服务暂时不可用，请稍后重试。', 502);
   }
   return error;
 }
 
-async function generateReport({ tasks, matrix, goals, distribution, modelClient, requestBody, now }) {
+async function generateReport({
+  tasks,
+  matrix,
+  goals,
+  distribution,
+  modelClient,
+  requestBody,
+  now,
+  signal,
+  deadlineAt,
+  onAttempt,
+}) {
   const rawInput = requestBody || { tasks, matrix, goals, ...(distribution ? { distribution } : {}) };
   const input = Array.isArray(rawInput?.tasks)
     ? {
@@ -340,6 +354,9 @@ async function generateReport({ tasks, matrix, goals, distribution, modelClient,
         : modelInput),
       temperature: 0.5,
       maxAttempts: 1,
+      signal,
+      deadlineAt,
+      onAttempt,
     };
 
     try {

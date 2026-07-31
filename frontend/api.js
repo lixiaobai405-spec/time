@@ -1,4 +1,4 @@
-let activeController;
+const activeControllers = new Map();
 let csrfToken = null;
 
 function apiError(payload, status) {
@@ -10,10 +10,32 @@ function apiError(payload, status) {
   );
 }
 
-async function requestJson(path, { method = 'GET', body, cancelPrevious = false } = {}) {
-  if (cancelPrevious) activeController?.abort();
+function controllersFor(channel) {
+  if (!channel) return null;
+  let controllers = activeControllers.get(channel);
+  if (!controllers) {
+    controllers = new Set();
+    activeControllers.set(channel, controllers);
+  }
+  return controllers;
+}
+
+function removeController(channel, controller) {
+  if (!channel) return;
+  const controllers = activeControllers.get(channel);
+  controllers?.delete(controller);
+  if (controllers?.size === 0) activeControllers.delete(channel);
+}
+
+async function requestJson(path, {
+  method = 'GET',
+  body,
+  channel,
+  cancelPrevious = false,
+} = {}) {
+  if (cancelPrevious && channel) cancelRequestChannel(channel);
   const controller = new AbortController();
-  if (cancelPrevious) activeController = controller;
+  controllersFor(channel)?.add(controller);
 
   const headers = {};
   if (body !== undefined) headers['content-type'] = 'application/json';
@@ -42,29 +64,61 @@ async function requestJson(path, { method = 'GET', body, cancelPrevious = false 
       });
     }
     throw error;
+  } finally {
+    removeController(channel, controller);
   }
 }
 
-export function getJson(path) {
-  return requestJson(path);
+export function getJson(path, options = {}) {
+  return requestJson(path, options);
 }
 
-export function postJson(path, body) {
-  return requestJson(path, { method: 'POST', body, cancelPrevious: true });
+export function postJson(path, body, {
+  channel = 'foreground',
+  cancelPrevious = true,
+} = {}) {
+  return requestJson(path, {
+    method: 'POST',
+    body,
+    channel,
+    cancelPrevious,
+  });
 }
 
-export function putJson(path, body) {
-  return requestJson(path, { method: 'PUT', body });
+export function patchJson(path, body, {
+  channel = 'history-write',
+  cancelPrevious = false,
+} = {}) {
+  return requestJson(path, {
+    method: 'PATCH',
+    body,
+    channel,
+    cancelPrevious,
+  });
 }
 
-export function deleteJson(path) {
-  return requestJson(path, { method: 'DELETE', cancelPrevious: true });
+export function putJson(path, body, options = {}) {
+  return requestJson(path, { method: 'PUT', body, ...options });
+}
+
+export function deleteJson(path, {
+  channel = 'foreground',
+  cancelPrevious = true,
+} = {}) {
+  return requestJson(path, { method: 'DELETE', channel, cancelPrevious });
 }
 
 export function setCsrfToken(value) {
   csrfToken = typeof value === 'string' && value ? value : null;
 }
 
+export function cancelRequestChannel(channel) {
+  const controllers = activeControllers.get(channel);
+  if (!controllers) return;
+  activeControllers.delete(channel);
+  for (const controller of controllers) controller.abort();
+}
+
 export function cancelActiveRequest() {
-  activeController?.abort();
+  cancelRequestChannel('foreground');
 }

@@ -188,8 +188,194 @@ const TASK_RESPONSE_SCHEMA = Object.freeze({
   },
 });
 
+const DECOMPOSITION_ITEM_LIMIT = 12;
+const v2EvidenceIdsSchema = {
+  type: 'array',
+  maxItems: DECOMPOSITION_ITEM_LIMIT,
+  items: { type: 'string', pattern: EVIDENCE_ID_PATTERN },
+};
+const v2ClaimSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['text', 'evidenceIds'],
+  properties: {
+    text: { type: 'string', minLength: 1, maxLength: 240 },
+    evidenceIds: v2EvidenceIdsSchema,
+  },
+};
+
+function v2ClaimObject(keys) {
+  return {
+    type: 'object',
+    additionalProperties: false,
+    required: keys,
+    properties: Object.fromEntries(keys.map(key => [key, v2ClaimSchema])),
+  };
+}
+
+const coachingAnalysisV2Schema = {
+  type: 'object',
+  additionalProperties: false,
+  required: [
+    'yesterday_analysis',
+    'today_focus',
+    'tomorrow_optimization',
+    'future_direction',
+    'connection_analysis',
+    'coaching_suggestions',
+    'overall_insight',
+  ],
+  properties: {
+    yesterday_analysis: v2ClaimObject([
+      'key_problem', 'gap', 'root_cause', 'management_insight',
+    ]),
+    today_focus: v2ClaimObject([
+      'key_work', 'priority_reason', 'manager_action', 'possible_delegation',
+    ]),
+    tomorrow_optimization: v2ClaimObject([
+      'management_improvement', 'system_building', 'capability_upgrade',
+    ]),
+    future_direction: v2ClaimObject([
+      'long_term_goal', 'organization_capability', 'future_focus',
+    ]),
+    connection_analysis: v2ClaimObject([
+      'problem_to_action', 'action_to_optimization', 'optimization_to_future',
+    ]),
+    coaching_suggestions: {
+      type: 'array',
+      maxItems: 3,
+      items: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['issue', 'suggestion', 'coaching_question'],
+        properties: {
+          issue: v2ClaimSchema,
+          suggestion: v2ClaimSchema,
+          coaching_question: { type: 'string', minLength: 1, maxLength: 240 },
+        },
+      },
+    },
+    overall_insight: v2ClaimSchema,
+  },
+};
+
+const EVIDENCE_ITEM_V2_SCHEMA = Object.freeze({
+  type: 'object',
+  additionalProperties: false,
+  required: [
+    'id',
+    'dimension',
+    'sourceLineIndex',
+    'quote',
+    'observation',
+    'kind',
+    'status',
+    'owner',
+    'due',
+  ],
+  properties: {
+    id: { type: 'string', pattern: EVIDENCE_ID_PATTERN },
+    dimension: { type: 'string', enum: GOAL_KEYS },
+    sourceLineIndex: { type: 'integer', minimum: 0, maximum: DECOMPOSITION_ITEM_LIMIT - 1 },
+    quote: { type: 'string', minLength: 1, maxLength: 120 },
+    observation: { type: 'string', minLength: 1, maxLength: 120 },
+    kind: {
+      type: 'string',
+      enum: ['problem', 'cause', 'result', 'work', 'goal', 'constraint', 'context'],
+    },
+    status: {
+      type: 'string',
+      enum: ['completed', 'unfinished', 'planned', 'not_actionable'],
+    },
+    owner: { type: 'string', minLength: 1, maxLength: 60 },
+    due: { type: 'string', minLength: 1, maxLength: 40 },
+  },
+});
+
+const EVIDENCE_RESPONSE_V2_SCHEMA = Object.freeze({
+  type: 'object',
+  additionalProperties: false,
+  required: ['evidence'],
+  properties: {
+    evidence: {
+      type: 'array',
+      maxItems: DECOMPOSITION_ITEM_LIMIT,
+      items: EVIDENCE_ITEM_V2_SCHEMA,
+    },
+  },
+});
+
+const TASK_CANDIDATE_V2_SCHEMA = Object.freeze({
+  type: 'object',
+  additionalProperties: false,
+  required: [
+    'name',
+    'importance',
+    'urgency',
+    'source',
+    'due',
+    'est',
+    'owner',
+    'acceptanceCriteria',
+    'nextAction',
+    'status',
+    'evidenceIds',
+  ],
+  properties: {
+    name: { type: 'string', minLength: 1, maxLength: 120 },
+    importance: { type: 'string', enum: IMPORTANCE },
+    urgency: { type: 'string', enum: URGENCY },
+    source: { type: 'string', enum: SOURCES },
+    due: { type: 'string', minLength: 1, maxLength: 40 },
+    est: { type: 'string', minLength: 1, maxLength: 20 },
+    owner: { type: 'string', minLength: 1, maxLength: 60 },
+    acceptanceCriteria: {
+      type: 'array',
+      maxItems: 3,
+      items: { type: 'string', minLength: 1, maxLength: 120 },
+    },
+    nextAction: { type: 'string', maxLength: 120 },
+    status: { type: 'string', enum: TASK_STATUS },
+    evidenceIds: v2EvidenceIdsSchema,
+  },
+});
+
+const TASK_RESPONSE_V2_SCHEMA = Object.freeze({
+  type: 'object',
+  additionalProperties: false,
+  required: ['tasks'],
+  properties: {
+    tasks: {
+      type: 'array',
+      maxItems: DECOMPOSITION_ITEM_LIMIT,
+      items: TASK_CANDIDATE_V2_SCHEMA,
+    },
+  },
+});
+
+const EVIDENCE_TASK_RESPONSE_SCHEMA = Object.freeze({
+  type: 'object',
+  additionalProperties: false,
+  required: ['evidence', 'tasks'],
+  properties: {
+    evidence: EVIDENCE_RESPONSE_V2_SCHEMA.properties.evidence,
+    tasks: TASK_RESPONSE_V2_SCHEMA.properties.tasks,
+  },
+});
+
+const COACHING_RESPONSE_SCHEMA = Object.freeze({
+  type: 'object',
+  additionalProperties: false,
+  required: ['coachingAnalysis'],
+  properties: { coachingAnalysis: coachingAnalysisV2Schema },
+});
+
 const validateCoachResponse = ajv.compile(COACH_RESPONSE_SCHEMA);
 const validateTaskResponse = ajv.compile(TASK_RESPONSE_SCHEMA);
+const validateEvidenceResponseV2 = ajv.compile(EVIDENCE_RESPONSE_V2_SCHEMA);
+const validateTaskResponseV2 = ajv.compile(TASK_RESPONSE_V2_SCHEMA);
+const validateEvidenceTaskResponse = ajv.compile(EVIDENCE_TASK_RESPONSE_SCHEMA);
+const validateCoachingResponse = ajv.compile(COACHING_RESPONSE_SCHEMA);
 
 function visitClaims(analysis, visitor) {
   for (const path of CLAIM_PATHS) {
@@ -205,9 +391,17 @@ function visitClaims(analysis, visitor) {
 
 module.exports = {
   COACH_RESPONSE_SCHEMA,
+  COACHING_RESPONSE_SCHEMA,
+  DECOMPOSITION_ITEM_LIMIT,
   EVIDENCE_ID_PATTERN,
+  EVIDENCE_TASK_RESPONSE_SCHEMA,
   TASK_RESPONSE_SCHEMA,
+  TASK_RESPONSE_V2_SCHEMA,
   validateCoachResponse,
+  validateCoachingResponse,
+  validateEvidenceResponseV2,
+  validateEvidenceTaskResponse,
   validateTaskResponse,
+  validateTaskResponseV2,
   visitClaims,
 };

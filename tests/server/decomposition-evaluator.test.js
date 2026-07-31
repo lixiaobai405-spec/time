@@ -3,8 +3,7 @@ const path = require('node:path');
 const test = require('node:test');
 
 const {
-  buildReplayCoachResponse,
-  buildReplayTaskResponse,
+  buildReplayEvidenceTaskResponse,
   loadJsonl,
   runEvaluation,
 } = require('../../server/evals/decomposition-evaluator');
@@ -34,17 +33,15 @@ test('17个模拟业务案例的黄金回放全部通过并输出核心指标', 
 
 test('模拟模型多生成一条合法任务时评测器报告精确率下降和意外任务', async () => {
   const base = loadJsonl(DATASET).find(item => item.id === 'D001');
-  const coach = buildReplayCoachResponse(base);
-  const taskResponse = buildReplayTaskResponse(base);
-  taskResponse.tasks.push({
-    ...clone(taskResponse.tasks[0]),
+  const combined = buildReplayEvidenceTaskResponse(base);
+  combined.tasks.push({
+    ...clone(combined.tasks[0]),
     name: '重复处理客户投诉复盘',
     est: '30分钟',
   });
   const modelClient = {
-    async completeJson(input) {
-      if (input.responseSchemaName === 'time_coach_analysis_v1') return clone(coach);
-      return clone(taskResponse);
+    async completeJson() {
+      return clone(combined);
     },
   };
 
@@ -63,12 +60,11 @@ test('模拟模型多生成一条合法任务时评测器报告精确率下降�
 
 test('模拟模型编造证据原文时流水线拒绝且评测器记录非预期模型错误', async () => {
   const base = loadJsonl(DATASET).find(item => item.id === 'D001');
-  const coach = buildReplayCoachResponse(base);
-  coach.evidence[0].quote = '原文中不存在的客户投诉事实';
+  const combined = buildReplayEvidenceTaskResponse(base);
+  combined.evidence[0].quote = '原文中不存在的客户投诉事实';
   const modelClient = {
-    async completeJson(input) {
-      if (input.responseSchemaName === 'time_coach_analysis_v1') return clone(coach);
-      return buildReplayTaskResponse(base);
+    async completeJson() {
+      return clone(combined);
     },
   };
 

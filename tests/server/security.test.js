@@ -127,6 +127,30 @@ test('65KB 请求体返回安全 413 JSON', async () => {
   }
 });
 
+test('65KB coaching 请求返回专用安全错误', async () => {
+  const app = createApp({
+    authBoundary: createTestAuthBoundary(),
+    modelClient: { completeJson: async () => passingReview() },
+  });
+  const server = await listen(app);
+  try {
+    const response = await fetch(
+      `http://127.0.0.1:${server.address().port}/api/time-management/tasks/coaching-analysis`,
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ padding: 'x'.repeat(65 * 1024) }),
+      },
+    );
+    const payload = await response.json();
+    assert.equal(response.status, 413);
+    assert.equal(payload.error.code, 'COACHING_PAYLOAD_TOO_LARGE');
+    assert.doesNotMatch(JSON.stringify(payload), /stack|x{100}/i);
+  } finally {
+    await close(server);
+  }
+});
+
 test('额外字段在模型调用前返回 INPUT_INVALID', async () => {
   let calls = 0;
   const app = createApp({
@@ -604,7 +628,7 @@ test('任务拆解格式失败日志包含阶段和固定规则码但不泄漏�
   const modelClient = {
     completeJson: async () => ({
       evidence: [{ marker }],
-      coachingAnalysis: {},
+      tasks: [],
     }),
   };
   const app = createApp({
@@ -640,8 +664,8 @@ test('任务拆解格式失败日志包含阶段和固定规则码但不泄漏�
       entry => entry.path === '/api/time-management/tasks/decompose',
     );
     assert.ok(logEntry);
-    assert.equal(logEntry.modelOutputStage, 'coach-analysis');
-    assert.equal(logEntry.modelOutputReason, 'JSON_SCHEMA_INVALID');
+    assert.equal(logEntry.modelOutputStage, 'evidence-task-generation');
+    assert.equal(logEntry.modelOutputReason, 'EVIDENCE_SCHEMA_INVALID');
     assert.equal(logEntry.modelAttempts, 2);
     assert.doesNotMatch(JSON.stringify(logEntry), new RegExp(marker));
   } finally {

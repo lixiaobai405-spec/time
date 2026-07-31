@@ -50,9 +50,12 @@ function classifyJsonSyntaxError(error) {
   return 'MODEL_JSON_SYNTAX_INVALID';
 }
 
-function parseModelJson(text, { finishReason } = {}) {
+function parseModelJson(text, {
+  finishReason,
+  maxBytes = MAX_MODEL_OUTPUT_BYTES,
+} = {}) {
   if (typeof text === 'string'
-      && Buffer.byteLength(text, 'utf8') > MAX_MODEL_OUTPUT_BYTES) {
+      && Buffer.byteLength(text, 'utf8') > maxBytes) {
     throw invalidOutputError('MODEL_OUTPUT_TOO_LARGE');
   }
 

@@ -4,12 +4,20 @@ const path = require('node:path');
 
 const DEFINITIONS = Object.freeze({
   'decomposition.coach-analysis': Object.freeze({
-    version: '1.1.0',
-    relativePath: 'decomposition/coach-analysis.v1.1.md',
+    version: '1.0.0',
+    relativePath: 'decomposition/coach-analysis.v1.md',
   }),
   'decomposition.task-generation': Object.freeze({
     version: '1.1.0',
     relativePath: 'decomposition/task-generation.v1.1.md',
+  }),
+  'decomposition.evidence-task-generation': Object.freeze({
+    version: '2.1.0',
+    relativePath: 'decomposition/evidence-task-generation.v2.1.md',
+  }),
+  'decomposition.coaching-analysis': Object.freeze({
+    version: '2.0.0',
+    relativePath: 'decomposition/coaching-analysis.v2.md',
   }),
 });
 

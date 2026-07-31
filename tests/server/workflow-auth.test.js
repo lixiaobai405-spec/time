@@ -11,6 +11,8 @@ const WORKFLOW_PATHS = [
   '/api/time-management/tasks/extract',
   '/api/time-management/matrix/classify',
   '/api/time-management/report/generate',
+  '/api/time-management/tasks/decompose',
+  '/api/time-management/tasks/coaching-analysis',
 ];
 const GOALS = Object.freeze({
   昨天: '原计划完成复盘，实际已完成，差距为零，下一步记录经验',

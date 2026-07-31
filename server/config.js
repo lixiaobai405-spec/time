@@ -23,6 +23,16 @@ function requiredBoolean(environment, key) {
   throw configError(`Invalid boolean environment variable: ${key}`);
 }
 
+function enumValue(environment, key, fallback, allowed) {
+  const value = environment[key] == null || String(environment[key]).trim() === ''
+    ? fallback
+    : String(environment[key]).trim();
+  if (!allowed.includes(value)) {
+    throw configError(`Invalid environment variable: ${key}`);
+  }
+  return value;
+}
+
 function loadConfig(environment = {}) {
   const modelApiBaseUrl = requiredText(environment, 'MODEL_API_BASE_URL');
   let parsedUrl;
@@ -57,6 +67,24 @@ function loadConfig(environment = {}) {
       environment.MODEL_TIMEOUT_MS,
       'MODEL_TIMEOUT_MS',
       30_000,
+    ),
+    modelResponseFormatMode: enumValue(
+      environment,
+      'MODEL_RESPONSE_FORMAT_MODE',
+      'auto',
+      ['auto', 'json_schema', 'json_object'],
+    ),
+    modelTaskMaxOutputTokens: positiveInteger(
+      environment.MODEL_TASK_MAX_OUTPUT_TOKENS,
+      'MODEL_TASK_MAX_OUTPUT_TOKENS',
+      16_384,
+      65_536,
+    ),
+    modelCoachMaxOutputTokens: positiveInteger(
+      environment.MODEL_COACH_MAX_OUTPUT_TOKENS,
+      'MODEL_COACH_MAX_OUTPUT_TOKENS',
+      8_192,
+      65_536,
     ),
     databasePath: requiredText(environment, 'DATABASE_PATH'),
     sessionSecret,

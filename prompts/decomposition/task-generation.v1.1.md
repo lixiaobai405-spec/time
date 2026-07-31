@@ -17,16 +17,16 @@
    - 今天 → 今天；只有原文明示临时、突发、插入事项时才可用临时
    - 明天 → 短期目标
    - 后天 → 中长期
-5. evidence.status=completed 或 not_actionable 不得生成任务。
-6. 昨天的 unfinished 证据必须被至少一条任务直接解决，可以作为该任务的主要证据或辅助证据；不得完全遗漏，也不得附加到无关任务上规避校验。
-7. 当“昨天”的 unfinished 证据与当前或未来的 planned 证据描述同一事项时，只生成一条任务。优先把具有明确可执行动作、截止时间和责任人的 planned 证据放在 evidenceIds[0]，把该任务直接解决的 unfinished 证据放在后续 evidenceIds。
-8. 今天、明天、后天中 status=planned 的可执行事项应生成任务。背景说明、已完成事实和纯评价不得生成任务。
+5. evidence.status=completed 或 not_actionable 不得出现在任何任务的 evidenceIds 中。
+6. 昨天的 unfinished 或 planned evidence 必须被至少一条任务直接解决，可以作为该任务的主要证据或辅助证据；不得完全遗漏，也不得附加到无关任务上规避校验。
+7. 当“昨天”的 unfinished 或 planned evidence 与当前或未来的 planned/unfinished evidence 描述同一事项时，只生成一条任务。优先把具有明确可执行动作、截止时间和责任人的当前或未来 evidence 放在 evidenceIds[0]，把该任务直接解决的昨天 evidence 放在后续 evidenceIds。
+8. 今天、明天、后天中 status=planned 或 unfinished 的可执行事项应各自作为至少一条任务的主要证据。背景说明、已完成事实和纯评价不得生成任务。
 9. importance 只判断“不完成对明确目标和结果的影响”，允许高/中/低；不得因为包含“管理、团队、项目”等词自动判高。
 10. urgency 是语义初值，允许高/中/低；服务端会根据业务日期和期限确定性纠偏。
 11. due 和 owner 只能使用 evidence 中提取的值；没有时填“待确认”。不得推断责任人或日期。
 12. est 无法由原文判断时写“待确认”，不得凭经验猜测。可解析且超过 8h 的复盘、今天、短期目标和临时事项必须拆分；中长期里程碑超过 8h 时必须填写 nextAction。
-13. acceptanceCriteria 最多 5 条。短期目标和中长期任务至少 1 条；只能根据原文目标或可直接验证的交付结果表达，不得虚构指标。
-14. 若 coachingAnalysis 指出断层，可以用它帮助理解优先级，但不得把 coaching suggestion 本身直接变成任务，除非存在对应 evidence。
+13. acceptanceCriteria 最多 3 条。短期目标和中长期任务至少 1 条；只能根据原文目标或可直接验证的交付结果表达，不得虚构指标。
+14. 只修正 retryFeedback 指出的任务规则；evidence 已冻结，不得返回或修改 evidence。
 </task_rules>
 
 <input_contract>
@@ -35,7 +35,7 @@
   "goals": {"昨天":"","今天":"","明天":"","后天":""},
   "businessDate":"YYYY-MM-DD",
   "evidence": [],
-  "coachingAnalysis": {}
+  "retryFeedback": {}
 }
 </input_contract>
 
