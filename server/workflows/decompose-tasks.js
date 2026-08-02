@@ -14,19 +14,20 @@ const { checkIntake, splitEntries } = require('./check-intake');
 const { checkTaskSmart } = require('./check-task-smart');
 const {
   DECOMPOSITION_ITEM_LIMIT,
-  EVIDENCE_TASK_RESPONSE_SCHEMA,
-  TASK_RESPONSE_V2_SCHEMA,
+  EVIDENCE_TASK_MODEL_RESPONSE_SCHEMA,
+  TASK_MODEL_RESPONSE_V2_SCHEMA,
   validateEvidenceResponseV2,
+  validateTaskModelResponseV2,
   validateTaskResponseV2,
 } = require('./decomposition-contracts');
+const {
+  ACTIONABLE_EVIDENCE_STATUSES,
+  NON_ACTIONABLE_EVIDENCE_STATUSES,
+  isDirectlyRelatedAuxiliary,
+  taskSourceMatchesPrimary,
+} = require('./task-evidence-policy');
 
 const PIPELINE_VERSION = 'task-first-v2';
-const SOURCE_FOR_DIMENSION = Object.freeze({
-  昨天: '复盘',
-  今天: '今天',
-  明天: '短期目标',
-  后天: '中长期',
-});
 
 function publicError(code, message, status) {
   return Object.assign(new Error(message), { code, status, expose: true });
@@ -109,7 +110,7 @@ function evidenceMap(response) {
 function assertTaskShapeAndSemantics(response, evidenceResponse) {
   const byEvidenceId = evidenceMap(evidenceResponse);
   const primaryCoverage = new Set();
-  const relatedCoverage = new Set();
+  const relatedYesterdayCoverage = new Set();
 
   for (const task of response.tasks) {
     if (!task.evidenceIds.length) {
@@ -125,26 +126,23 @@ function assertTaskShapeAndSemantics(response, evidenceResponse) {
     if (referenced.some(item => !item)) {
       throw outputError('evidence-task-generation', ['TASK_EVIDENCE_NOT_FOUND']);
     }
-    if (referenced.some(item => ['completed', 'not_actionable'].includes(item.status))) {
+    if (referenced.some(item => NON_ACTIONABLE_EVIDENCE_STATUSES.has(item.status))) {
       throw outputError('evidence-task-generation', ['NON_ACTIONABLE_EVIDENCE_USED']);
-    }
-    for (const evidence of referenced) {
-      relatedCoverage.add(evidence.id);
     }
 
     const primary = referenced[0];
-    const expectedSource = SOURCE_FOR_DIMENSION[primary.dimension];
-    const sourceMatches = primary.dimension === '今天'
-      ? ['今天', '临时'].includes(task.source)
-      : task.source === expectedSource;
-    if (!sourceMatches) {
+    for (const auxiliary of referenced.slice(1)) {
+      if (auxiliary.dimension !== '昨天') continue;
+      if (!isDirectlyRelatedAuxiliary(primary, auxiliary)) {
+        throw outputError('evidence-task-generation', ['TASK_AUXILIARY_EVIDENCE_UNRELATED']);
+      }
+      relatedYesterdayCoverage.add(auxiliary.id);
+    }
+    if (!taskSourceMatchesPrimary(task, primary)) {
       throw outputError('evidence-task-generation', ['TASK_SOURCE_MISMATCH']);
     }
     if (task.source === '临时' && !/临时|突发|插入|插单/.test(primary.quote)) {
       throw outputError('evidence-task-generation', ['TEMPORARY_SOURCE_UNSUPPORTED']);
-    }
-    if (task.owner !== '待确认' && task.owner !== primary.owner) {
-      throw outputError('evidence-task-generation', ['TASK_OWNER_NOT_GROUNDED']);
     }
     if (
       ['短期目标', '中长期'].includes(task.source)
@@ -164,10 +162,9 @@ function assertTaskShapeAndSemantics(response, evidenceResponse) {
   }
 
   for (const evidence of evidenceResponse.evidence) {
-    if (!['planned', 'unfinished'].includes(evidence.status)) continue;
-    const isCovered = evidence.dimension === '昨天'
-      ? relatedCoverage.has(evidence.id)
-      : primaryCoverage.has(evidence.id);
+    if (!ACTIONABLE_EVIDENCE_STATUSES.has(evidence.status)) continue;
+    const isCovered = primaryCoverage.has(evidence.id)
+      || (evidence.dimension === '昨天' && relatedYesterdayCoverage.has(evidence.id));
     if (!isCovered) {
       throw outputError('evidence-task-generation', ['ACTIONABLE_EVIDENCE_NOT_COVERED']);
     }
@@ -189,20 +186,36 @@ function validateEvidencePart(response, entries) {
 function groundTaskResponse(taskResponse, evidenceResponse) {
   const byEvidenceId = evidenceMap(evidenceResponse);
   return {
-    tasks: taskResponse.tasks.map(candidate => ({
-      ...candidate,
-      due: byEvidenceId.get(candidate.evidenceIds[0]).due,
-    })),
+    tasks: taskResponse.tasks.map(candidate => {
+      const primary = byEvidenceId.get(candidate.evidenceIds[0]);
+      return {
+        ...candidate,
+        due: primary.due,
+        owner: primary.owner,
+      };
+    }),
+  };
+}
+
+function modelTaskResponse(response) {
+  return {
+    tasks: Array.isArray(response?.tasks)
+      ? response.tasks.map(({ due, owner, ...candidate }) => candidate)
+      : response?.tasks,
   };
 }
 
 function validateTaskPart(response, evidenceResponse) {
-  const taskResponse = { tasks: response?.tasks };
-  if (!validateTaskResponseV2(taskResponse)) {
+  const taskResponse = modelTaskResponse(response);
+  if (!validateTaskModelResponseV2(taskResponse)) {
     throw outputError('evidence-task-generation', ['TASK_SCHEMA_INVALID']);
   }
   assertTaskShapeAndSemantics(taskResponse, evidenceResponse);
-  return groundTaskResponse(taskResponse, evidenceResponse);
+  const grounded = groundTaskResponse(taskResponse, evidenceResponse);
+  if (!validateTaskResponseV2(grounded)) {
+    throw outputError('evidence-task-generation', ['TASK_GROUNDING_INVALID']);
+  }
+  return grounded;
 }
 
 function validateJointResponse(response, entries) {
@@ -240,6 +253,7 @@ async function runEvidenceTaskStage({
   const correctionPrompt = loadVersionedPrompt('decomposition.task-generation');
   const attemptEvents = [];
   let modelCalls = 0;
+  let correctionPromptUsed = null;
   const startedAt = monotonicNow();
 
   const recordAttempt = event => {
@@ -279,7 +293,7 @@ async function runEvidenceTaskStage({
     firstResponse = await invoke({
       prompt: taskPrompt,
       input: baseInput,
-      schema: EVIDENCE_TASK_RESPONSE_SCHEMA,
+      schema: EVIDENCE_TASK_MODEL_RESPONSE_SCHEMA,
       schemaName: 'time_evidence_task_generation_v2',
     });
   } catch (error) {
@@ -295,7 +309,7 @@ async function runEvidenceTaskStage({
           correction: '重新生成完整 evidence 与 tasks JSON。',
         },
       },
-      schema: EVIDENCE_TASK_RESPONSE_SCHEMA,
+      schema: EVIDENCE_TASK_MODEL_RESPONSE_SCHEMA,
       schemaName: 'time_evidence_task_generation_v2',
     });
     validateJointResponse(corrected, entries);
@@ -318,7 +332,7 @@ async function runEvidenceTaskStage({
           correction: '重新生成完整 evidence 与 tasks，逐行修正证据。',
         },
       },
-      schema: EVIDENCE_TASK_RESPONSE_SCHEMA,
+      schema: EVIDENCE_TASK_MODEL_RESPONSE_SCHEMA,
       schemaName: 'time_evidence_task_generation_v2',
     });
     validateJointResponse(corrected, entries);
@@ -334,6 +348,7 @@ async function runEvidenceTaskStage({
       throw error;
     }
     const frozenEvidence = copy(evidenceResponse.evidence);
+    correctionPromptUsed = correctionPrompt;
     const corrected = await invoke({
       prompt: correctionPrompt,
       input: {
@@ -344,7 +359,7 @@ async function runEvidenceTaskStage({
           correction: '只返回 tasks，禁止返回或修改 evidence。',
         },
       },
-      schema: TASK_RESPONSE_V2_SCHEMA,
+      schema: TASK_MODEL_RESPONSE_V2_SCHEMA,
       schemaName: 'time_task_generation_v2',
     });
     taskResponse = validateTaskPart(corrected, { evidence: frozenEvidence });
@@ -356,6 +371,7 @@ async function runEvidenceTaskStage({
     .find(event => !event.errorCode);
   return {
     prompt: taskPrompt,
+    correctionPrompt: correctionPromptUsed,
     response: {
       evidence: evidenceResponse.evidence,
       tasks: taskResponse.tasks,
@@ -464,6 +480,13 @@ async function decomposeTasks({
           version: stage.prompt.version,
           sha256: stage.prompt.sha256,
         },
+        ...(stage.correctionPrompt ? {
+          correctionPrompt: {
+            id: stage.correctionPrompt.id,
+            version: stage.correctionPrompt.version,
+            sha256: stage.correctionPrompt.sha256,
+          },
+        } : {}),
         attempts: stage.attempts,
         durationMs: stage.durationMs,
         responseFormat: stage.responseFormat,

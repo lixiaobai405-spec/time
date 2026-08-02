@@ -171,6 +171,7 @@ function createApp({
   });
   app.use('/api', createRequestLifecycle({
     modelTimeoutMs: config.modelTimeoutMs || 30_000,
+    taskRouteBudgetMs: config.modelTaskRouteBudgetMs,
   }));
   app.get('/api/health', (_request, response) => response.json({ status: 'ok' }));
   app.use(authBoundary.sessionMiddleware);

@@ -185,6 +185,114 @@ test('version-3 history accepts yesterday actionable evidence as related coverag
   inputInvalid(() => validateHistorySnapshot(legacyPromptContract));
 });
 
+test('version-3 history accepts prompt 2.1 and records task-only correction provenance', () => {
+  const base = historySnapshot({
+    goals: { 昨天: '', 今天: '今天18:00前提交方案', 明天: '', 后天: '' },
+  });
+  const snapshot = {
+    ...base,
+    decomposition: taskFirstDecompositionFixture(base, {
+      promptVersion: '2.1.0',
+      withCorrectionPrompt: true,
+    }),
+  };
+
+  assert.deepEqual(validateHistorySnapshot(snapshot), snapshot);
+  assert.deepEqual(decodeStoredSnapshot(stored(snapshot, 3)), snapshot);
+});
+
+test('version-3 history mirrors related-yesterday coverage and rejects unrelated auxiliaries', () => {
+  const base = historySnapshot({
+    goals: {
+      昨天: '目前还有2项措施没有明确负责人，今天上午收集负责人意向',
+      今天: '今天11:30前确认剩余2项措施负责人',
+      明天: '',
+      后天: '',
+    },
+  });
+  const candidate = {
+    name: '确认剩余2项措施负责人',
+    importance: '高',
+    urgency: '高',
+    source: '今天',
+    due: '今天11:30前',
+    est: '30分钟',
+    owner: '待确认',
+    acceptanceCriteria: [],
+    nextAction: '',
+    status: 'pending',
+    evidenceIds: ['E3', 'E1', 'E2'],
+  };
+  const snapshot = {
+    ...base,
+    decomposition: {
+      pipelineVersion: 'task-first-v2',
+      decompositionId: '44444444-4444-4444-8444-444444444444',
+      businessDate: '2026-07-29',
+      stages: [{
+        name: 'evidence-task-generation',
+        status: 'succeeded',
+        prompt: {
+          id: 'decomposition.evidence-task-generation',
+          version: '2.1.0',
+          sha256: 'c'.repeat(64),
+        },
+        attempts: 1,
+        durationMs: 100,
+        responseFormat: 'json_schema',
+        fallbackUsed: false,
+        output: {
+          evidence: [
+            {
+              id: 'E1',
+              dimension: '昨天',
+              sourceLineIndex: 0,
+              quote: '目前还有2项措施没有明确负责人',
+              observation: '2项措施未明确负责人',
+              kind: 'problem',
+              status: 'unfinished',
+              owner: '待确认',
+              due: '待确认',
+            },
+            {
+              id: 'E2',
+              dimension: '昨天',
+              sourceLineIndex: 0,
+              quote: '今天上午收集负责人意向',
+              observation: '收集负责人意向',
+              kind: 'work',
+              status: 'planned',
+              owner: '待确认',
+              due: '待确认',
+            },
+            {
+              id: 'E3',
+              dimension: '今天',
+              sourceLineIndex: 0,
+              quote: '今天11:30前确认剩余2项措施负责人',
+              observation: '确认剩余2项措施负责人',
+              kind: 'work',
+              status: 'planned',
+              owner: '待确认',
+              due: '今天11:30前',
+            },
+          ],
+          tasks: [candidate],
+        },
+      }],
+      taskEvidence: [{ taskId: TASK_ONE_ID, evidenceIds: candidate.evidenceIds }],
+    },
+  };
+
+  assert.deepEqual(validateHistorySnapshot(snapshot), snapshot);
+
+  const unrelated = structuredClone(snapshot);
+  unrelated.goals.昨天 = '审核方案尚未完成，今天上午收集负责人意向';
+  unrelated.decomposition.stages[0].output.evidence[0].quote = '审核方案尚未完成';
+  unrelated.decomposition.stages[0].output.evidence[0].observation = '审核方案尚未完成';
+  inputInvalid(() => validateHistorySnapshot(unrelated));
+});
+
 test('version-3 history rejects wrong prompt identity and pending coaching', () => {
   const base = historySnapshot({
     goals: { 昨天: '', 今天: '今天18:00前提交方案', 明天: '', 后天: '' },

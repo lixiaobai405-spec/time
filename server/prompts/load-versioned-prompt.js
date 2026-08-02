@@ -22,18 +22,32 @@ const DEFINITIONS = Object.freeze({
 });
 
 const CACHE = new Map();
+const PROMPT_ROOT = path.join(__dirname, '..', '..', 'prompts');
+const INCLUDE_PATTERN = /\{\{include:([^}]+)\}\}/g;
 
 function promptError(message) {
   return Object.assign(new Error(message), { code: 'PROMPT_INVALID' });
+}
+
+function readPrompt(relativePath, stack = []) {
+  const filename = path.resolve(PROMPT_ROOT, relativePath);
+  const relative = path.relative(PROMPT_ROOT, filename);
+  if (!relative || relative.startsWith('..') || path.isAbsolute(relative)) {
+    throw promptError('prompt include escapes prompt root');
+  }
+  if (stack.includes(filename)) throw promptError('prompt include cycle');
+  const source = readFileSync(filename, 'utf8').trim();
+  if (!source) throw promptError('versioned prompt is empty');
+  return source.replace(INCLUDE_PATTERN, (_, includedPath) => (
+    readPrompt(includedPath.trim(), [...stack, filename])
+  ));
 }
 
 function loadVersionedPrompt(promptId) {
   if (CACHE.has(promptId)) return CACHE.get(promptId);
   const definition = DEFINITIONS[promptId];
   if (!definition) throw promptError('unknown versioned prompt');
-  const filename = path.join(__dirname, '..', '..', 'prompts', definition.relativePath);
-  const text = readFileSync(filename, 'utf8').trim();
-  if (!text) throw promptError('versioned prompt is empty');
+  const text = readPrompt(definition.relativePath);
   const value = Object.freeze({
     id: promptId,
     version: definition.version,

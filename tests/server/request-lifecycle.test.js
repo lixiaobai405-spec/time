@@ -16,11 +16,15 @@ function requestResponse(path) {
   return { request, response };
 }
 
-test('拆解和 coaching 使用 12 秒路由预算', () => {
+test('拆解和 coaching 默认使用 12 秒且支持供应商级预算覆盖', () => {
   assert.equal(routeBudget('/api/time-management/tasks/decompose', 30_000), 12_000);
   assert.equal(
     routeBudget('/api/time-management/tasks/coaching-analysis', 30_000),
     12_000,
+  );
+  assert.equal(
+    routeBudget('/api/time-management/tasks/coaching-analysis', 30_000, 30_000),
+    30_000,
   );
   assert.equal(routeBudget('/api/time-management/report/generate', 30_000), 30_000);
   assert.equal(routeBudget('/api/health', 30_000), null);
@@ -46,6 +50,21 @@ test('路由 deadline 中止请求 signal', () => {
   timerCallback();
   assert.equal(response.locals.requestContext.signal.aborted, true);
   assert.equal(response.locals.requestContext.signal.reason.code, 'MODEL_TIMEOUT');
+});
+
+test('自定义任务路由预算写入 deadline', () => {
+  const middleware = createRequestLifecycle({
+    modelTimeoutMs: 30_000,
+    taskRouteBudgetMs: 30_000,
+    now: () => 100,
+    setTimer: () => 1,
+    clearTimer() {},
+  });
+  const { request, response } = requestResponse(
+    '/api/time-management/tasks/coaching-analysis',
+  );
+  middleware(request, response, () => undefined);
+  assert.equal(response.locals.requestContext.deadlineAt, 30_100);
 });
 
 test('客户端断开中止 signal，正常 finish 只清理 timer', () => {

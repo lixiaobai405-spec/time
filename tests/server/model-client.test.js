@@ -270,6 +270,30 @@ test('maxTokens 写入供应商请求', async () => {
   assert.equal(requestBody.max_tokens, 8192);
 });
 
+test('可选 thinking 模式只在显式配置时写入供应商请求', async () => {
+  const { createModelClient } = require('../../server/model/model-client');
+  const bodies = [];
+  const fetchImpl = async (url, options) => {
+    bodies.push(JSON.parse(options.body));
+    return responseWith('{"value":"ok"}');
+  };
+  const disabled = createModelClient(clientOptions(fetchImpl, {
+    modelThinkingMode: 'disabled',
+  }));
+  const defaultMode = createModelClient(clientOptions(fetchImpl));
+  const request = {
+    system: 'rules',
+    user: '{}',
+    maxAttempts: 1,
+  };
+
+  await disabled.completeJson(request);
+  await defaultMode.completeJson(request);
+
+  assert.deepEqual(bodies[0].thinking, { type: 'disabled' });
+  assert.equal(Object.hasOwn(bodies[1], 'thinking'), false);
+});
+
 test('响应头到达后正文挂起仍按 deadline 超时', async () => {
   const { createModelClient } = require('../../server/model/model-client');
   let cancelled = false;

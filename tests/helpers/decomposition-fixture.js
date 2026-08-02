@@ -96,7 +96,11 @@ function decompositionFixture(snapshot) {
   };
 }
 
-function taskFirstDecompositionFixture(snapshot, { withCoaching = false } = {}) {
+function taskFirstDecompositionFixture(snapshot, {
+  withCoaching = false,
+  promptVersion = '2.0.0',
+  withCorrectionPrompt = false,
+} = {}) {
   const generatedTask = snapshot.tasks[0];
   const evidence = [{
     id: 'E1',
@@ -127,10 +131,17 @@ function taskFirstDecompositionFixture(snapshot, { withCoaching = false } = {}) 
     status: 'succeeded',
     prompt: {
       id: 'decomposition.evidence-task-generation',
-      version: '2.0.0',
+      version: promptVersion,
       sha256: 'c'.repeat(64),
     },
-    attempts: 1,
+    ...(withCorrectionPrompt ? {
+      correctionPrompt: {
+        id: 'decomposition.task-generation',
+        version: '1.1.0',
+        sha256: 'e'.repeat(64),
+      },
+    } : {}),
+    attempts: withCorrectionPrompt ? 2 : 1,
     durationMs: 100,
     responseFormat: 'json_object',
     fallbackUsed: false,

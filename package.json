@@ -10,6 +10,8 @@
     "eval:decomposition:live": "node scripts/evaluate-decomposition.js --mode=live",
     "test": "npm run test:server && npm run test:e2e",
     "test:server": "node --test",
+    "test:smoke": "node --test tests/server/full-flow-smoke.test.js",
+    "test:live:deepseek": "node --test tests/live/deepseek-full-flow.live.js",
     "test:e2e": "playwright test"
   },
   "devDependencies": {

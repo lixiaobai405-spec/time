@@ -51,7 +51,7 @@ function maxHistorySnapshot() {
   const goalLines = Object.fromEntries(CATEGORY_KEYS.map(dimension => [
     dimension,
     goalLineFillers.map((length, index) => (
-      `${dimension}${index + 1}${maxText(length)}`
+      `${dimension}${index + 1}共同事项${maxText(length - 4)}`
     )).join('\n'),
   ]));
   const evidence = [];
@@ -112,8 +112,13 @@ function maxHistorySnapshot() {
         status: 'succeeded',
         prompt: {
           id: 'decomposition.evidence-task-generation',
-          version: '2.0.0',
+          version: '2.1.0',
           sha256: 'a'.repeat(64),
+        },
+        correctionPrompt: {
+          id: 'decomposition.task-generation',
+          version: '1.1.0',
+          sha256: 'c'.repeat(64),
         },
         attempts: 3,
         durationMs: Number.MAX_SAFE_INTEGER,

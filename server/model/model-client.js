@@ -9,6 +9,7 @@ const {
 const MODEL_ENVELOPE_MAX_BYTES = 96 * 1024;
 const MODEL_ERROR_BODY_MAX_BYTES = 8 * 1024;
 const RESPONSE_FORMAT_MODES = new Set(['auto', 'json_schema', 'json_object']);
+const THINKING_MODES = new Set(['default', 'enabled', 'disabled']);
 const RESPONSE_FORMAT_ERROR_CODES = new Set([
   'unsupported_response_format',
   'unsupported_value',
@@ -45,6 +46,14 @@ function normalizeResponseFormatMode(value) {
   const mode = value == null ? 'auto' : String(value);
   if (!RESPONSE_FORMAT_MODES.has(mode)) {
     throw modelError('MODEL_CONFIG_INVALID', 'responseFormatMode is invalid');
+  }
+  return mode;
+}
+
+function normalizeThinkingMode(value) {
+  const mode = value == null ? 'default' : String(value);
+  if (!THINKING_MODES.has(mode)) {
+    throw modelError('MODEL_CONFIG_INVALID', 'thinkingMode is invalid');
   }
   return mode;
 }
@@ -107,6 +116,7 @@ function createModelClient({
   modelName,
   modelTimeoutMs,
   modelResponseFormatMode = 'auto',
+  modelThinkingMode = 'default',
   fetchImpl = globalThis.fetch,
   now = () => performance.now(),
 }) {
@@ -116,6 +126,7 @@ function createModelClient({
 
   const endpoint = `${String(modelApiBaseUrl).replace(/\/+$/, '')}/chat/completions`;
   const configuredMode = normalizeResponseFormatMode(modelResponseFormatMode);
+  const configuredThinkingMode = normalizeThinkingMode(modelThinkingMode);
   let cachedAutoMode;
 
   function responseFormats(responseSchema, responseSchemaName, requestedMode) {
@@ -193,6 +204,9 @@ function createModelClient({
         ],
       };
       if (outputTokens !== undefined) requestBody.max_tokens = outputTokens;
+      if (configuredThinkingMode !== 'default') {
+        requestBody.thinking = { type: configuredThinkingMode };
+      }
 
       try {
         response = await raceWithSignal(fetchImpl(endpoint, {

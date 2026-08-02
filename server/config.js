@@ -74,6 +74,18 @@ function loadConfig(environment = {}) {
       'auto',
       ['auto', 'json_schema', 'json_object'],
     ),
+    modelThinkingMode: enumValue(
+      environment,
+      'MODEL_THINKING_MODE',
+      'default',
+      ['default', 'enabled', 'disabled'],
+    ),
+    modelTaskRouteBudgetMs: positiveInteger(
+      environment.MODEL_TASK_ROUTE_BUDGET_MS,
+      'MODEL_TASK_ROUTE_BUDGET_MS',
+      12_000,
+      120_000,
+    ),
     modelTaskMaxOutputTokens: positiveInteger(
       environment.MODEL_TASK_MAX_OUTPUT_TOKENS,
       'MODEL_TASK_MAX_OUTPUT_TOKENS',

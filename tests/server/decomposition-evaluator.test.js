@@ -25,7 +25,7 @@ test('17个模拟业务案例的黄金回放全部通过并输出核心指标', 
   assert.equal(report.summary.tasks.precision, 1);
   assert.equal(report.summary.tasks.recall, 1);
   assert.equal(report.summary.evidence.statusCorrect, report.summary.evidence.expected);
-  assert.equal(report.summary.yesterday.covered, report.summary.yesterday.expectedUnfinished);
+  assert.equal(report.summary.yesterday.covered, report.summary.yesterday.expectedActionable);
   assert.equal(report.summary.safety.completedLeakage, 0);
   assert.equal(report.summary.safety.ownerHallucinations, 0);
   assert.equal(report.summary.safety.dueHallucinations, 0);

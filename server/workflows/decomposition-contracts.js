@@ -305,41 +305,61 @@ const EVIDENCE_RESPONSE_V2_SCHEMA = Object.freeze({
   },
 });
 
+const TASK_MODEL_PROPERTIES_V2 = Object.freeze({
+  name: { type: 'string', minLength: 1, maxLength: 120 },
+  importance: { type: 'string', enum: IMPORTANCE },
+  urgency: { type: 'string', enum: URGENCY },
+  source: { type: 'string', enum: SOURCES },
+  est: { type: 'string', minLength: 1, maxLength: 20 },
+  acceptanceCriteria: {
+    type: 'array',
+    maxItems: 3,
+    items: { type: 'string', minLength: 1, maxLength: 120 },
+  },
+  nextAction: { type: 'string', maxLength: 120 },
+  status: { type: 'string', enum: TASK_STATUS },
+  evidenceIds: v2EvidenceIdsSchema,
+});
+const TASK_MODEL_REQUIRED_FIELDS_V2 = Object.freeze([
+  'name',
+  'importance',
+  'urgency',
+  'source',
+  'est',
+  'acceptanceCriteria',
+  'nextAction',
+  'status',
+  'evidenceIds',
+]);
+const TASK_MODEL_CANDIDATE_V2_SCHEMA = Object.freeze({
+  type: 'object',
+  additionalProperties: false,
+  required: TASK_MODEL_REQUIRED_FIELDS_V2,
+  properties: TASK_MODEL_PROPERTIES_V2,
+});
 const TASK_CANDIDATE_V2_SCHEMA = Object.freeze({
   type: 'object',
   additionalProperties: false,
-  required: [
-    'name',
-    'importance',
-    'urgency',
-    'source',
-    'due',
-    'est',
-    'owner',
-    'acceptanceCriteria',
-    'nextAction',
-    'status',
-    'evidenceIds',
-  ],
+  required: [...TASK_MODEL_REQUIRED_FIELDS_V2, 'due', 'owner'],
   properties: {
-    name: { type: 'string', minLength: 1, maxLength: 120 },
-    importance: { type: 'string', enum: IMPORTANCE },
-    urgency: { type: 'string', enum: URGENCY },
-    source: { type: 'string', enum: SOURCES },
+    ...TASK_MODEL_PROPERTIES_V2,
     due: { type: 'string', minLength: 1, maxLength: 40 },
-    est: { type: 'string', minLength: 1, maxLength: 20 },
     owner: { type: 'string', minLength: 1, maxLength: 60 },
-    acceptanceCriteria: {
-      type: 'array',
-      maxItems: 3,
-      items: { type: 'string', minLength: 1, maxLength: 120 },
-    },
-    nextAction: { type: 'string', maxLength: 120 },
-    status: { type: 'string', enum: TASK_STATUS },
-    evidenceIds: v2EvidenceIdsSchema,
   },
 });
 
+const TASK_MODEL_RESPONSE_V2_SCHEMA = Object.freeze({
+  type: 'object',
+  additionalProperties: false,
+  required: ['tasks'],
+  properties: {
+    tasks: {
+      type: 'array',
+      maxItems: DECOMPOSITION_ITEM_LIMIT,
+      items: TASK_MODEL_CANDIDATE_V2_SCHEMA,
+    },
+  },
+});
 const TASK_RESPONSE_V2_SCHEMA = Object.freeze({
   type: 'object',
   additionalProperties: false,
@@ -353,6 +373,15 @@ const TASK_RESPONSE_V2_SCHEMA = Object.freeze({
   },
 });
 
+const EVIDENCE_TASK_MODEL_RESPONSE_SCHEMA = Object.freeze({
+  type: 'object',
+  additionalProperties: false,
+  required: ['evidence', 'tasks'],
+  properties: {
+    evidence: EVIDENCE_RESPONSE_V2_SCHEMA.properties.evidence,
+    tasks: TASK_MODEL_RESPONSE_V2_SCHEMA.properties.tasks,
+  },
+});
 const EVIDENCE_TASK_RESPONSE_SCHEMA = Object.freeze({
   type: 'object',
   additionalProperties: false,
@@ -373,6 +402,7 @@ const COACHING_RESPONSE_SCHEMA = Object.freeze({
 const validateCoachResponse = ajv.compile(COACH_RESPONSE_SCHEMA);
 const validateTaskResponse = ajv.compile(TASK_RESPONSE_SCHEMA);
 const validateEvidenceResponseV2 = ajv.compile(EVIDENCE_RESPONSE_V2_SCHEMA);
+const validateTaskModelResponseV2 = ajv.compile(TASK_MODEL_RESPONSE_V2_SCHEMA);
 const validateTaskResponseV2 = ajv.compile(TASK_RESPONSE_V2_SCHEMA);
 const validateEvidenceTaskResponse = ajv.compile(EVIDENCE_TASK_RESPONSE_SCHEMA);
 const validateCoachingResponse = ajv.compile(COACHING_RESPONSE_SCHEMA);
@@ -394,13 +424,16 @@ module.exports = {
   COACHING_RESPONSE_SCHEMA,
   DECOMPOSITION_ITEM_LIMIT,
   EVIDENCE_ID_PATTERN,
+  EVIDENCE_TASK_MODEL_RESPONSE_SCHEMA,
   EVIDENCE_TASK_RESPONSE_SCHEMA,
+  TASK_MODEL_RESPONSE_V2_SCHEMA,
   TASK_RESPONSE_SCHEMA,
   TASK_RESPONSE_V2_SCHEMA,
   validateCoachResponse,
   validateCoachingResponse,
   validateEvidenceResponseV2,
   validateEvidenceTaskResponse,
+  validateTaskModelResponseV2,
   validateTaskResponse,
   validateTaskResponseV2,
   visitClaims,

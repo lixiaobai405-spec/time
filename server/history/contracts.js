@@ -29,6 +29,12 @@ const {
   quadrantFor,
 } = require('../contracts/time-management');
 const { splitEntries } = require('../workflows/check-intake');
+const {
+  ACTIONABLE_EVIDENCE_STATUSES,
+  NON_ACTIONABLE_EVIDENCE_STATUSES,
+  isDirectlyRelatedAuxiliary,
+  taskSourceMatchesPrimary,
+} = require('../workflows/task-evidence-policy');
 
 const HISTORY_SCHEMA_VERSION = 3;
 const UUID_PATTERN = '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89aAbB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$';
@@ -187,6 +193,7 @@ const evidenceTaskStageSchema = {
   properties: {
     name: { const: 'evidence-task-generation' },
     ...stageMetricsProperties,
+    correctionPrompt: stagePromptSchema,
     output: EVIDENCE_TASK_RESPONSE_SCHEMA,
   },
 };
@@ -572,12 +579,21 @@ function assertDecompositionSemanticsV3(decomposition, tasks, goals) {
   }
   const taskStage = stageByName.get('evidence-task-generation');
   const coachingStage = stageByName.get('coaching-analysis');
+  const taskPromptVersion = taskStage?.prompt.version;
+  const supportsRelatedYesterdayCoverage = taskPromptVersion === '2.1.0';
+  const correctionPrompt = taskStage?.correctionPrompt;
   if (
     !taskStage
     || stageByName.size !== (coachingStage ? 2 : 1)
     || taskStage.prompt.id !== 'decomposition.evidence-task-generation'
-    || !['2.0.0', '2.1.0'].includes(taskStage.prompt.version)
+    || !['2.0.0', '2.1.0'].includes(taskPromptVersion)
     || !validateEvidenceTaskResponse(taskStage.output)
+    || (correctionPrompt && (
+      !supportsRelatedYesterdayCoverage
+      || correctionPrompt.id !== 'decomposition.task-generation'
+      || correctionPrompt.version !== '1.1.0'
+      || taskStage.attempts < 2
+    ))
     || (coachingStage && (
       coachingStage.prompt.id !== 'decomposition.coaching-analysis'
       || coachingStage.prompt.version !== '2.0.0'
@@ -626,52 +642,53 @@ function assertDecompositionSemanticsV3(decomposition, tasks, goals) {
 
   const candidates = taskStage.output.tasks;
   if (decomposition.taskEvidence.length !== candidates.length) throw inputError();
-  const sourceForDimension = {
-    昨天: '复盘',
-    今天: '今天',
-    明天: '短期目标',
-    后天: '中长期',
-  };
   const primaryCoverage = new Set();
-  const relatedCoverage = new Set();
-  const allowsYesterdayRelatedCoverage = taskStage.prompt.version === '2.1.0';
+  const relatedYesterdayCoverage = new Set();
   const linkedTaskIds = new Set();
   for (let index = 0; index < candidates.length; index += 1) {
     const candidate = candidates[index];
     const link = decomposition.taskEvidence[index];
     const referenced = candidate.evidenceIds.map(id => evidenceById.get(id));
     const primary = referenced[0];
-    const sourceMatches = primary?.dimension === '今天'
-      ? ['今天', '临时'].includes(candidate.source)
-      : candidate.source === sourceForDimension[primary?.dimension];
+    const ownerGrounded = supportsRelatedYesterdayCoverage
+      ? candidate.owner === primary?.owner
+      : candidate.owner === '待确认' || candidate.owner === primary?.owner;
+    const dueGrounded = supportsRelatedYesterdayCoverage
+      ? candidate.due === primary?.due
+      : candidate.due === '待确认' || candidate.due === primary?.due;
     if (
       linkedTaskIds.has(link.taskId)
       || candidate.status !== 'pending'
       || candidate.evidenceIds.length === 0
       || new Set(candidate.evidenceIds).size !== candidate.evidenceIds.length
       || referenced.some(item => !item)
-      || referenced.some(item => ['completed', 'not_actionable'].includes(item.status))
+      || referenced.some(item => NON_ACTIONABLE_EVIDENCE_STATUSES.has(item.status))
       || JSON.stringify(link.evidenceIds) !== JSON.stringify(candidate.evidenceIds)
-      || !sourceMatches
-      || (candidate.owner !== '待确认' && candidate.owner !== primary?.owner)
-      || (candidate.due !== '待确认' && candidate.due !== primary?.due)
+      || !taskSourceMatchesPrimary(candidate, primary)
+      || !ownerGrounded
+      || !dueGrounded
     ) {
       throw inputError();
     }
-    for (const evidence of referenced) {
-      relatedCoverage.add(evidence.id);
+    if (supportsRelatedYesterdayCoverage) {
+      for (const auxiliary of referenced.slice(1)) {
+        if (auxiliary.dimension !== '昨天') continue;
+        if (!isDirectlyRelatedAuxiliary(primary, auxiliary)) throw inputError();
+        relatedYesterdayCoverage.add(auxiliary.id);
+      }
     }
     primaryCoverage.add(primary.id);
     linkedTaskIds.add(link.taskId);
   }
   for (const evidence of evidenceById.values()) {
-    if (!['planned', 'unfinished'].includes(evidence.status)) continue;
-    const isCovered = allowsYesterdayRelatedCoverage && evidence.dimension === '昨天'
-      ? relatedCoverage.has(evidence.id)
-      : primaryCoverage.has(evidence.id);
-    if (!isCovered) {
-      throw inputError();
-    }
+    if (!ACTIONABLE_EVIDENCE_STATUSES.has(evidence.status)) continue;
+    const covered = primaryCoverage.has(evidence.id)
+      || (
+        supportsRelatedYesterdayCoverage
+        && evidence.dimension === '昨天'
+        && relatedYesterdayCoverage.has(evidence.id)
+      );
+    if (!covered) throw inputError();
   }
 
   const finalTaskIds = new Set(tasks.map(task => task.id));

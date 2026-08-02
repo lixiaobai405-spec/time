@@ -75,7 +75,7 @@ function printHumanReport(report, options) {
   process.stdout.write(`案例: ${summary.passed}/${summary.cases} 通过 (${percent(summary.passRate)})\n`);
   process.stdout.write(`任务: precision=${percent(summary.tasks.precision)} recall=${percent(summary.tasks.recall)} F1=${percent(summary.tasks.f1)}\n`);
   process.stdout.write(`证据状态: ${ratio(summary.evidence.statusCorrect, summary.evidence.expected)}\n`);
-  process.stdout.write(`昨天未完成覆盖: ${ratio(summary.yesterday.covered, summary.yesterday.expectedUnfinished)}\n`);
+  process.stdout.write(`昨天可执行证据覆盖: ${ratio(summary.yesterday.covered, summary.yesterday.expectedActionable)}\n`);
   process.stdout.write(`根因证据不足标记: ${ratio(summary.rootCause.correctlyMarkedInsufficient, summary.rootCause.requiredInsufficient)}\n`);
   process.stdout.write(`安全错误: 完成事项泄漏=${summary.safety.completedLeakage} 责任人幻觉=${summary.safety.ownerHallucinations} 期限幻觉=${summary.safety.dueHallucinations}\n`);
 

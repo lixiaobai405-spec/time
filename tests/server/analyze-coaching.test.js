@@ -113,7 +113,7 @@ test('coaching claim 不得引用未知 evidence', async () => {
     error => error.code === 'MODEL_OUTPUT_INVALID'
       && error.failedRules.includes('CLAIM_EVIDENCE_NOT_FOUND'),
   );
-  assert.equal(modelClient.calls.length, 2);
+  assert.equal(modelClient.calls.length, 3);
 });
 
 test('无 evidence 的 claim 必须明确标记证据不足', async () => {
@@ -128,6 +128,53 @@ test('无 evidence 的 claim 必须明确标记证据不足', async () => {
     analyzeCoaching({ ...request(), modelClient }),
     error => error.failedRules.includes('UNSUPPORTED_CLAIM_NOT_MARKED'),
   );
+});
+
+test('空 evidenceIds 的错误文案通过精确重试指令纠正', async () => {
+  const invalid = analysisFor(['E1']);
+  invalid.today_focus.key_work = claim('暂无足够信息判断今天重点。');
+  const valid = analysisFor(['E1']);
+  const modelClient = queuedModel([
+    { coachingAnalysis: invalid },
+    { coachingAnalysis: valid },
+  ]);
+
+  const result = await analyzeCoaching({ ...request(), modelClient });
+
+  assert.equal(modelClient.calls.length, 2);
+  const retry = JSON.parse(modelClient.calls[1].user).retryFeedback;
+  assert.deepEqual(retry.failedRules, ['UNSUPPORTED_CLAIM_NOT_MARKED']);
+  assert.match(retry.correction, /严格以“证据不足”四个字开头/);
+  assert.match(retry.correction, /禁止使用“信息不足”“暂无证据”/);
+  assert.equal(result.stage.attempts, 2);
+});
+
+test('语义纠正后遇到 JSON 格式错误时第三轮仍可恢复', async () => {
+  const invalid = analysisFor(['E1']);
+  invalid.today_focus.key_work = claim('暂无足够信息判断今天重点。');
+  const calls = [];
+  const modelClient = {
+    calls,
+    async completeJson(input) {
+      calls.push(input);
+      if (calls.length === 1) return { coachingAnalysis: invalid };
+      if (calls.length === 2) {
+        throw Object.assign(new Error('invalid model JSON'), {
+          code: 'MODEL_OUTPUT_INVALID',
+          diagnosticCode: 'MODEL_JSON_SEPARATOR_INVALID',
+        });
+      }
+      return { coachingAnalysis: analysisFor(['E1']) };
+    },
+  };
+
+  const result = await analyzeCoaching({ ...request(), modelClient });
+
+  assert.equal(calls.length, 3);
+  assert.equal(result.stage.attempts, 3);
+  const thirdRetry = JSON.parse(calls[2].user).retryFeedback;
+  assert.deepEqual(thirdRetry.failedRules, ['MODEL_JSON_SEPARATOR_INVALID']);
+  assert.match(thirdRetry.correction, /重新生成完整 coachingAnalysis JSON/);
 });
 
 test('coaching 请求拒绝未知字段和篡改 evidence', async () => {

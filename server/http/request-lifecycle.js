@@ -20,12 +20,12 @@ function cancelledError() {
   });
 }
 
-function routeBudget(pathname, modelTimeoutMs) {
+function routeBudget(pathname, modelTimeoutMs, taskRouteBudgetMs = TASK_ROUTE_BUDGET_MS) {
   if (
     pathname.endsWith('/tasks/decompose')
     || pathname.endsWith('/tasks/coaching-analysis')
   ) {
-    return TASK_ROUTE_BUDGET_MS;
+    return taskRouteBudgetMs;
   }
   for (const suffix of MODEL_ROUTE_SUFFIXES) {
     if (pathname.endsWith(suffix)) return modelTimeoutMs;
@@ -35,13 +35,14 @@ function routeBudget(pathname, modelTimeoutMs) {
 
 function createRequestLifecycle({
   modelTimeoutMs = 30_000,
+  taskRouteBudgetMs = TASK_ROUTE_BUDGET_MS,
   now = () => performance.now(),
   setTimer = setTimeout,
   clearTimer = clearTimeout,
 } = {}) {
   return (request, response, next) => {
     const pathname = new URL(request.originalUrl, 'http://localhost').pathname;
-    const budgetMs = routeBudget(pathname, modelTimeoutMs);
+    const budgetMs = routeBudget(pathname, modelTimeoutMs, taskRouteBudgetMs);
     const controller = new AbortController();
     const startedAt = now();
     const deadlineAt = budgetMs == null ? Infinity : startedAt + budgetMs;

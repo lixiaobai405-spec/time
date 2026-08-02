@@ -3,6 +3,7 @@ const { readFileSync } = require('node:fs');
 const { SOURCE_TO_CATEGORY } = require('../contracts/time-management');
 const { decomposeTasks } = require('../workflows/decompose-tasks');
 const { splitEntries } = require('../workflows/check-intake');
+const { isDirectlyRelatedAuxiliary } = require('../workflows/task-evidence-policy');
 
 function deepClone(value) {
   return JSON.parse(JSON.stringify(value));
@@ -285,16 +286,21 @@ function evaluateSuccessfulCase(testCase, result) {
     if (linked.some(item => item?.status === 'completed')) completedLeakage += 1;
   }
 
-  const expectedYesterdayUnfinished = expectedEvidence.filter(item => (
-    item.dimension === '昨天' && item.status === 'unfinished'
+  const expectedYesterdayActionable = expectedEvidence.filter(item => (
+    item.dimension === '昨天' && ['planned', 'unfinished'].includes(item.status)
   ));
   let yesterdayCovered = 0;
-  for (const expected of expectedYesterdayUnfinished) {
+  for (const expected of expectedYesterdayActionable) {
     const actual = findEvidenceMatch(expected, actualEvidence);
     if (!actual) continue;
-    const covered = actualTasks.some(task => (
-      (taskEvidenceById.get(task.id) || []).includes(actual.id)
-    ));
+    const covered = actualTasks.some(task => {
+      const evidenceIds = taskEvidenceById.get(task.id) || [];
+      const position = evidenceIds.indexOf(actual.id);
+      if (position === 0) return true;
+      if (position < 1) return false;
+      const primary = evidenceById.get(evidenceIds[0]);
+      return isDirectlyRelatedAuxiliary(primary, actual);
+    });
     if (covered) yesterdayCovered += 1;
   }
 
@@ -329,8 +335,8 @@ function evaluateSuccessfulCase(testCase, result) {
   if (evidenceOwnerCorrect !== expectedEvidence.length) failures.push('EVIDENCE_OWNER_MISMATCH');
   if (evidenceDueCorrect !== expectedEvidence.length) failures.push('EVIDENCE_DUE_MISMATCH');
   if (completedLeakage) failures.push('COMPLETED_EVIDENCE_LEAKAGE');
-  if (yesterdayCovered !== expectedYesterdayUnfinished.length) {
-    failures.push('YESTERDAY_UNFINISHED_NOT_COVERED');
+  if (yesterdayCovered !== expectedYesterdayActionable.length) {
+    failures.push('YESTERDAY_ACTIONABLE_NOT_COVERED');
   }
   if (rootCauseRequired && !rootCauseCorrect) failures.push('ROOT_CAUSE_INVENTED');
   if (ownerHallucinations) failures.push('OWNER_HALLUCINATION');
@@ -358,7 +364,7 @@ function evaluateSuccessfulCase(testCase, result) {
     completedLeakage,
     ownerHallucinations,
     dueHallucinations,
-    expectedYesterdayUnfinished: expectedYesterdayUnfinished.length,
+    expectedYesterdayActionable: expectedYesterdayActionable.length,
     yesterdayCovered,
     rootCauseRequired,
     rootCauseCorrect,
@@ -389,7 +395,7 @@ function evaluateErrorCase(testCase, error) {
     completedLeakage: 0,
     ownerHallucinations: 0,
     dueHallucinations: 0,
-    expectedYesterdayUnfinished: 0,
+    expectedYesterdayActionable: 0,
     yesterdayCovered: 0,
     rootCauseRequired: 0,
     rootCauseCorrect: 0,
@@ -441,7 +447,7 @@ function summarize(caseResults, mode) {
       dueHallucinations: sum('dueHallucinations'),
     },
     yesterday: {
-      expectedUnfinished: sum('expectedYesterdayUnfinished'),
+      expectedActionable: sum('expectedYesterdayActionable'),
       covered: sum('yesterdayCovered'),
     },
     rootCause: {

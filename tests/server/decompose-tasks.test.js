@@ -1,5 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const { readFileSync } = require('node:fs');
+const path = require('node:path');
 
 const { loadVersionedPrompt } = require('../../server/prompts/load-versioned-prompt');
 const { decomposeTasks } = require('../../server/workflows/decompose-tasks');
@@ -98,6 +100,11 @@ test('evidence 合法但任务遗漏时只重试冻结 evidence 的任务', asyn
   assert.equal(modelClient.calls[1].responseSchemaName, 'time_task_generation_v2');
   assert.deepEqual(JSON.parse(modelClient.calls[1].user).evidence, frozenEvidence);
   assert.deepEqual(result.decomposition.stages[0].output.evidence, frozenEvidence);
+  assert.deepEqual(result.decomposition.stages[0].correctionPrompt, {
+    id: 'decomposition.task-generation',
+    version: '1.1.0',
+    sha256: loadVersionedPrompt('decomposition.task-generation').sha256,
+  });
 });
 
 test('evidence quote 不在指定行时联合重试后拒绝', async () => {
@@ -236,6 +243,85 @@ test('今天行动作为主要证据时可关联覆盖昨天遗留与计划', as
   assert.deepEqual(result.decomposition.taskEvidence[0].evidenceIds, ['E3', 'E1', 'E2']);
 });
 
+test('无关的昨天 evidence 不能作为辅助证据规避覆盖校验', async () => {
+  const invalidTask = task({
+    name: '联系供应商',
+    source: '今天',
+    evidenceIds: ['E2', 'E1'],
+  });
+  const modelClient = queuedModel([
+    {
+      evidence: [
+        evidence({
+          id: 'E1',
+          quote: '昨天未完成审核方案',
+          observation: '审核方案尚未完成',
+        }),
+        evidence({
+          id: 'E2',
+          dimension: '今天',
+          quote: '今天联系供应商',
+          observation: '联系供应商',
+          status: 'planned',
+        }),
+      ],
+      tasks: [invalidTask],
+    },
+    { tasks: [invalidTask] },
+  ]);
+
+  await assert.rejects(
+    decomposeTasks({
+      entries: {
+        昨天: '昨天未完成审核方案',
+        今天: '今天联系供应商',
+        明天: '',
+        后天: '',
+      },
+      modelClient,
+    }),
+    error => error.failedRules.includes('TASK_AUXILIARY_EVIDENCE_UNRELATED'),
+  );
+});
+
+test('owner 与 due 由主要 evidence 落地且不再要求模型生成', async () => {
+  const { owner, due, ...modelTask } = task({
+    name: '提交项目方案',
+    source: '今天',
+    evidenceIds: ['E1'],
+  });
+  const modelClient = queuedModel([{
+    evidence: [evidence({
+      dimension: '今天',
+      quote: '张三今天18:00前提交项目方案',
+      observation: '提交项目方案',
+      status: 'planned',
+      owner: '张三',
+      due: '今天18:00前',
+    })],
+    tasks: [modelTask],
+  }]);
+
+  const result = await decomposeTasks({
+    entries: {
+      昨天: '',
+      今天: '张三今天18:00前提交项目方案',
+      明天: '',
+      后天: '',
+    },
+    modelClient,
+    now: () => new Date('2026-07-29T04:00:00.000Z'),
+  });
+
+  const modelTaskSchema = modelClient.calls[0].responseSchema.properties.tasks.items;
+  assert.equal(modelTaskSchema.properties.owner, undefined);
+  assert.equal(modelTaskSchema.properties.due, undefined);
+  assert.equal(result.decomposition.stages[0].output.tasks[0].owner, '张三');
+  assert.equal(result.decomposition.stages[0].output.tasks[0].due, '今天18:00前');
+  assert.equal(result.tasks[0].owner, '张三');
+  assert.equal(result.tasks[0].due, '2026-07-29');
+});
+
 test('主要 evidence 未提供截止时间时忽略模型虚构日期', async () => {
   const modelClient = queuedModel([{
     evidence: [evidence({
@@ -335,13 +421,24 @@ test('versioned prompts expose stable identity, version and content hash', () =>
   assert.match(coaching.sha256, /^[0-9a-f]{64}$/);
   assert.match(tasks.text, /sourceLineIndex/);
   assert.match(tasks.text, /同一事项时，只生成一条任务/);
-  assert.match(tasks.text, /服务端会以主要 evidence 为准覆盖模型返回的 due/);
+  assert.match(tasks.text, /不要求把每个修饰性原子事实单独拆出/);
   assert.match(tasks.text, /acceptanceCriteria 最多 3 条/);
-  assert.match(correction.text, /直接相关或被该任务直接解决的辅助证据/);
-  assert.match(correction.text, /昨天的 unfinished 或 planned evidence/);
-  assert.match(correction.text, /acceptanceCriteria 最多 3 条/);
-  assert.match(correction.text, /"retryFeedback": \{\}/);
-  assert.doesNotMatch(correction.text, /coachingAnalysis/);
+  assert.match(tasks.text, /不要在 task 中输出 owner 或 due/);
+  assert.match(correction.text, /与主要证据描述同一事项/);
+  assert.doesNotMatch(tasks.text, /\{\{include:/);
+  assert.doesNotMatch(correction.text, /\{\{include:/);
+  const taskProtocol = tasks.text.match(/<task_protocol>[\s\S]*<\/task_protocol>/)?.[0];
+  const correctionProtocol = correction.text.match(/<task_protocol>[\s\S]*<\/task_protocol>/)?.[0];
+  assert.equal(taskProtocol, correctionProtocol);
+  const promptRoot = path.join(__dirname, '..', '..', 'prompts', 'decomposition');
+  assert.match(
+    readFileSync(path.join(promptRoot, 'evidence-task-generation.v2.1.md'), 'utf8'),
+    /\{\{include:decomposition\/task-policy\.v1\.1\.md\}\}/,
+  );
+  assert.match(
+    readFileSync(path.join(promptRoot, 'task-generation.v1.1.md'), 'utf8'),
+    /\{\{include:decomposition\/task-policy\.v1\.1\.md\}\}/,
+  );
   assert.match(coaching.text, /证据不足/);
   assert.strictEqual(
     loadVersionedPrompt('decomposition.evidence-task-generation'),

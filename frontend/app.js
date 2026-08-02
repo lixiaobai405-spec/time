@@ -690,26 +690,6 @@ function historyDistributionSection(distribution) {
   return `<section class="history-section"><h2>时间分布诊断</h2>${distributionResultMarkup(distribution)}</section>`;
 }
 
-function historyDecompositionSection(decomposition) {
-  if (!decomposition) {
-    return '<section class="history-section"><h2>拆解审计</h2><div class="history-empty">该历史版本未保存拆解中间产物。</div></section>';
-  }
-  const evidenceStage = decomposition.stages?.find(stage => (
-    stage.name === 'evidence-task-generation' || stage.name === 'coach-analysis'
-  ));
-  const taskStage = decomposition.stages?.find(stage => (
-    stage.name === 'evidence-task-generation' || stage.name === 'task-generation'
-  ));
-  const coachingStage = decomposition.stages?.find(stage => (
-    stage.name === 'coaching-analysis' || stage.name === 'coach-analysis'
-  ));
-  const evidenceCount = evidenceStage?.output?.evidence?.length || 0;
-  const candidateCount = taskStage?.output?.tasks?.length || 0;
-  const coachingText = coachingStage ? '教练诊断已保存' : '教练诊断未保存';
-  return `<section class="history-section"><h2>拆解审计</h2><p>流水线：${escapeHtml(decomposition.pipelineVersion)} · 业务日期：${escapeHtml(decomposition.businessDate)} · 证据 ${evidenceCount} 条 · 候选任务 ${candidateCount} 条 · ${coachingText}</p>
-    <details class="history-audit"><summary>查看中间产物 JSON</summary><pre>${escapeHtml(JSON.stringify(decomposition, null, 2))}</pre></details></section>`;
-}
-
 function renderHistoryDetail() {
   const item = state.historyDetail;
   if (!item) return renderHistory();

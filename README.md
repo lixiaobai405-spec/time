@@ -49,6 +49,8 @@ npx.cmd playwright install chromium
 | `MODEL_API_KEY` | 是 | 只允许注入服务端进程，不得写入前端 |
 | `MODEL_NAME` | 是 | 模型名称 |
 | `MODEL_TIMEOUT_MS` | 否 | 单次模型请求超时，默认 `30000` |
+| `MODEL_TASK_ROUTE_BUDGET_MS` | 否 | 拆解与教练路由预算，默认 `12000`；DeepSeek 模板使用 `30000` |
+| `MODEL_THINKING_MODE` | 否 | `default/enabled/disabled`；不支持该字段的供应商保持 `default` |
 | `DATABASE_PATH` | 是 | SQLite 数据库路径；本地默认放在已忽略的 `data/` |
 | `SESSION_SECRET` | 是 | 至少 48 字节的随机会话签名密钥，不得提交 |
 | `SESSION_COOKIE_SECURE` | 是 | 当前 HTTP 部署固定为 `false` |
@@ -62,6 +64,17 @@ npm.cmd run dev
 ```
 
 访问 `http://127.0.0.1:4174/`。不要把真实 key 写入 `.env.example`、源码、测试或文档。
+
+### DeepSeek API 配置
+
+仓库提供 `.env.deepseek.example`。该模板使用 DeepSeek OpenAI 兼容地址、`deepseek-v4-flash`、`json_object` 响应模式、关闭思考模式并设置 30 秒任务路由预算；真实密钥只写入已忽略的 `.env.deepseek` 或 `.env`：
+
+```powershell
+Copy-Item .env.deepseek.example .env.deepseek
+# 编辑 .env.deepseek，只替换 MODEL_API_KEY 和本机会话密钥
+```
+
+DeepSeek 真实测试按 `DEEPSEEK_ENV_FILE`、`.env.deepseek`、`.env` 的顺序选择配置文件，并校验供应商地址、模型名、JSON 输出模式和占位密钥，不会输出 API key。
 
 应用启动时会按版本在事务中运行 migration（迁移）：migration 001 创建认证与历史表，002 大小写用户名，003 每日跟踪，004 新增可空 `distribution_json TEXT`，005 新增可空 `decomposition_json TEXT`。也可在启动前显式执行：
 
@@ -146,8 +159,19 @@ npm.cmd test
 
 ```powershell
 npm.cmd run test:server
+npm.cmd run test:smoke
 npm.cmd run test:e2e
 ```
+
+`test:smoke` 使用确定性假模型，真实启动认证、五步 API、历史落库和每日跟踪，在一个测试中验证完整业务闭环，但不会访问外部供应商。
+
+配置 DeepSeek 密钥后，可显式执行真实全流程测试：
+
+```powershell
+npm.cmd run test:live:deepseek
+```
+
+该命令会产生四类真实模型请求：证据与任务拆解、教练分析、矩阵分类和报告生成，并继续验证历史保存、历史读取与每日跟踪。真实测试文件命名为 `.live.js`，不会被普通 `npm test` 自动发现。
 
 拆解流水线已有固定模拟评测集 `tests/evals/decomposition-cases.jsonl`。离线黄金回放不会访问外部模型，可直接执行：
 

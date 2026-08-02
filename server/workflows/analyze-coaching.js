@@ -13,6 +13,7 @@ const { assertEvidenceTrace } = require('./decompose-tasks');
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const BUSINESS_DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
+const MAX_COACHING_ATTEMPTS = 3;
 const OPTION_KEYS = new Set([
   'decompositionId',
   'attemptId',
@@ -107,6 +108,25 @@ function assertCoachingSemantics(response, evidence) {
   });
 }
 
+function coachingCorrection(failedRules = []) {
+  if (failedRules.includes('UNSUPPORTED_CLAIM_NOT_MARKED')) {
+    return [
+      '逐个检查 coachingAnalysis 中的每个 claim。',
+      '只要 evidenceIds 为空，text 必须严格以“证据不足”四个字开头，例如“证据不足：当前输入未提供该维度信息。”',
+      '禁止使用“信息不足”“暂无证据”“无法判断”等替代表述。',
+      '有输入 evidence 直接支持的 claim 才能填写对应 evidenceIds。',
+      '返回完整 coachingAnalysis JSON。',
+    ].join('');
+  }
+  if (failedRules.includes('CLAIM_EVIDENCE_NOT_FOUND')) {
+    return '逐个检查所有 claim，仅保留输入 evidence 中真实存在的 evidenceIds；无法直接支持时清空 evidenceIds，并让 text 严格以“证据不足”开头。返回完整 coachingAnalysis JSON。';
+  }
+  if (failedRules.includes('CLAIM_EVIDENCE_DUPLICATED')) {
+    return '删除每个 claim.evidenceIds 内的重复 ID；其他字段保持符合证据约束。返回完整 coachingAnalysis JSON。';
+  }
+  return '只修正失败的证据引用；任何 evidenceIds 为空的 claim，其 text 必须严格以“证据不足”开头。返回完整 coachingAnalysis JSON。';
+}
+
 async function analyzeCoaching(options = {}) {
   const {
     decompositionId,
@@ -128,7 +148,7 @@ async function analyzeCoaching(options = {}) {
   let retryFeedback;
   let response;
 
-  for (let round = 1; round <= 2; round += 1) {
+  for (let round = 1; round <= MAX_COACHING_ATTEMPTS; round += 1) {
     modelCalls += 1;
     try {
       response = await modelClient.completeJson({
@@ -159,7 +179,10 @@ async function analyzeCoaching(options = {}) {
       });
     } catch (error) {
       const normalized = normalizeModelError(error);
-      if (normalized.code !== 'MODEL_OUTPUT_INVALID' || round === 2) throw normalized;
+      if (
+        normalized.code !== 'MODEL_OUTPUT_INVALID'
+        || round === MAX_COACHING_ATTEMPTS
+      ) throw normalized;
       retryFeedback = {
         failedRules: [normalized.diagnosticCode || 'MODEL_JSON_INVALID'],
         correction: '重新生成完整 coachingAnalysis JSON。',
@@ -174,10 +197,13 @@ async function analyzeCoaching(options = {}) {
       assertCoachingSemantics(response, input.evidence);
       break;
     } catch (error) {
-      if (error.code !== 'MODEL_OUTPUT_INVALID' || round === 2) throw error;
+      if (
+        error.code !== 'MODEL_OUTPUT_INVALID'
+        || round === MAX_COACHING_ATTEMPTS
+      ) throw error;
       retryFeedback = {
         failedRules: error.failedRules,
-        correction: '只修正失败的证据引用，返回完整 coachingAnalysis。',
+        correction: coachingCorrection(error.failedRules),
       };
     }
   }
